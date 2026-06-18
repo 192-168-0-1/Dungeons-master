@@ -370,9 +370,15 @@ namespace Dungeons
         private void DrawTeamGatestone(Graphics g, TeamGatestoneOwner owner, int gatestoneIndex, Point location)
         {
             var p = FloorSize.MapToClientCoords(location, Image.Size);
-            var offset = gatestoneIndex == 1 ? new Point(2, 2) : new Point(2, 18);
-            var markerRect = new Rectangle(p.X + offset.X, p.Y + offset.Y, 11, 11);
-            var labelLocation = new Point(p.X + offset.X + 13, p.Y + offset.Y - 2);
+            const int markerSize = 12;
+            var roomCenter = new Point(p.X + MapUtils.RoomSize / 2, p.Y + MapUtils.RoomSize / 2);
+            var sameRoomGateCount = owner.Locations.Count(pair => pair.Value == location);
+            var xOffset = sameRoomGateCount > 1
+                ? gatestoneIndex == 1 ? -markerSize - 1 : 1
+                : -markerSize / 2;
+            var yOffset = -markerSize / 2;
+            var markerRect = new Rectangle(roomCenter.X + xOffset, roomCenter.Y + yOffset, markerSize, markerSize);
+            var labelLocation = new Point(markerRect.X + markerSize + 2, markerRect.Y - 1);
             using var fillBrush = new SolidBrush(owner.Color);
             using var shadowBrush = new SolidBrush(Color.FromArgb(210, 0, 0, 0));
             using var borderPen = new Pen(Color.White, 1);

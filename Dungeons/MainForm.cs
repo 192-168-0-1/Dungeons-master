@@ -21,11 +21,7 @@ namespace Dungeons
         private readonly MapForm mapForm;
         private readonly TeamSyncManager teamSync = new();
         private TextBox teamNameTextBox;
-        private TextBox teamEndpointTextBox;
-        private TextBox teamRelayUrlTextBox;
         private TextBox teamRelayRoomTextBox;
-        private Button teamHostButton;
-        private Button teamConnectButton;
         private Button teamRelayCreateButton;
         private Button teamRelayJoinButton;
         private Button teamDisconnectButton;
@@ -133,7 +129,6 @@ namespace Dungeons
         private void InitializeTeamControls()
         {
             const int y = 70;
-            const int relayY = y + 29;
             panel1.MinimumSize = new Size(0, 130);
 
             var teamNameLabel = new Label
@@ -145,90 +140,50 @@ namespace Dungeons
             teamNameTextBox = new TextBox
             {
                 Location = new Point(45, y + 1),
-                Size = new Size(90, 23),
+                Size = new Size(120, 23),
                 Text = Environment.UserName
-            };
-            teamHostButton = new Button
-            {
-                FlatStyle = FlatStyle.System,
-                Location = new Point(141, y),
-                Size = new Size(55, 23),
-                Text = "Host"
-            };
-            var endpointLabel = new Label
-            {
-                AutoSize = true,
-                Location = new Point(206, y + 4),
-                Text = "Address:"
-            };
-            teamEndpointTextBox = new TextBox
-            {
-                Location = new Point(259, y + 1),
-                Size = new Size(132, 23),
-                Text = $"127.0.0.1:{TeamSyncManager.DefaultPort}"
-            };
-            teamConnectButton = new Button
-            {
-                FlatStyle = FlatStyle.System,
-                Location = new Point(397, y),
-                Size = new Size(65, 23),
-                Text = "Connect"
-            };
-            teamDisconnectButton = new Button
-            {
-                FlatStyle = FlatStyle.System,
-                Location = new Point(468, y),
-                Size = new Size(76, 23),
-                Text = "Disconnect"
-            };
-            teamStatusLabel = new Label
-            {
-                AutoEllipsis = true,
-                Location = new Point(550, y + 4),
-                Size = new Size(204, 15),
-                Text = "Team sync offline"
-            };
-            var relayUrlLabel = new Label
-            {
-                AutoSize = true,
-                Location = new Point(11, relayY + 4),
-                Text = "Relay:"
-            };
-            teamRelayUrlTextBox = new TextBox
-            {
-                Location = new Point(54, relayY + 1),
-                Size = new Size(205, 23),
-                Text = TeamSyncManager.DefaultRelayUrl
             };
             var relayRoomLabel = new Label
             {
                 AutoSize = true,
-                Location = new Point(267, relayY + 4),
+                Location = new Point(174, y + 4),
                 Text = "Room:"
             };
             teamRelayRoomTextBox = new TextBox
             {
-                Location = new Point(309, relayY + 1),
+                Location = new Point(216, y + 1),
                 Size = new Size(72, 23),
                 Text = TeamSyncManager.CreateRoomCode()
             };
             teamRelayCreateButton = new Button
             {
                 FlatStyle = FlatStyle.System,
-                Location = new Point(387, relayY),
+                Location = new Point(294, y),
                 Size = new Size(83, 23),
                 Text = "New room"
             };
             teamRelayJoinButton = new Button
             {
                 FlatStyle = FlatStyle.System,
-                Location = new Point(476, relayY),
-                Size = new Size(73, 23),
+                Location = new Point(383, y),
+                Size = new Size(54, 23),
                 Text = "Join"
             };
+            teamDisconnectButton = new Button
+            {
+                FlatStyle = FlatStyle.System,
+                Location = new Point(443, y),
+                Size = new Size(76, 23),
+                Text = "Disconnect"
+            };
+            teamStatusLabel = new Label
+            {
+                AutoEllipsis = true,
+                Location = new Point(528, y + 4),
+                Size = new Size(226, 15),
+                Text = "Team sync offline"
+            };
 
-            teamHostButton.Click += TeamHostButton_Click;
-            teamConnectButton.Click += TeamConnectButton_Click;
             teamRelayCreateButton.Click += TeamRelayCreateButton_Click;
             teamRelayJoinButton.Click += TeamRelayJoinButton_Click;
             teamDisconnectButton.Click += TeamDisconnectButton_Click;
@@ -236,25 +191,19 @@ namespace Dungeons
             {
                 teamNameLabel,
                 teamNameTextBox,
-                teamHostButton,
-                endpointLabel,
-                teamEndpointTextBox,
-                teamConnectButton,
-                teamDisconnectButton,
-                teamStatusLabel,
-                relayUrlLabel,
-                teamRelayUrlTextBox,
                 relayRoomLabel,
                 teamRelayRoomTextBox,
                 teamRelayCreateButton,
-                teamRelayJoinButton
+                teamRelayJoinButton,
+                teamDisconnectButton,
+                teamStatusLabel
             });
             UpdateTeamButtons();
         }
 
         private void InitializeOverlayControls()
         {
-            const int y = 128;
+            const int y = 99;
             panel1.MinimumSize = new Size(0, 160);
 
             var overlayLabel = new Label
@@ -321,30 +270,12 @@ namespace Dungeons
             ApplyOverlayControls();
         }
 
-        private async void TeamHostButton_Click(object sender, EventArgs e)
-        {
-            await RunTeamActionAsync(async () =>
-            {
-                var endpoint = ParseEndpoint(teamEndpointTextBox.Text);
-                await teamSync.StartHostAsync(endpoint.Port, teamNameTextBox.Text);
-            });
-        }
-
-        private async void TeamConnectButton_Click(object sender, EventArgs e)
-        {
-            await RunTeamActionAsync(async () =>
-            {
-                var endpoint = ParseEndpoint(teamEndpointTextBox.Text);
-                await teamSync.ConnectAsync(endpoint.Host, endpoint.Port, teamNameTextBox.Text);
-            });
-        }
-
         private async void TeamRelayCreateButton_Click(object sender, EventArgs e)
         {
             await RunTeamActionAsync(async () =>
             {
                 teamRelayRoomTextBox.Text = TeamSyncManager.CreateRoomCode();
-                await teamSync.ConnectRelayAsync(teamRelayUrlTextBox.Text, teamRelayRoomTextBox.Text, teamNameTextBox.Text);
+                await teamSync.ConnectRelayAsync(TeamSyncManager.DefaultRelayUrl, teamRelayRoomTextBox.Text, teamNameTextBox.Text);
                 teamRelayRoomTextBox.Text = teamSync.RelayRoomCode;
             });
         }
@@ -356,7 +287,7 @@ namespace Dungeons
                 if (string.IsNullOrWhiteSpace(teamRelayRoomTextBox.Text))
                     throw new InvalidOperationException("Fill in a relay room code first.");
 
-                await teamSync.ConnectRelayAsync(teamRelayUrlTextBox.Text, teamRelayRoomTextBox.Text, teamNameTextBox.Text);
+                await teamSync.ConnectRelayAsync(TeamSyncManager.DefaultRelayUrl, teamRelayRoomTextBox.Text, teamNameTextBox.Text);
                 teamRelayRoomTextBox.Text = teamSync.RelayRoomCode;
             });
         }
@@ -382,29 +313,6 @@ namespace Dungeons
             {
                 UpdateTeamButtons();
             }
-        }
-
-        private (string Host, int Port) ParseEndpoint(string endpoint)
-        {
-            endpoint = (endpoint ?? string.Empty).Trim();
-            if (string.IsNullOrEmpty(endpoint))
-                return ("127.0.0.1", TeamSyncManager.DefaultPort);
-
-            if (int.TryParse(endpoint, out var portOnly))
-                return ("127.0.0.1", portOnly);
-
-            var separator = endpoint.LastIndexOf(':');
-            if (separator < 0)
-                return (endpoint, TeamSyncManager.DefaultPort);
-
-            var host = endpoint.Substring(0, separator).Trim();
-            var portText = endpoint.Substring(separator + 1).Trim();
-            if (string.IsNullOrWhiteSpace(host))
-                host = "127.0.0.1";
-            if (!int.TryParse(portText, out var port))
-                port = TeamSyncManager.DefaultPort;
-
-            return (host, port);
         }
 
         private void MapForm_AnnotationChanged(object sender, AnnotationChangedEventArgs e)
@@ -485,11 +393,9 @@ namespace Dungeons
 
         private void UpdateTeamButtons()
         {
-            if (teamHostButton == null)
+            if (teamRelayCreateButton == null)
                 return;
 
-            teamHostButton.Enabled = !teamSync.IsConnected;
-            teamConnectButton.Enabled = !teamSync.IsConnected;
             teamRelayCreateButton.Enabled = !teamSync.IsConnected;
             teamRelayJoinButton.Enabled = !teamSync.IsConnected;
             teamDisconnectButton.Enabled = teamSync.IsConnected;
