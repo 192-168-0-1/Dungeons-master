@@ -14,10 +14,10 @@ namespace Dungeons
         const int GatestoneDetectionThreshold = 3;
         const int GatestonePaletteBucketSize = 16;
 
-        static readonly Font AnnotationFont = new Font("Consolas", 8);
+        static readonly Font AnnotationFont = new Font("Consolas", 7);
         static readonly Font GatestoneFont = new Font("Segoe UI", 7, FontStyle.Bold);
         //static readonly Font DistanceAnnotationFont = new Font("Arial", 7);
-        static readonly Color AnnotationColor = Color.FromArgb(240, 240, 240);
+        static readonly Color AnnotationColor = Color.FromArgb(140, 240, 240, 240);
         //static readonly Pen AnnotationPen = new Pen(AnnotationColor, 1);
         //static readonly Pen SelectionPen = new Pen(Color.DarkGreen, 1);
         static readonly Brush AnnotationBrush = new SolidBrush(AnnotationColor);
@@ -48,7 +48,17 @@ namespace Dungeons
 
         // For key annotations
         private readonly string[] colors = { "c", "o", "y", "go", "gr", "b", "p", "s" };
-        private readonly Color[] colorValues = { Color.FromArgb(255, 178, 206), Color.Orange, Color.Yellow, Color.Gold, Color.Lime, Color.SkyBlue, Color.FromArgb(214, 178, 255), Color.Silver };
+        private readonly Color[] colorValues =
+        {
+            Color.FromArgb(155, 255, 178, 206),
+            Color.FromArgb(155, Color.Orange),
+            Color.FromArgb(155, Color.Yellow),
+            Color.FromArgb(155, Color.Gold),
+            Color.FromArgb(155, Color.Lime),
+            Color.FromArgb(155, Color.SkyBlue),
+            Color.FromArgb(155, 214, 178, 255),
+            Color.FromArgb(155, Color.Silver)
+        };
 
         private readonly MapReader mapReader;
 
@@ -351,7 +361,8 @@ namespace Dungeons
                     if (!string.IsNullOrWhiteSpace(ann))
                     {
                         var p = FloorSize.MapToClientCoords(new Point(x, y), Image.Size);
-                        e.Graphics.DrawString(ann, AnnotationFont, colorIndex == null ? AnnotationBrush : new SolidBrush(colorValues[colorIndex.Value]), p.X + 3, p.Y + 9);
+                        using var brush = colorIndex == null ? null : new SolidBrush(colorValues[colorIndex.Value]);
+                        e.Graphics.DrawString(ann, AnnotationFont, brush ?? AnnotationBrush, p.X + 2, p.Y + 1);
                     }
                 }
             }
