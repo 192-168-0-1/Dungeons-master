@@ -21,6 +21,7 @@ namespace Dungeons
         private Size startingSize;
         private Button gateDebugButton;
         private CheckBox transparentMapCheckBox;
+        private CheckBox autoAlignMapCheckBox;
 
         private static readonly Keys[] KeysToEat =
         {
@@ -50,6 +51,7 @@ namespace Dungeons
             TransparencyKey = MapTransparencyKey;
             InitializeGateDebugControls();
             InitializeTransparentMapControls();
+            InitializeAutoAlignControls();
         }
 
         public DateTimeOffset FloorStartTime { get; private set; } = DateTimeOffset.MinValue;
@@ -172,6 +174,21 @@ namespace Dungeons
             ApplyTransparentMapMode();
         }
 
+        private void InitializeAutoAlignControls()
+        {
+            autoAlignMapCheckBox = new CheckBox
+            {
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Left,
+                AutoSize = true,
+                Checked = true,
+                Location = new Point(144, 304),
+                Text = "Auto align",
+                UseVisualStyleBackColor = true
+            };
+            autoAlignMapCheckBox.CheckedChanged += AutoAlignMapCheckBox_CheckedChanged;
+            Controls.Add(autoAlignMapCheckBox);
+        }
+
         private void GateDebugButton_Click(object sender, EventArgs e)
         {
             var directory = Path.GetFullPath(Path.Combine(
@@ -277,6 +294,7 @@ namespace Dungeons
                     {
                         FloorSize = floorSize;
                         mapPictureBox.Size = LogicalToDeviceUnits(mapSize);
+                        AlignOverlayToRuneScapeMap(window);
                         timer.Start();
                         if (mapPictureBox.Image != null)
                             mapPictureBox.Image.Dispose();
@@ -374,6 +392,11 @@ namespace Dungeons
             ApplyTransparentMapMode();
         }
 
+        private void AutoAlignMapCheckBox_CheckedChanged(object sender, EventArgs e)
+        {
+            AlignOverlayToRuneScapeMap(dataWindow.SelectedWindow);
+        }
+
         private void ApplyTransparentMapMode()
         {
             if (mapPictureBox == null || transparentMapCheckBox == null)
@@ -382,6 +405,19 @@ namespace Dungeons
             mapPictureBox.ShowCapturedMap = !transparentMapCheckBox.Checked;
             mapPictureBox.BackColor = transparentMapCheckBox.Checked ? MapTransparencyKey : Color.Black;
             mapPictureBox.Invalidate();
+        }
+
+        private void AlignOverlayToRuneScapeMap(ProcessWindow window)
+        {
+            if (autoAlignMapCheckBox == null || !autoAlignMapCheckBox.Checked || window == null || window.HasExited)
+                return;
+
+            if (Properties.Settings.Default.MapLocation == MapUtils.Invalid)
+                return;
+
+            var mapScreenLocation = window.ClientToScreen(Properties.Settings.Default.MapLocation);
+            if (Location != mapScreenLocation)
+                Location = mapScreenLocation;
         }
 
         private void ResetTimerButton_Click(object sender, EventArgs e)

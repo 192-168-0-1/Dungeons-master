@@ -29,6 +29,17 @@ namespace Dungeons
 
         public Bitmap Capture() => Capture(new Rectangle(Point.Empty, Size));
 
+        public Point ClientToScreen(Point point)
+        {
+            if (Handle == IntPtr.Zero)
+                return new Point(SystemInformation.VirtualScreen.X + point.X, SystemInformation.VirtualScreen.Y + point.Y);
+
+            var nativePoint = new POINT { X = point.X, Y = point.Y };
+            return NativeMethods.ClientToScreen(Handle, ref nativePoint)
+                ? new Point(nativePoint.X, nativePoint.Y)
+                : point;
+        }
+
         public Bitmap Capture(Rectangle region)
         {
             var size = region.Size;

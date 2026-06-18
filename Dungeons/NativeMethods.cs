@@ -23,6 +23,10 @@ namespace Dungeons
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool GetClientRect(IntPtr hWnd, out RECT lpRect);
 
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
+
         [DllImport("gdi32.dll")]
         public static extern bool BitBlt(IntPtr hdcDest, int nxDest, int nyDest, int nWidth, int nHeight, IntPtr hdcSrc, int nXSrc, int nYSrc, int dwRop);
 
@@ -53,6 +57,12 @@ namespace Dungeons
             public int Top;
             public int Right;
             public int Bottom;
+        }
+
+        public struct POINT
+        {
+            public int X;
+            public int Y;
         }
     }
 }
