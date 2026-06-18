@@ -15,6 +15,7 @@ namespace Dungeons
     public class TeamSyncManager : IDisposable
     {
         public const int DefaultPort = 36595;
+        public const string DefaultRelayUrl = "https://dungeons-master.onrender.com/team-sync";
 
         private readonly object gate = new object();
         private readonly List<PeerConnection> peers = new List<PeerConnection>();
@@ -424,7 +425,7 @@ namespace Dungeons
 
         private static Uri BuildRelayUri(string relayUrl, string roomCode)
         {
-            relayUrl = string.IsNullOrWhiteSpace(relayUrl) ? "ws://localhost:36596/team-sync" : relayUrl.Trim();
+            relayUrl = string.IsNullOrWhiteSpace(relayUrl) ? DefaultRelayUrl : relayUrl.Trim();
             if (!relayUrl.Contains("://"))
                 relayUrl = "wss://" + relayUrl;
 

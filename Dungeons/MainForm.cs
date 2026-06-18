@@ -192,7 +192,7 @@ namespace Dungeons
             {
                 Location = new Point(54, relayY + 1),
                 Size = new Size(205, 23),
-                Text = "ws://localhost:36596/team-sync"
+                Text = TeamSyncManager.DefaultRelayUrl
             };
             var relayRoomLabel = new Label
             {
