@@ -2,5 +2,5 @@ services:
   - type: web
     name: dungeons-relay
     runtime: docker
-    dockerfilePath: ./DungeonsRelay.Dockerfile
+    dockerfilePath: ./Dockerfile
     healthCheckPath: /health
