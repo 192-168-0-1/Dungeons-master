@@ -13,12 +13,14 @@ namespace Dungeons
     {
         const int WM_NCLBUTTONDOWN = 0xA1;
         const int HT_CAPTION = 0x2;
+        private static readonly Color MapTransparencyKey = Color.FromArgb(1, 0, 1);
 
         private Point lastHomeLocation = MapUtils.Invalid;
         private int lastRoomCount = 0;
         private readonly MainForm dataWindow;
         private Size startingSize;
         private Button gateDebugButton;
+        private CheckBox transparentMapCheckBox;
 
         private static readonly Keys[] KeysToEat =
         {
@@ -43,8 +45,11 @@ namespace Dungeons
 
             FontType.InitializeFonts();
             mapPictureBox.FloorSize = FloorSize;
+            mapPictureBox.TransparentBackgroundColor = MapTransparencyKey;
             this.dataWindow = dataWindow;
+            TransparencyKey = MapTransparencyKey;
             InitializeGateDebugControls();
+            InitializeTransparentMapControls();
         }
 
         public DateTimeOffset FloorStartTime { get; private set; } = DateTimeOffset.MinValue;
@@ -149,6 +154,22 @@ namespace Dungeons
             };
             gateDebugButton.Click += GateDebugButton_Click;
             Controls.Add(gateDebugButton);
+        }
+
+        private void InitializeTransparentMapControls()
+        {
+            transparentMapCheckBox = new CheckBox
+            {
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Left,
+                AutoSize = true,
+                Checked = true,
+                Location = new Point(12, 304),
+                Text = "Transparent map",
+                UseVisualStyleBackColor = true
+            };
+            transparentMapCheckBox.CheckedChanged += TransparentMapCheckBox_CheckedChanged;
+            Controls.Add(transparentMapCheckBox);
+            ApplyTransparentMapMode();
         }
 
         private void GateDebugButton_Click(object sender, EventArgs e)
@@ -346,6 +367,21 @@ namespace Dungeons
         private void TopMostCheckBox_CheckedChanged(object sender, EventArgs e)
         {
             TopMost = topMostCheckBox.Checked;
+        }
+
+        private void TransparentMapCheckBox_CheckedChanged(object sender, EventArgs e)
+        {
+            ApplyTransparentMapMode();
+        }
+
+        private void ApplyTransparentMapMode()
+        {
+            if (mapPictureBox == null || transparentMapCheckBox == null)
+                return;
+
+            mapPictureBox.ShowCapturedMap = !transparentMapCheckBox.Checked;
+            mapPictureBox.BackColor = transparentMapCheckBox.Checked ? MapTransparencyKey : Color.Black;
+            mapPictureBox.Invalidate();
         }
 
         private void ResetTimerButton_Click(object sender, EventArgs e)

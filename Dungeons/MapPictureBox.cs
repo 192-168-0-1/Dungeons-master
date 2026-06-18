@@ -79,6 +79,8 @@ namespace Dungeons
         public HashSet<Point> MarkedCriticalRooms { get; private set; } = new HashSet<Point>();
         public HashSet<Point> CriticalRooms { get; private set; } = new HashSet<Point>();
         public bool DrawDistancesEnabled { get; set; }
+        public bool ShowCapturedMap { get; set; } = true;
+        public Color TransparentBackgroundColor { get; set; } = Color.Transparent;
         public event EventHandler<AnnotationChangedEventArgs> AnnotationChanged;
         public event EventHandler AnnotationsCleared;
         public event EventHandler<GatestoneChangedEventArgs> GatestoneChanged;
@@ -305,12 +307,23 @@ namespace Dungeons
 
         protected override void OnPaint(PaintEventArgs e)
         {
-            base.OnPaint(e);
+            if (ShowCapturedMap)
+                base.OnPaint(e);
+            else
+                e.Graphics.Clear(TransparentBackgroundColor);
 
             e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.HighQuality;
 
             DrawAnnotations(e);
             DrawGatestones(e);
+        }
+
+        protected override void OnPaintBackground(PaintEventArgs pevent)
+        {
+            if (ShowCapturedMap)
+                base.OnPaintBackground(pevent);
+            else
+                pevent.Graphics.Clear(TransparentBackgroundColor);
         }
 
         private void ToggleMarkedCritical(Point p)
