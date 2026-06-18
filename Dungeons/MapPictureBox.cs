@@ -337,6 +337,9 @@ namespace Dungeons
 
         private void DrawAnnotations(PaintEventArgs e)
         {
+            if (Image == null)
+                return;
+
             for (int y = 0; y < FloorSize.Height; y++)
             {
                 for (int x = 0; x < FloorSize.Width; x++)

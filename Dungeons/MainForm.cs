@@ -30,6 +30,11 @@ namespace Dungeons
         private Button teamRelayJoinButton;
         private Button teamDisconnectButton;
         private Label teamStatusLabel;
+        private CheckBox overlayTopMostCheckBox;
+        private CheckBox overlayTransparentMapCheckBox;
+        private CheckBox overlayAutoAlignCheckBox;
+        private Button overlayClearAnnotationsButton;
+        private Button overlayDebugButton;
 
         public MainForm()
         {
@@ -37,6 +42,7 @@ namespace Dungeons
 
             mapForm = new MapForm(this);
             InitializeTeamControls();
+            InitializeOverlayControls();
             mapForm.AnnotationChanged += MapForm_AnnotationChanged;
             mapForm.AnnotationsCleared += MapForm_AnnotationsCleared;
             mapForm.GatestoneChanged += MapForm_GatestoneChanged;
@@ -246,6 +252,75 @@ namespace Dungeons
             UpdateTeamButtons();
         }
 
+        private void InitializeOverlayControls()
+        {
+            const int y = 128;
+            panel1.MinimumSize = new Size(0, 160);
+
+            var overlayLabel = new Label
+            {
+                AutoSize = true,
+                Location = new Point(11, y + 4),
+                Text = "Overlay:"
+            };
+            overlayTopMostCheckBox = new CheckBox
+            {
+                AutoSize = true,
+                Checked = true,
+                FlatStyle = FlatStyle.System,
+                Location = new Point(70, y + 2),
+                Text = "Top-most"
+            };
+            overlayTransparentMapCheckBox = new CheckBox
+            {
+                AutoSize = true,
+                Checked = true,
+                FlatStyle = FlatStyle.System,
+                Location = new Point(157, y + 2),
+                Text = "Transparent map"
+            };
+            overlayAutoAlignCheckBox = new CheckBox
+            {
+                AutoSize = true,
+                Checked = true,
+                FlatStyle = FlatStyle.System,
+                Location = new Point(290, y + 2),
+                Text = "Auto align"
+            };
+            overlayClearAnnotationsButton = new Button
+            {
+                FlatStyle = FlatStyle.System,
+                Location = new Point(390, y),
+                Size = new Size(114, 23),
+                Text = "Clear annotations"
+            };
+            overlayDebugButton = new Button
+            {
+                FlatStyle = FlatStyle.System,
+                Location = new Point(510, y),
+                Size = new Size(58, 23),
+                Text = "Debug"
+            };
+
+            overlayTopMostCheckBox.CheckedChanged += OverlayTopMostCheckBox_CheckedChanged;
+            overlayTransparentMapCheckBox.CheckedChanged += OverlayTransparentMapCheckBox_CheckedChanged;
+            overlayAutoAlignCheckBox.CheckedChanged += OverlayAutoAlignCheckBox_CheckedChanged;
+            overlayClearAnnotationsButton.Click += OverlayClearAnnotationsButton_Click;
+            overlayDebugButton.Click += OverlayDebugButton_Click;
+
+            panel1.Controls.AddRange(new Control[]
+            {
+                overlayLabel,
+                overlayTopMostCheckBox,
+                overlayTransparentMapCheckBox,
+                overlayAutoAlignCheckBox,
+                overlayClearAnnotationsButton,
+                overlayDebugButton
+            });
+
+            ApplyOverlayControls();
+        }
+
         private async void TeamHostButton_Click(object sender, EventArgs e)
         {
             await RunTeamActionAsync(async () =>
@@ -424,6 +499,41 @@ namespace Dungeons
         private string GetTeamStatusText()
         {
             return teamSync.IsRelayConnected ? $"Relay {teamSync.RelayRoomCode}" : teamSync.IsHosting ? "Hosting" : teamSync.IsConnected ? "Connected" : "Team sync offline";
+        }
+
+        private void ApplyOverlayControls()
+        {
+            if (mapForm == null)
+                return;
+
+            mapForm.SetMapTopMost(overlayTopMostCheckBox?.Checked ?? false);
+            mapForm.SetTransparentMap(overlayTransparentMapCheckBox?.Checked ?? true);
+            mapForm.SetAutoAlignMap(overlayAutoAlignCheckBox?.Checked ?? true);
+        }
+
+        private void OverlayTopMostCheckBox_CheckedChanged(object sender, EventArgs e)
+        {
+            mapForm.SetMapTopMost(overlayTopMostCheckBox.Checked);
+        }
+
+        private void OverlayTransparentMapCheckBox_CheckedChanged(object sender, EventArgs e)
+        {
+            mapForm.SetTransparentMap(overlayTransparentMapCheckBox.Checked);
+        }
+
+        private void OverlayAutoAlignCheckBox_CheckedChanged(object sender, EventArgs e)
+        {
+            mapForm.SetAutoAlignMap(overlayAutoAlignCheckBox.Checked);
+        }
+
+        private void OverlayClearAnnotationsButton_Click(object sender, EventArgs e)
+        {
+            mapForm.ClearAnnotations();
+        }
+
+        private void OverlayDebugButton_Click(object sender, EventArgs e)
+        {
+            mapForm.SaveGatestoneDebug();
         }
 
         protected override void WndProc(ref Message m)

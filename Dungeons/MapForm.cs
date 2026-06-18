@@ -19,9 +19,9 @@ namespace Dungeons
         private int lastRoomCount = 0;
         private readonly MainForm dataWindow;
         private Size startingSize;
-        private Button gateDebugButton;
-        private CheckBox transparentMapCheckBox;
-        private CheckBox autoAlignMapCheckBox;
+        private bool transparentMapEnabled = true;
+        private bool autoAlignMapEnabled = true;
+        private bool showMapStatsOnly;
 
         private static readonly Keys[] KeysToEat =
         {
@@ -48,10 +48,10 @@ namespace Dungeons
             mapPictureBox.FloorSize = FloorSize;
             mapPictureBox.TransparentBackgroundColor = MapTransparencyKey;
             this.dataWindow = dataWindow;
+            BackColor = MapTransparencyKey;
             TransparencyKey = MapTransparencyKey;
-            InitializeGateDebugControls();
-            InitializeTransparentMapControls();
-            InitializeAutoAlignControls();
+            MoveMapControlsToMainForm();
+            ApplyMapRenderMode();
         }
 
         public DateTimeOffset FloorStartTime { get; private set; } = DateTimeOffset.MinValue;
@@ -112,8 +112,42 @@ namespace Dungeons
 
         public void SetShowMapStatsOnly(bool value)
         {
-            mapPictureBox.Visible = !value;
-            Height = value ? dataLabel.Height + 7 : startingSize.Height;
+            showMapStatsOnly = value;
+            ApplyMapRenderMode();
+        }
+
+        public void SetTransparentMap(bool value)
+        {
+            transparentMapEnabled = value;
+            ApplyMapRenderMode();
+        }
+
+        public void SetAutoAlignMap(bool value)
+        {
+            autoAlignMapEnabled = value;
+            AlignOverlayToRuneScapeMap(dataWindow.SelectedWindow);
+        }
+
+        public void SetMapTopMost(bool value)
+        {
+            TopMost = value;
+        }
+
+        public void ClearAnnotations()
+        {
+            mapPictureBox.ClearAnnotations();
+        }
+
+        public void SaveGatestoneDebug()
+        {
+            var directory = Path.GetFullPath(Path.Combine(
+                Properties.Settings.Default.MapSaveLocation,
+                "GatestoneDebug",
+                DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss")));
+            var count = mapPictureBox.SaveGatestoneDebugCrops(directory);
+            Log(count == 0
+                ? "Gate debug export failed: no map image active."
+                : $"Gate debug export saved {count} crops to {directory}");
         }
 
         public void ApplyTeamAnnotation(Point location, string text)
@@ -141,64 +175,21 @@ namespace Dungeons
             mapPictureBox.ClearTeamGatestones();
         }
 
-        private void InitializeGateDebugControls()
+        private void MoveMapControlsToMainForm()
         {
-            gateDebugButton = new Button
-            {
-                Anchor = AnchorStyles.Bottom | AnchorStyles.Left,
-                BackColor = Color.FromArgb(51, 51, 51),
-                FlatStyle = FlatStyle.Flat,
-                ForeColor = Color.White,
-                Location = new Point(220, 356),
-                Size = new Size(54, 25),
-                Text = "Debug",
-                UseVisualStyleBackColor = false
-            };
-            gateDebugButton.Click += GateDebugButton_Click;
-            Controls.Add(gateDebugButton);
-        }
+            Controls.Remove(minusTenButton);
+            Controls.Remove(plusOneButton);
+            Controls.Remove(plusTenButton);
+            Controls.Remove(resetTimerButton);
+            Controls.Remove(timerLabel);
+            Controls.Remove(clearAnnotationsButton);
+            Controls.Remove(topMostCheckBox);
+            Controls.Remove(tableLayoutPanel1);
 
-        private void InitializeTransparentMapControls()
-        {
-            transparentMapCheckBox = new CheckBox
-            {
-                Anchor = AnchorStyles.Bottom | AnchorStyles.Left,
-                AutoSize = true,
-                Checked = true,
-                Location = new Point(12, 304),
-                Text = "Transparent map",
-                UseVisualStyleBackColor = true
-            };
-            transparentMapCheckBox.CheckedChanged += TransparentMapCheckBox_CheckedChanged;
-            Controls.Add(transparentMapCheckBox);
-            ApplyTransparentMapMode();
-        }
-
-        private void InitializeAutoAlignControls()
-        {
-            autoAlignMapCheckBox = new CheckBox
-            {
-                Anchor = AnchorStyles.Bottom | AnchorStyles.Left,
-                AutoSize = true,
-                Checked = true,
-                Location = new Point(144, 304),
-                Text = "Auto align",
-                UseVisualStyleBackColor = true
-            };
-            autoAlignMapCheckBox.CheckedChanged += AutoAlignMapCheckBox_CheckedChanged;
-            Controls.Add(autoAlignMapCheckBox);
-        }
-
-        private void GateDebugButton_Click(object sender, EventArgs e)
-        {
-            var directory = Path.GetFullPath(Path.Combine(
-                Properties.Settings.Default.MapSaveLocation,
-                "GatestoneDebug",
-                DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss")));
-            var count = mapPictureBox.SaveGatestoneDebugCrops(directory);
-            Log(count == 0
-                ? "Gate debug export failed: no map image active."
-                : $"Gate debug export saved {count} crops to {directory}");
+            flowLayoutPanel.BackColor = MapTransparencyKey;
+            mapPictureBox.BackColor = MapTransparencyKey;
+            dataLabel.BackColor = Color.Black;
+            UpdateOverlayLayout();
         }
 
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
@@ -294,6 +285,7 @@ namespace Dungeons
                     {
                         FloorSize = floorSize;
                         mapPictureBox.Size = LogicalToDeviceUnits(mapSize);
+                        UpdateOverlayLayout();
                         AlignOverlayToRuneScapeMap(window);
                         timer.Start();
                         if (mapPictureBox.Image != null)
@@ -356,15 +348,8 @@ namespace Dungeons
 
             if (FloorStartTime != DateTimeOffset.MinValue)
             {
-                UpdateTimerLabel();
                 UpdateDataLabel();
             }
-        }
-
-        private void UpdateTimerLabel()
-        {
-            var elapsed = GetElapsedTime();
-            timerLabel.Text = elapsed.ToString(elapsed.Hours > 0 ? "h\\:mm\\:ss" : "m':'ss");
         }
 
         private void SaveMapButton_Click(object sender, EventArgs e)
@@ -384,32 +369,22 @@ namespace Dungeons
 
         private void TopMostCheckBox_CheckedChanged(object sender, EventArgs e)
         {
-            TopMost = topMostCheckBox.Checked;
+            SetMapTopMost(topMostCheckBox.Checked);
         }
 
-        private void TransparentMapCheckBox_CheckedChanged(object sender, EventArgs e)
+        private void ApplyMapRenderMode()
         {
-            ApplyTransparentMapMode();
-        }
-
-        private void AutoAlignMapCheckBox_CheckedChanged(object sender, EventArgs e)
-        {
-            AlignOverlayToRuneScapeMap(dataWindow.SelectedWindow);
-        }
-
-        private void ApplyTransparentMapMode()
-        {
-            if (mapPictureBox == null || transparentMapCheckBox == null)
+            if (mapPictureBox == null)
                 return;
 
-            mapPictureBox.ShowCapturedMap = !transparentMapCheckBox.Checked;
-            mapPictureBox.BackColor = transparentMapCheckBox.Checked ? MapTransparencyKey : Color.Black;
+            mapPictureBox.ShowCapturedMap = !transparentMapEnabled && !showMapStatsOnly;
+            mapPictureBox.BackColor = mapPictureBox.ShowCapturedMap ? Color.Black : MapTransparencyKey;
             mapPictureBox.Invalidate();
         }
 
         private void AlignOverlayToRuneScapeMap(ProcessWindow window)
         {
-            if (autoAlignMapCheckBox == null || !autoAlignMapCheckBox.Checked || window == null || window.HasExited)
+            if (!autoAlignMapEnabled || window == null || window.HasExited)
                 return;
 
             if (Properties.Settings.Default.MapLocation == MapUtils.Invalid)
@@ -418,6 +393,15 @@ namespace Dungeons
             var mapScreenLocation = window.ClientToScreen(Properties.Settings.Default.MapLocation);
             if (Location != mapScreenLocation)
                 Location = mapScreenLocation;
+        }
+
+        private void UpdateOverlayLayout()
+        {
+            var statsHeight = dataLabel.Height + dataLabel.Margin.Vertical;
+            var width = Math.Max(mapPictureBox.Width, dataLabel.PreferredWidth + dataLabel.Margin.Horizontal);
+            var height = mapPictureBox.Height + statsHeight;
+            flowLayoutPanel.Size = new Size(width, height);
+            ClientSize = new Size(width, height);
         }
 
         private void ResetTimerButton_Click(object sender, EventArgs e)
@@ -436,7 +420,6 @@ namespace Dungeons
                 else
                     FloorStartTime = FloorStartTime.AddSeconds(10);
             }
-            UpdateTimerLabel();
         }
 
         private void CloseButton_Click(object sender, EventArgs e)
