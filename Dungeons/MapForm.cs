@@ -107,6 +107,7 @@ namespace Dungeons
             else
             {
                 Log($"Could not find map. Current map search location = {Properties.Settings.Default.MapLocation}");
+                SaveCalibrationDebug();
             }
         }
 
@@ -261,6 +262,37 @@ namespace Dungeons
             }
 
             return (MapUtils.Invalid, FloorSize.Small);
+        }
+
+        private void SaveCalibrationDebug()
+        {
+            var window = dataWindow.SelectedWindow;
+            if (window == null || window.HasExited)
+                return;
+
+            using var bmp = window.Capture();
+            if (bmp == null)
+                return;
+
+            var directory = Path.GetFullPath(Path.Combine(
+                Properties.Settings.Default.MapSaveLocation,
+                "CalibrationDebug"));
+            Directory.CreateDirectory(directory);
+
+            var timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
+            var imagePath = Path.Combine(directory, $"client_{timestamp}.png");
+            var infoPath = Path.Combine(directory, $"client_{timestamp}.txt");
+
+            bmp.Save(imagePath);
+            File.WriteAllLines(infoPath, new[]
+            {
+                $"Window: {window.Title}",
+                $"Client size: {window.Size.Width}x{window.Size.Height}",
+                $"Current map search location: {Properties.Settings.Default.MapLocation}",
+                $"Expected map sizes: {string.Join(", ", rsMapSizes.Select(pair => $"{pair.Key}={pair.Value.Width}x{pair.Value.Height}"))}"
+            });
+
+            Log($"Calibration debug saved to {imagePath}");
         }
 
         private void UpdateMap()

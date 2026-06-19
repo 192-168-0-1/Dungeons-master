@@ -11,6 +11,8 @@ namespace Dungeons.Common
         public static readonly Color MapCornerColorMin = Color.FromArgb(100, 87, 65);
         public static readonly Color MapCornerColorMax = Color.FromArgb(117, 104, 83);
         public static readonly Color MapTopRightCornerColor = Color.FromArgb(122, 52, 44);
+        private const int MapCornerSearchTolerance = 8;
+        private const int MapTopRightCornerTolerance = 900;
 
         private readonly Dictionary<RoomType, Color[]> signatures = [];
 
@@ -89,10 +91,25 @@ namespace Dungeons.Common
             using var u = new UnsafeBitmap(bmp);
             foreach (var p in new Point[] { new(0, 0), new(0, bmp.Height - 1), new(bmp.Width - 1, bmp.Height - 1) })
             {
-                if (!u.GetPixel(p.X, p.Y).IsBetween(MapCornerColorMin, MapCornerColorMax))
+                if (!IsMapCornerColor(u.GetPixel(p.X, p.Y)))
                     return false;
             }
             return true;
+        }
+
+        public static bool IsMapCornerColor(Color color)
+        {
+            return color.R >= MapCornerColorMin.R - MapCornerSearchTolerance
+                && color.R <= MapCornerColorMax.R + MapCornerSearchTolerance
+                && color.G >= MapCornerColorMin.G - MapCornerSearchTolerance
+                && color.G <= MapCornerColorMax.G + MapCornerSearchTolerance
+                && color.B >= MapCornerColorMin.B - MapCornerSearchTolerance
+                && color.B <= MapCornerColorMax.B + MapCornerSearchTolerance;
+        }
+
+        public static bool IsMapTopRightCornerColor(Color color)
+        {
+            return UnsafeBitmap.ColorDistance(color, MapTopRightCornerColor) <= MapTopRightCornerTolerance;
         }
     }
 }
