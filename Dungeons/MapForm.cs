@@ -22,6 +22,7 @@ namespace Dungeons
         private bool transparentMapEnabled = true;
         private bool autoAlignMapEnabled = true;
         private bool showMapStatsOnly;
+        private bool useScreenCapture;
 
         private static readonly Keys[] KeysToEat =
         {
@@ -132,6 +133,11 @@ namespace Dungeons
         public void SetMapTopMost(bool value)
         {
             TopMost = value;
+        }
+
+        public void SetUseScreenCapture(bool value)
+        {
+            useScreenCapture = value;
         }
 
         public void ClearAnnotations()
@@ -249,7 +255,7 @@ namespace Dungeons
             var window = dataWindow.SelectedWindow;
             if (window != null && !window.HasExited)
             {
-                using var bmp = window.Capture();
+                using var bmp = window.Capture(useScreenCapture);
                 // Search for map marker
                 foreach (var floorSize in FloorSize.RSSizes)
                 {
@@ -270,7 +276,7 @@ namespace Dungeons
             if (window == null || window.HasExited)
                 return;
 
-            using var bmp = window.Capture();
+            using var bmp = window.Capture(useScreenCapture);
             if (bmp == null)
                 return;
 
@@ -309,7 +315,7 @@ namespace Dungeons
                 if (Properties.Settings.Default.MapLocation != MapUtils.Invalid)
                 {
                     var mapSize = rsMapSizes[floorSize];
-                    var bmp = window.Capture(new Rectangle(Properties.Settings.Default.MapLocation, mapSize));
+                    var bmp = window.Capture(new Rectangle(Properties.Settings.Default.MapLocation, mapSize), useScreenCapture);
                     if (bmp == null)
                         return; // Break out of the loop, window capture won't work for the other cases either.
 

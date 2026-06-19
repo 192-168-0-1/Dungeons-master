@@ -29,6 +29,7 @@ namespace Dungeons
         private CheckBox overlayTopMostCheckBox;
         private CheckBox overlayTransparentMapCheckBox;
         private CheckBox overlayAutoAlignCheckBox;
+        private CheckBox captureScreenCheckBox;
         private Button overlayClearAnnotationsButton;
         private Button overlayDebugButton;
 
@@ -236,17 +237,24 @@ namespace Dungeons
                 Location = new Point(290, y + 2),
                 Text = "Auto align"
             };
+            captureScreenCheckBox = new CheckBox
+            {
+                AutoSize = true,
+                FlatStyle = FlatStyle.System,
+                Location = new Point(390, y + 2),
+                Text = "Screen capture"
+            };
             overlayClearAnnotationsButton = new Button
             {
                 FlatStyle = FlatStyle.System,
-                Location = new Point(390, y),
+                Location = new Point(513, y),
                 Size = new Size(114, 23),
                 Text = "Clear annotations"
             };
             overlayDebugButton = new Button
             {
                 FlatStyle = FlatStyle.System,
-                Location = new Point(510, y),
+                Location = new Point(633, y),
                 Size = new Size(58, 23),
                 Text = "Debug"
             };
@@ -254,6 +262,7 @@ namespace Dungeons
             overlayTopMostCheckBox.CheckedChanged += OverlayTopMostCheckBox_CheckedChanged;
             overlayTransparentMapCheckBox.CheckedChanged += OverlayTransparentMapCheckBox_CheckedChanged;
             overlayAutoAlignCheckBox.CheckedChanged += OverlayAutoAlignCheckBox_CheckedChanged;
+            captureScreenCheckBox.CheckedChanged += CaptureScreenCheckBox_CheckedChanged;
             overlayClearAnnotationsButton.Click += OverlayClearAnnotationsButton_Click;
             overlayDebugButton.Click += OverlayDebugButton_Click;
 
@@ -263,6 +272,7 @@ namespace Dungeons
                 overlayTopMostCheckBox,
                 overlayTransparentMapCheckBox,
                 overlayAutoAlignCheckBox,
+                captureScreenCheckBox,
                 overlayClearAnnotationsButton,
                 overlayDebugButton
             });
@@ -415,6 +425,7 @@ namespace Dungeons
             mapForm.SetMapTopMost(overlayTopMostCheckBox?.Checked ?? false);
             mapForm.SetTransparentMap(overlayTransparentMapCheckBox?.Checked ?? true);
             mapForm.SetAutoAlignMap(overlayAutoAlignCheckBox?.Checked ?? true);
+            mapForm.SetUseScreenCapture(captureScreenCheckBox?.Checked ?? false);
         }
 
         private void OverlayTopMostCheckBox_CheckedChanged(object sender, EventArgs e)
@@ -430,6 +441,11 @@ namespace Dungeons
         private void OverlayAutoAlignCheckBox_CheckedChanged(object sender, EventArgs e)
         {
             mapForm.SetAutoAlignMap(overlayAutoAlignCheckBox.Checked);
+        }
+
+        private void CaptureScreenCheckBox_CheckedChanged(object sender, EventArgs e)
+        {
+            mapForm.SetUseScreenCapture(captureScreenCheckBox.Checked);
         }
 
         private void OverlayClearAnnotationsButton_Click(object sender, EventArgs e)
@@ -461,7 +477,7 @@ namespace Dungeons
         /// <returns>true if winterface was found; otherwise, false.</returns>
         private async Task<bool> CaptureWinterfaceAsync()
         {
-            using var bmp = mapForm.RSWindow?.Capture();
+            using var bmp = mapForm.RSWindow?.Capture(captureScreenCheckBox.Checked);
             if (bmp == null)
                 return false;
             var dict = await Task.Run(() => ParseWinterfaceBitmap(bmp, saveImagesCheckBox.Checked));

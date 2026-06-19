@@ -29,6 +29,8 @@ namespace Dungeons
 
         public Bitmap Capture() => Capture(new Rectangle(Point.Empty, Size));
 
+        public Bitmap Capture(bool useScreenCapture) => Capture(new Rectangle(Point.Empty, Size), useScreenCapture);
+
         public Point ClientToScreen(Point point)
         {
             if (Handle == IntPtr.Zero)
@@ -42,6 +44,11 @@ namespace Dungeons
 
         public Bitmap Capture(Rectangle region)
         {
+            return Capture(region, false);
+        }
+
+        public Bitmap Capture(Rectangle region, bool useScreenCapture)
+        {
             var size = region.Size;
             if (Handle == IntPtr.Zero)
             {
@@ -54,6 +61,9 @@ namespace Dungeons
                 }
                 return screenBmp;
             }
+
+            if (useScreenCapture)
+                return CaptureFromScreen(region);
 
             var desktopDC = GetDC(Handle);
             var memoryDC = CreateCompatibleDC(desktopDC);
@@ -72,6 +82,18 @@ namespace Dungeons
             }
 
             return null;
+        }
+
+        private Bitmap CaptureFromScreen(Rectangle region)
+        {
+            var screenLocation = ClientToScreen(region.Location);
+            var screenBmp = new Bitmap(region.Width, region.Height);
+            using (var g = Graphics.FromImage(screenBmp))
+            {
+                g.CopyFromScreen(screenLocation, Point.Empty, region.Size);
+            }
+
+            return screenBmp;
         }
 
         public bool Equals(ProcessWindow other)
