@@ -55,23 +55,65 @@ namespace Dungeons
                 return screenBmp;
             }
 
+            var windowCapture = CaptureFromWindowDc(region);
+            if (windowCapture != null && !IsMostlyBlack(windowCapture))
+                return windowCapture;
+
+            windowCapture?.Dispose();
+            return CaptureFromScreen(region);
+        }
+
+        private Bitmap CaptureFromWindowDc(Rectangle region)
+        {
+            var size = region.Size;
             var desktopDC = GetDC(Handle);
             var memoryDC = CreateCompatibleDC(desktopDC);
             var bmp = CreateCompatibleBitmap(desktopDC, size.Width, size.Height);
             var oldBitmap = SelectObject(memoryDC, bmp);
-            var success = BitBlt(memoryDC, 0, 0, size.Width, size.Height, desktopDC, region.X, region.Y, SRCCOPY | CAPTUREBLT);
-
-            if (success)
+            try
             {
-                var result = Image.FromHbitmap(bmp);
+                var success = BitBlt(memoryDC, 0, 0, size.Width, size.Height, desktopDC, region.X, region.Y, SRCCOPY | CAPTUREBLT);
+                return success ? (Bitmap)Image.FromHbitmap(bmp) : null;
+            }
+            finally
+            {
                 SelectObject(memoryDC, oldBitmap);
                 DeleteObject(bmp);
                 DeleteDC(memoryDC);
                 ReleaseDC(Handle, desktopDC);
-                return result;
+            }
+        }
+
+        private Bitmap CaptureFromScreen(Rectangle region)
+        {
+            var screenLocation = ClientToScreen(region.Location);
+            var screenBmp = new Bitmap(region.Width, region.Height);
+            using (var g = Graphics.FromImage(screenBmp))
+            {
+                g.CopyFromScreen(screenLocation, Point.Empty, region.Size);
+            }
+            return screenBmp;
+        }
+
+        private static bool IsMostlyBlack(Bitmap bitmap)
+        {
+            var sampled = 0;
+            var black = 0;
+            var stepX = Math.Max(1, bitmap.Width / 32);
+            var stepY = Math.Max(1, bitmap.Height / 32);
+
+            for (var y = 0; y < bitmap.Height; y += stepY)
+            {
+                for (var x = 0; x < bitmap.Width; x += stepX)
+                {
+                    sampled++;
+                    var color = bitmap.GetPixel(x, y);
+                    if (color.R <= 5 && color.G <= 5 && color.B <= 5)
+                        black++;
+                }
             }
 
-            return null;
+            return sampled > 0 && black >= sampled * 98 / 100;
         }
 
         public bool Equals(ProcessWindow other)
