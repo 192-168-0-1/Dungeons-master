@@ -89,9 +89,7 @@ namespace Dungeons
         {
             var selectedItem = windowComboBox.SelectedItem;
             var list = (from x in Process.GetProcessesByName("rs2client") select new ProcessWindow(x)).ToList();
-#if DEBUG
             list.Add(new ProcessWindow(null));
-#endif
             windowComboBox.DataSource = list;
             windowComboBox.SelectedItem = selectedItem == null ? list.FirstOrDefault() : selectedItem;
         }

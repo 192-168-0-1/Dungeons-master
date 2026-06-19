@@ -52,12 +52,13 @@ namespace Dungeons
             var size = region.Size;
             if (Handle == IntPtr.Zero)
             {
-                // Capture entire screen.
-                size = SystemInformation.VirtualScreen.Size;
                 var screenBmp = new Bitmap(size.Width, size.Height);
+                var source = new Point(
+                    SystemInformation.VirtualScreen.X + region.X,
+                    SystemInformation.VirtualScreen.Y + region.Y);
                 using (var g = Graphics.FromImage(screenBmp))
                 {
-                    g.CopyFromScreen(SystemInformation.VirtualScreen.X, SystemInformation.VirtualScreen.Y, 0, 0, size);
+                    g.CopyFromScreen(source, Point.Empty, size);
                 }
                 return screenBmp;
             }

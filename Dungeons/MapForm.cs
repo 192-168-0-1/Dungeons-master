@@ -294,6 +294,8 @@ namespace Dungeons
             {
                 $"Window: {window.Title}",
                 $"Client size: {window.Size.Width}x{window.Size.Height}",
+                $"Capture mode: {(window.Handle == IntPtr.Zero ? "Entire screen" : useScreenCapture ? "Visible screen region" : "Window DC")}",
+                $"Virtual screen: {SystemInformation.VirtualScreen}",
                 $"Current map search location: {Properties.Settings.Default.MapLocation}",
                 $"Expected map sizes: {string.Join(", ", rsMapSizes.Select(pair => $"{pair.Key}={pair.Value.Width}x{pair.Value.Height}"))}"
             });
