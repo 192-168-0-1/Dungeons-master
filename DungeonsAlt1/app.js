@@ -1,0 +1,688 @@
+import {
+  FLOOR_SIZES,
+  ROOM_SIZE,
+  RoomType,
+  detectGatestones,
+  findMapByCorners,
+  gridOffset,
+  imageToMap,
+  isOpened,
+  isValidMap,
+  mapToImage,
+  readGameMap,
+  toChess,
+} from "./src/map-core.js";
+import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js";
+import { TeamSync, createRoomCode } from "./src/team-sync.js";
+import { WinterfaceReader } from "./src/winterface.js";
+
+const SCAN_INTERVAL = 600;
+const AUTO_CALIBRATION_INTERVAL = 2500;
+const STORAGE_PREFIX = "dungeons-alt1";
+const INVALID_CAPTURES_BEFORE_RECALIBRATION = 3;
+
+const elements = {
+  titlebar: document.querySelector(".titlebar"),
+  status: document.querySelector("#status"),
+  stats: document.querySelector("#stats"),
+  canvas: document.querySelector("#map"),
+  calibrate: document.querySelector("#calibrate"),
+  pause: document.querySelector("#pause"),
+  save: document.querySelector("#save"),
+  clear: document.querySelector("#clear"),
+  captureResults: document.querySelector("#capture-results"),
+  showCapture: document.querySelector("#show-capture"),
+  showGrid: document.querySelector("#show-grid"),
+  gameOverlay: document.querySelector("#game-overlay"),
+  selection: document.querySelector("#selection"),
+  annotation: document.querySelector("#annotation"),
+  applyAnnotation: document.querySelector("#apply-annotation"),
+  teamName: document.querySelector("#team-name"),
+  teamRoom: document.querySelector("#team-room"),
+  teamCreate: document.querySelector("#team-create"),
+  teamJoin: document.querySelector("#team-join"),
+  teamDisconnect: document.querySelector("#team-disconnect"),
+  teamStatus: document.querySelector("#team-status"),
+  installLink: document.querySelector("#install-link"),
+  environment: document.querySelector("#environment"),
+  resultsBody: document.querySelector("#results-body"),
+  copyResults: document.querySelector("#copy-results"),
+};
+
+const context = elements.canvas.getContext("2d", { alpha: true });
+const teamSync = new TeamSync();
+const winterfaceReader = WinterfaceReader.load();
+
+const state = {
+  calibration: loadCalibration(),
+  image: null,
+  gameMap: null,
+  selected: null,
+  annotations: new Map(),
+  manualCritical: new Set(),
+  localGatestones: {},
+  teamGatestones: new Map(),
+  floorStart: null,
+  lastBase: null,
+  lastRoomCount: 0,
+  invalidCaptures: 0,
+  autoScan: true,
+  busy: false,
+  lastCalibrationAttempt: 0,
+  results: [],
+};
+
+function loadCalibration() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(`${STORAGE_PREFIX}:calibration`));
+    const floor = FLOOR_SIZES.find((candidate) => candidate.name === saved?.floor);
+    if (floor && Number.isInteger(saved.x) && Number.isInteger(saved.y)) return { x: saved.x, y: saved.y, floor };
+  } catch {
+    // A corrupt development setting is safe to ignore.
+  }
+  return null;
+}
+
+function saveCalibration() {
+  if (!state.calibration) return;
+  localStorage.setItem(`${STORAGE_PREFIX}:calibration`, JSON.stringify({
+    x: state.calibration.x,
+    y: state.calibration.y,
+    floor: state.calibration.floor.name,
+  }));
+}
+
+function setStatus(text, tone = "neutral") {
+  elements.status.textContent = text;
+  elements.status.dataset.tone = tone;
+}
+
+function floorPointKey(point) {
+  return `${point.x},${point.y}`;
+}
+
+function pointFromKey(value) {
+  const [x, y] = value.split(",").map(Number);
+  return { x, y };
+}
+
+function samePoint(left, right) {
+  return Boolean(left && right && left.x === right.x && left.y === right.y);
+}
+
+function pointInFloor(point, floor = state.gameMap?.floor) {
+  return Boolean(point && floor && point.x >= 0 && point.x < floor.width && point.y >= 0 && point.y < floor.height);
+}
+
+function resetFloor() {
+  state.floorStart = Date.now() - 2000;
+  state.annotations.clear();
+  state.manualCritical.clear();
+  state.teamGatestones.clear();
+  state.selected = null;
+  elements.annotation.value = "";
+  elements.selection.textContent = "No room selected";
+}
+
+function clearCalibration() {
+  state.calibration = null;
+  localStorage.removeItem(`${STORAGE_PREFIX}:calibration`);
+}
+
+async function calibrate({ silent = false } = {}) {
+  if (state.busy) return false;
+  state.busy = true;
+  state.lastCalibrationAttempt = Date.now();
+  elements.calibrate.disabled = true;
+  let found = false;
+  try {
+    assertAlt1Ready();
+    if (!silent) setStatus("Searching for the Dungeoneering map…");
+    await nextPaint();
+    const fullClient = captureFullRuneScape();
+    const match = findMapByCorners(fullClient);
+    if (!match) {
+      clearCalibration();
+      setStatus("Waiting for a Dungeoneering map to appear…", "warn");
+    } else {
+      state.calibration = match;
+      state.invalidCaptures = 0;
+      saveCalibration();
+      found = true;
+      setStatus(`Calibrated: ${match.floor.name} at ${match.x},${match.y}`, "ok");
+    }
+  } catch (error) {
+    setStatus(error.message || String(error), silent ? "warn" : "error");
+  } finally {
+    state.busy = false;
+    elements.calibrate.disabled = false;
+  }
+  if (found) await updateMap();
+  return found;
+}
+
+function assertAlt1Ready() {
+  if (!hasAlt1()) throw new Error("Open this page inside Alt1 to read RuneScape.");
+  if (!window.alt1.rsLinked) throw new Error("Waiting for Alt1 to link to the RuneScape window…");
+  if (window.alt1.permissionPixel === false) throw new Error("Install the app in Alt1 and grant pixel permission.");
+}
+
+function nextPaint() {
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+}
+
+async function updateMap() {
+  if (state.busy || !state.calibration || !state.autoScan) return;
+  state.busy = true;
+  let shouldRecalibrate = false;
+  try {
+    assertAlt1Ready();
+    const { x, y, floor } = state.calibration;
+    const image = captureRegion(x, y, floor.imageWidth, floor.imageHeight);
+    if (!isValidMap(image)) {
+      state.invalidCaptures += 1;
+      setStatus(`Map image lost (${state.invalidCaptures}/${INVALID_CAPTURES_BEFORE_RECALIBRATION})`, "warn");
+      shouldRecalibrate = state.invalidCaptures >= INVALID_CAPTURES_BEFORE_RECALIBRATION;
+      return;
+    }
+
+    state.invalidCaptures = 0;
+    const gameMap = readGameMap(image, floor);
+    const newFloor = !state.floorStart
+      || (state.lastBase && gameMap.base && !samePoint(state.lastBase, gameMap.base))
+      || (state.lastRoomCount > 1 && gameMap.openedRoomCount === 1);
+    if (newFloor) resetFloor();
+
+    state.image = image;
+    state.gameMap = gameMap;
+    state.lastBase = gameMap.base ?? state.lastBase;
+    state.lastRoomCount = gameMap.openedRoomCount;
+    updateLocalGatestones(detectGatestones(image, gameMap));
+    render();
+    setStatus(`${floor.name} map live`, "ok");
+  } catch (error) {
+    setStatus(error.message || String(error), "error");
+  } finally {
+    state.busy = false;
+    if (shouldRecalibrate) {
+      clearCalibration();
+      setTimeout(() => calibrate({ silent: true }), 0);
+    }
+  }
+}
+
+function updateLocalGatestones(next) {
+  for (const index of [1, 2]) {
+    const previousPoint = state.localGatestones[index] ?? null;
+    const nextPoint = next[index] ?? null;
+    if ((previousPoint || nextPoint) && !samePoint(previousPoint, nextPoint)) teamSync.sendGatestone(index, nextPoint);
+  }
+  state.localGatestones = next;
+}
+
+function updateStats() {
+  if (!state.gameMap) {
+    elements.stats.textContent = "No map read yet";
+    return;
+  }
+  const rooms = state.gameMap.openedRoomCount;
+  const possible = rooms + state.gameMap.mysteryCount;
+  const minutes = state.floorStart ? Math.max((Date.now() - state.floorStart) / 60_000, 1 / 60) : 0;
+  const rpm = minutes ? Math.max(0, (rooms - 0.8) / minutes).toFixed(1) : "0.0";
+  const elapsedSeconds = state.floorStart ? Math.max(0, Math.floor((Date.now() - state.floorStart) / 1000)) : 0;
+  const elapsed = `${String(Math.floor(elapsedSeconds / 60)).padStart(2, "0")}:${String(elapsedSeconds % 60).padStart(2, "0")}`;
+  elements.stats.textContent = `${rooms} rooms (${possible}) · ${rpm} rpm · ${state.gameMap.deadEndCount} dead ends · ${elapsed}`;
+}
+
+function render() {
+  const { image, gameMap } = state;
+  if (!image || !gameMap) {
+    drawEmptyState();
+    updateStats();
+    return;
+  }
+
+  elements.canvas.width = image.width;
+  elements.canvas.height = image.height;
+  context.imageSmoothingEnabled = false;
+  if (elements.showCapture.checked) context.putImageData(image, 0, 0);
+  else drawAbstractMap(gameMap);
+  if (elements.showGrid.checked) drawGrid(gameMap.floor);
+  drawCriticalRooms(gameMap);
+  drawAnnotations(gameMap.floor);
+  drawGatestones(gameMap.floor);
+  drawSelection(gameMap.floor);
+  updateStats();
+  renderGameOverlay();
+}
+
+function drawEmptyState() {
+  elements.canvas.width = 280;
+  elements.canvas.height = 280;
+  context.clearRect(0, 0, 280, 280);
+  context.fillStyle = "#101417";
+  context.fillRect(0, 0, 280, 280);
+  context.fillStyle = "#7f8c91";
+  context.font = "14px system-ui";
+  context.textAlign = "center";
+  context.fillText("Waiting for a Dungeoneering map", 140, 140);
+}
+
+function drawAbstractMap(gameMap) {
+  const { floor } = gameMap;
+  context.clearRect(0, 0, floor.imageWidth, floor.imageHeight);
+  context.fillStyle = "rgba(8, 12, 14, .88)";
+  context.fillRect(0, 0, floor.imageWidth, floor.imageHeight);
+  context.lineCap = "round";
+  for (let y = 0; y < floor.height; y += 1) {
+    for (let x = 0; x < floor.width; x += 1) {
+      const type = gameMap.typeAt(x, y);
+      if (type === RoomType.Gap) continue;
+      const origin = mapToImage({ x, y }, floor);
+      const centerX = origin.x + ROOM_SIZE / 2;
+      const centerY = origin.y + ROOM_SIZE / 2;
+      context.strokeStyle = type & RoomType.Mystery ? "#8c6a3b" : "#8fa3a8";
+      context.lineWidth = 4;
+      context.beginPath();
+      if (type & RoomType.W) { context.moveTo(origin.x, centerY); context.lineTo(centerX, centerY); }
+      if (type & RoomType.E) { context.moveTo(centerX, centerY); context.lineTo(origin.x + ROOM_SIZE, centerY); }
+      if (type & RoomType.N) { context.moveTo(centerX, origin.y); context.lineTo(centerX, centerY); }
+      if (type & RoomType.S) { context.moveTo(centerX, centerY); context.lineTo(centerX, origin.y + ROOM_SIZE); }
+      context.stroke();
+
+      context.fillStyle = type & RoomType.Base ? "#d8d2a4"
+        : type & RoomType.Boss ? "#9e3d35"
+          : type & RoomType.Crit ? "#c89a42"
+            : type & RoomType.Mystery ? "#5a432a" : "#59686c";
+      context.fillRect(origin.x + 9, origin.y + 9, 14, 14);
+      context.strokeStyle = "rgba(255,255,255,.35)";
+      context.lineWidth = 1;
+      context.strokeRect(origin.x + 9.5, origin.y + 9.5, 13, 13);
+    }
+  }
+}
+
+function drawGrid(floor) {
+  const offset = gridOffset(floor);
+  context.save();
+  context.strokeStyle = "rgba(220, 244, 247, .16)";
+  context.lineWidth = 1;
+  context.beginPath();
+  for (let x = 0; x <= floor.width; x += 1) {
+    const px = offset.x + x * ROOM_SIZE + 0.5;
+    context.moveTo(px, offset.y);
+    context.lineTo(px, offset.y + floor.height * ROOM_SIZE);
+  }
+  for (let y = 0; y <= floor.height; y += 1) {
+    const py = offset.y + y * ROOM_SIZE + 0.5;
+    context.moveTo(offset.x, py);
+    context.lineTo(offset.x + floor.width * ROOM_SIZE, py);
+  }
+  context.stroke();
+  context.restore();
+}
+
+function drawCriticalRooms(gameMap) {
+  context.save();
+  context.lineWidth = 2;
+  for (let y = 0; y < gameMap.floor.height; y += 1) {
+    for (let x = 0; x < gameMap.floor.width; x += 1) {
+      const point = { x, y };
+      const pointKey = floorPointKey(point);
+      const detected = gameMap.criticalPath.has(pointKey);
+      const manual = state.manualCritical.has(pointKey);
+      if (!detected && !manual) continue;
+      const origin = mapToImage(point, gameMap.floor);
+      context.strokeStyle = manual ? "rgba(58, 218, 238, .95)" : "rgba(255, 185, 58, .78)";
+      context.strokeRect(origin.x + 2, origin.y + 2, ROOM_SIZE - 4, ROOM_SIZE - 4);
+    }
+  }
+  context.restore();
+}
+
+function annotationColor(text) {
+  const value = String(text || "").toLowerCase();
+  if (value.startsWith("go")) return "rgba(255, 215, 0, .95)";
+  if (value.startsWith("gr")) return "rgba(100, 255, 100, .95)";
+  if (value.startsWith("o")) return "rgba(255, 165, 0, .95)";
+  if (value.startsWith("y")) return "rgba(255, 240, 70, .95)";
+  if (value.startsWith("b")) return "rgba(105, 200, 255, .95)";
+  if (value.startsWith("p")) return "rgba(220, 175, 255, .95)";
+  return "rgba(240, 245, 245, .94)";
+}
+
+function drawAnnotations(floor) {
+  context.save();
+  context.font = "bold 10px Consolas, monospace";
+  context.textAlign = "left";
+  context.textBaseline = "top";
+  context.shadowColor = "rgba(0,0,0,.9)";
+  context.shadowBlur = 2;
+  for (const [pointKey, text] of state.annotations) {
+    if (!text) continue;
+    const point = pointFromKey(pointKey);
+    if (!pointInFloor(point, floor)) continue;
+    const origin = mapToImage(point, floor);
+    context.fillStyle = annotationColor(text);
+    context.fillText(text, origin.x + 3, origin.y + 3);
+  }
+  context.restore();
+}
+
+function drawGatestones(floor) {
+  for (const [index, point] of Object.entries(state.localGatestones)) {
+    drawGatestoneBadge(point, `G${index}`, "#ffd23f", "#111", floor, 0);
+  }
+  const grouped = [];
+  for (const owner of state.teamGatestones.values()) {
+    for (const [index, point] of owner.locations) grouped.push({ owner, index, point });
+  }
+  grouped.forEach((marker, index) => drawGatestoneBadge(
+    marker.point,
+    String(marker.index),
+    colorForOwner(marker.owner.id),
+    "#fff",
+    floor,
+    index,
+  ));
+}
+
+function drawGatestoneBadge(point, text, fill, color, floor, slot) {
+  if (!pointInFloor(point, floor)) return;
+  const origin = mapToImage(point, floor);
+  const positions = [[2, 21], [21, 21], [21, 2], [2, 2], [12, 21], [12, 2]];
+  const [dx, dy] = positions[slot % positions.length];
+  context.save();
+  context.fillStyle = fill;
+  context.strokeStyle = "rgba(255,255,255,.8)";
+  context.lineWidth = 1;
+  context.fillRect(origin.x + dx, origin.y + dy, 9, 9);
+  context.strokeRect(origin.x + dx + 0.5, origin.y + dy + 0.5, 8, 8);
+  context.fillStyle = color;
+  context.font = "bold 6px system-ui";
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.fillText(text, origin.x + dx + 4.5, origin.y + dy + 4.8);
+  context.restore();
+}
+
+function colorForOwner(id) {
+  const colors = ["#e7502b", "#35b7e8", "#52be4c", "#eed340", "#aaafb2"];
+  let hash = 17;
+  for (const character of String(id)) hash = ((hash * 31) + character.charCodeAt(0)) | 0;
+  return colors[Math.abs(hash) % colors.length];
+}
+
+function drawSelection(floor) {
+  if (!pointInFloor(state.selected, floor)) return;
+  const origin = mapToImage(state.selected, floor);
+  context.save();
+  context.strokeStyle = "#5fe8f5";
+  context.lineWidth = 2;
+  context.setLineDash([4, 2]);
+  context.strokeRect(origin.x + 1, origin.y + 1, ROOM_SIZE - 2, ROOM_SIZE - 2);
+  context.restore();
+}
+
+function mixColor(r, g, b, a = 255) {
+  return (b << 0) + (g << 8) + (r << 16) + (a << 24);
+}
+
+function renderGameOverlay() {
+  if (!hasAlt1() || typeof window.alt1.overLayClearGroup !== "function") return;
+  const api = window.alt1;
+  const group = "dungeons-alt1";
+  api.overLayClearGroup(group);
+  if (!elements.gameOverlay.checked || !state.calibration || !state.gameMap || api.permissionOverlay === false) return;
+  api.overLaySetGroup(group);
+  const mapX = api.rsX + state.calibration.x;
+  const mapY = api.rsY + state.calibration.y;
+  for (const [pointKey, annotation] of state.annotations) {
+    if (!annotation) continue;
+    const point = pointFromKey(pointKey);
+    const origin = mapToImage(point, state.gameMap.floor);
+    api.overLayTextEx(annotation, mixColor(235, 245, 245, 230), 10, mapX + origin.x + 4, mapY + origin.y + 4, 1200, "Consolas", false, true);
+  }
+  for (const pointKey of state.manualCritical) {
+    const origin = mapToImage(pointFromKey(pointKey), state.gameMap.floor);
+    api.overLayRect(mixColor(60, 220, 238, 220), mapX + origin.x + 2, mapY + origin.y + 2, 28, 28, 1200, 2);
+  }
+  api.overLayTextEx(elements.stats.textContent, mixColor(225, 238, 239, 235), 11, mapX, mapY + state.calibration.floor.imageHeight + 4, 1200, "Segoe UI", false, true);
+}
+
+function selectPoint(point) {
+  if (!pointInFloor(point)) return;
+  state.selected = point;
+  const annotation = state.annotations.get(floorPointKey(point)) ?? "";
+  elements.selection.textContent = `${toChess(point)} · ${isOpened(state.gameMap.typeAt(point.x, point.y)) ? "room" : "unknown"}`;
+  elements.annotation.value = annotation;
+  elements.annotation.focus();
+  elements.annotation.select();
+  render();
+}
+
+function setSelectedAnnotation(value, notify = true) {
+  if (!pointInFloor(state.selected)) return;
+  const text = String(value ?? "").slice(0, 4);
+  const pointKey = floorPointKey(state.selected);
+  if (text) state.annotations.set(pointKey, text);
+  else state.annotations.delete(pointKey);
+  elements.annotation.value = text;
+  if (notify) teamSync.sendAnnotation(state.selected, text);
+  render();
+}
+
+function clearAnnotations(notify = true) {
+  state.annotations.clear();
+  state.manualCritical.clear();
+  elements.annotation.value = "";
+  if (notify) teamSync.sendClear();
+  render();
+}
+
+function canvasPoint(event) {
+  const bounds = elements.canvas.getBoundingClientRect();
+  return {
+    x: (event.clientX - bounds.left) * elements.canvas.width / bounds.width,
+    y: (event.clientY - bounds.top) * elements.canvas.height / bounds.height,
+  };
+}
+
+function saveMap() {
+  if (!state.image) return;
+  const link = document.createElement("a");
+  link.download = `dungeon-map-${new Date().toISOString().replaceAll(":", "-").slice(0, 19)}.png`;
+  link.href = elements.canvas.toDataURL("image/png");
+  link.click();
+}
+
+const RESULT_COLUMNS = [
+  "Timestamp", "Time", "Floor", "FloorXP", "PrestigeXP", "BaseXP", "FloorSize", "SizeMod",
+  "BonusMod", "DifficultyMod", "LevelMod", "FloorXPBoost", "TotalMod", "FinalXP", "Roomcount", "DeadEnds",
+];
+
+async function captureDungeonResults() {
+  if (state.busy) return;
+  state.busy = true;
+  elements.captureResults.disabled = true;
+  try {
+    assertAlt1Ready();
+    setStatus("Reading the Dungeoneering results screen…");
+    const reader = await winterfaceReader;
+    const result = reader.read(captureFullRuneScape(), {
+      roomcount: state.gameMap?.openedRoomCount,
+      deadEnds: state.gameMap?.deadEndCount,
+    });
+    if (!result) {
+      setStatus("Results screen not found — keep the XP overview visible", "error");
+      return;
+    }
+    state.results.unshift(result);
+    renderResults();
+    setStatus(`Results read: floor ${result.Floor || "?"}, ${result.FinalXP || "?"} XP`, "ok");
+  } catch (error) {
+    setStatus(`Could not read the results screen: ${error.message || error}`, "error");
+  } finally {
+    state.busy = false;
+    elements.captureResults.disabled = false;
+  }
+}
+
+function renderResults() {
+  elements.resultsBody.replaceChildren(...state.results.map((result) => {
+    const row = document.createElement("tr");
+    for (const column of RESULT_COLUMNS) {
+      const cell = document.createElement("td");
+      cell.textContent = result[column] ?? "";
+      row.append(cell);
+    }
+    return row;
+  }));
+}
+
+async function copyResults() {
+  if (!state.results.length) return;
+  const text = [
+    RESULT_COLUMNS.join("\t"),
+    ...state.results.map((result) => RESULT_COLUMNS.map((column) => result[column] ?? "").join("\t")),
+  ].join("\n");
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    document.body.append(textarea);
+    textarea.select();
+    document.execCommand("copy");
+    textarea.remove();
+  }
+  setStatus("Results table copied to the clipboard", "ok");
+}
+
+function sendTeamSnapshot() {
+  for (const [pointKey, annotation] of state.annotations) teamSync.sendAnnotation(pointFromKey(pointKey), annotation);
+  for (const [index, point] of Object.entries(state.localGatestones)) teamSync.sendGatestone(index, point);
+}
+
+function bindEvents() {
+  moveWindowFrom(elements.titlebar);
+  elements.calibrate.addEventListener("click", () => calibrate({ silent: false }));
+  elements.pause.addEventListener("click", () => {
+    state.autoScan = !state.autoScan;
+    elements.pause.textContent = state.autoScan ? "Pause" : "Resume";
+    setStatus(state.autoScan ? "Automatic scanning resumed" : "Automatic scanning paused", "warn");
+    if (state.autoScan) scanOnce();
+  });
+  elements.save.addEventListener("click", saveMap);
+  elements.clear.addEventListener("click", () => clearAnnotations(true));
+  elements.captureResults.addEventListener("click", captureDungeonResults);
+  elements.copyResults.addEventListener("click", copyResults);
+  elements.showCapture.addEventListener("change", render);
+  elements.showGrid.addEventListener("change", render);
+  elements.gameOverlay.addEventListener("change", renderGameOverlay);
+  elements.applyAnnotation.addEventListener("click", () => setSelectedAnnotation(elements.annotation.value));
+  elements.annotation.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") { setSelectedAnnotation(elements.annotation.value); elements.canvas.focus(); }
+  });
+  elements.canvas.addEventListener("click", (event) => {
+    if (!state.gameMap) return;
+    const point = imageToMap(canvasPoint(event), state.gameMap.floor);
+    if (point) selectPoint(point);
+  });
+  elements.canvas.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+    if (!state.gameMap) return;
+    const point = imageToMap(canvasPoint(event), state.gameMap.floor);
+    if (!point || !isOpened(state.gameMap.typeAt(point.x, point.y))) return;
+    const pointKey = floorPointKey(point);
+    if (state.manualCritical.has(pointKey)) state.manualCritical.delete(pointKey);
+    else state.manualCritical.add(pointKey);
+    render();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (!state.selected || /^(INPUT|BUTTON|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName)) return;
+    const delta = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] }[event.key];
+    if (delta) {
+      const point = { x: state.selected.x + delta[0], y: state.selected.y + delta[1] };
+      if (pointInFloor(point)) selectPoint(point);
+      event.preventDefault();
+    }
+  });
+
+  elements.teamCreate.addEventListener("click", () => {
+    elements.teamRoom.value = createRoomCode();
+    elements.teamRoom.value = teamSync.connect(elements.teamRoom.value, elements.teamName.value);
+  });
+  elements.teamJoin.addEventListener("click", () => {
+    elements.teamRoom.value = teamSync.connect(elements.teamRoom.value, elements.teamName.value);
+  });
+  elements.teamDisconnect.addEventListener("click", () => {
+    teamSync.disconnect();
+    state.teamGatestones.clear();
+    render();
+  });
+  teamSync.addEventListener("status", (event) => { elements.teamStatus.textContent = event.detail; });
+  teamSync.addEventListener("connected", sendTeamSnapshot);
+  teamSync.addEventListener("hello", sendTeamSnapshot);
+  teamSync.addEventListener("annotation", (event) => {
+    const { point, text } = event.detail;
+    if (!pointInFloor(point)) return;
+    if (text) state.annotations.set(floorPointKey(point), String(text).slice(0, 4));
+    else state.annotations.delete(floorPointKey(point));
+    render();
+  });
+  teamSync.addEventListener("clear", () => clearAnnotations(false));
+  teamSync.addEventListener("gatestone", (event) => {
+    const { senderId, senderName, index, point } = event.detail;
+    let owner = state.teamGatestones.get(senderId);
+    if (!owner) {
+      owner = { id: senderId, name: senderName, locations: new Map() };
+      state.teamGatestones.set(senderId, owner);
+    }
+    owner.name = senderName;
+    if (pointInFloor(point)) owner.locations.set(index, point);
+    else owner.locations.delete(index);
+    if (!owner.locations.size) state.teamGatestones.delete(senderId);
+    render();
+  });
+}
+
+async function scanLoop() {
+  await scanOnce();
+  setTimeout(scanLoop, SCAN_INTERVAL);
+}
+
+async function scanOnce() {
+  if (!state.autoScan || state.busy) return;
+  if (state.calibration) {
+    await updateMap();
+    return;
+  }
+  if (Date.now() - state.lastCalibrationAttempt >= AUTO_CALIBRATION_INTERVAL) {
+    await calibrate({ silent: true });
+  }
+}
+
+function initialize() {
+  bindEvents();
+  drawEmptyState();
+  updateStats();
+  elements.teamRoom.value = createRoomCode();
+  elements.teamName.value = localStorage.getItem(`${STORAGE_PREFIX}:name`) || "";
+  elements.teamName.addEventListener("change", () => localStorage.setItem(`${STORAGE_PREFIX}:name`, elements.teamName.value));
+
+  const configUrl = new URL("appconfig.json", window.location.href).href;
+  elements.installLink.href = `alt1://addapp/${configUrl}`;
+  if (hasAlt1()) {
+    identifyApp();
+    elements.environment.textContent = `Alt1 ${window.alt1.version || ""}`.trim();
+    if (state.calibration) setStatus(`Loading saved ${state.calibration.floor.name} calibration…`);
+    else setStatus("Waiting for a Dungeoneering map to appear…", "warn");
+  } else {
+    elements.environment.textContent = "Browser preview";
+    setStatus("Open this app in Alt1; a browser cannot read RuneScape pixels", "warn");
+  }
+  scanLoop();
+}
+
+initialize();
