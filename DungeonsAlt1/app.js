@@ -20,6 +20,7 @@ const SCAN_INTERVAL = 600;
 const AUTO_CALIBRATION_INTERVAL = 2500;
 const STORAGE_PREFIX = "dungeons-alt1";
 const INVALID_CAPTURES_BEFORE_RECALIBRATION = 3;
+const OVERLAY_DURATION = 5000;
 
 const elements = {
   titlebar: document.querySelector(".titlebar"),
@@ -34,6 +35,8 @@ const elements = {
   showCapture: document.querySelector("#show-capture"),
   showGrid: document.querySelector("#show-grid"),
   gameOverlay: document.querySelector("#game-overlay"),
+  testOverlay: document.querySelector("#test-overlay"),
+  overlayStatus: document.querySelector("#overlay-status"),
   selection: document.querySelector("#selection"),
   annotation: document.querySelector("#annotation"),
   applyAnnotation: document.querySelector("#apply-annotation"),
@@ -442,19 +445,45 @@ function annotationOverlayColor(text) {
 function clearGameOverlay() {
   if (hasAlt1() && typeof window.alt1.overLayClearGroup === "function") {
     window.alt1.overLayClearGroup("dungeons-alt1");
+    window.alt1.overLayClearGroup("dungeons-alt1-test");
+  }
+}
+
+function updateOverlayStatus(text = "") {
+  if (!elements.overlayStatus) return;
+  if (text) {
+    elements.overlayStatus.textContent = text;
+    return;
+  }
+  if (!hasAlt1()) {
+    elements.overlayStatus.textContent = "Native overlay unavailable in a browser";
+    return;
+  }
+  const api = window.alt1;
+  if (!api.rsLinked) {
+    elements.overlayStatus.textContent = "Native overlay waiting for RuneScape";
+  } else if (api.permissionOverlay === false) {
+    elements.overlayStatus.textContent = "Native overlay permission is missing; reinstall the app";
+  } else if (typeof api.overLayTextEx !== "function" || typeof api.overLayRect !== "function") {
+    elements.overlayStatus.textContent = "This Alt1 version does not expose the native overlay API";
+  } else if (state.calibration) {
+    elements.overlayStatus.textContent = `Native overlay ready at ${state.calibration.x},${state.calibration.y} · ${state.annotations.size} label(s)`;
+  } else {
+    elements.overlayStatus.textContent = "Native overlay ready; waiting for map calibration";
   }
 }
 
 function renderGameOverlay() {
+  updateOverlayStatus();
   if (!hasAlt1() || typeof window.alt1.overLayClearGroup !== "function") return;
   const api = window.alt1;
   const group = "dungeons-alt1";
   api.overLaySetGroup(group);
-  const canFreeze = typeof api.overLayFreezeGroup === "function" && typeof api.overLayRefreshGroup === "function";
-  if (canFreeze) api.overLayFreezeGroup(group);
+  const canBatch = typeof api.overLayFreezeGroup === "function" && typeof api.overLayContinueGroup === "function";
+  if (canBatch) api.overLayFreezeGroup(group);
   api.overLayClearGroup(group);
   if (!elements.gameOverlay.checked || !state.calibration || !state.gameMap || api.permissionOverlay === false) {
-    if (canFreeze) api.overLayRefreshGroup(group);
+    if (canBatch) api.overLayContinueGroup(group);
     return;
   }
 
@@ -470,15 +499,48 @@ function renderGameOverlay() {
     const origin = mapToImage(point, state.gameMap.floor);
     const centerX = mapX + origin.x + ROOM_SIZE / 2;
     const centerY = mapY + origin.y + ROOM_SIZE / 2;
-    api.overLayRect(mixColor(0, 0, 0, 135), centerX - 13, centerY - 8, 26, 16, 1500, 1);
-    api.overLayTextEx(annotation, annotationOverlayColor(annotation), 12, centerX, centerY, 1500, "Consolas", true, true);
+    api.overLayRect(mixColor(0, 0, 0, 180), centerX - 13, centerY - 8, 26, 16, OVERLAY_DURATION, 2);
+    api.overLayTextEx(annotation, annotationOverlayColor(annotation), 12, centerX, centerY, OVERLAY_DURATION, "Arial", true, true);
   }
   for (const pointKey of state.manualCritical) {
     const origin = mapToImage(pointFromKey(pointKey), state.gameMap.floor);
-    api.overLayRect(mixColor(60, 220, 238, 220), mapX + origin.x + 2, mapY + origin.y + 2, 28, 28, 1500, 2);
+    api.overLayRect(mixColor(60, 220, 238, 220), mapX + origin.x + 2, mapY + origin.y + 2, 28, 28, OVERLAY_DURATION, 2);
   }
-  api.overLayTextEx(elements.stats.textContent, mixColor(225, 238, 239, 235), 11, mapX, mapY + state.calibration.floor.imageHeight + 4, 1500, "Segoe UI", false, true);
-  if (canFreeze) api.overLayRefreshGroup(group);
+  api.overLayTextEx(elements.stats.textContent, mixColor(225, 238, 239, 235), 11, mapX, mapY + state.calibration.floor.imageHeight + 4, OVERLAY_DURATION, "Arial", false, true);
+  if (canBatch) api.overLayContinueGroup(group);
+}
+
+function testGameOverlay() {
+  updateOverlayStatus();
+  if (!hasAlt1()) return;
+  const api = window.alt1;
+  if (!api.rsLinked) {
+    updateOverlayStatus("Test failed: Alt1 is not linked to RuneScape");
+    return;
+  }
+  if (api.permissionOverlay === false) {
+    updateOverlayStatus("Test failed: native overlay permission is missing; reinstall the app");
+    return;
+  }
+  if (typeof api.overLaySetGroup !== "function" || typeof api.overLayClearGroup !== "function"
+    || typeof api.overLayRect !== "function" || typeof api.overLayTextEx !== "function") {
+    updateOverlayStatus("Test failed: native overlay API unavailable");
+    return;
+  }
+
+  const group = "dungeons-alt1-test";
+  const x = state.calibration?.x ?? Math.max(20, Math.round(api.rsWidth / 2) - 140);
+  const y = state.calibration?.y ?? Math.max(20, Math.round(api.rsHeight / 2) - 50);
+  const width = state.calibration?.floor.imageWidth ?? 280;
+  const height = state.calibration?.floor.imageHeight ?? 100;
+  api.overLaySetGroup(group);
+  api.overLayClearGroup(group);
+  const rectangleDrawn = api.overLayRect(mixColor(255, 0, 255, 255), x, y, width, height, 8000, 4);
+  const textDrawn = api.overLayTextEx("DUNGEONS NATIVE OVERLAY TEST", mixColor(255, 255, 0, 255), 18,
+    x + width / 2, y + 18, 8000, "Arial", true, true);
+  updateOverlayStatus(rectangleDrawn === false || textDrawn === false
+    ? "Alt1 rejected the native overlay test"
+    : "Test sent: look for a pink box on the RuneScape map (8 seconds)");
 }
 
 function selectPoint(point) {
@@ -611,6 +673,7 @@ function bindEvents() {
   elements.showCapture.addEventListener("change", render);
   elements.showGrid.addEventListener("change", render);
   elements.gameOverlay.addEventListener("change", renderGameOverlay);
+  elements.testOverlay.addEventListener("click", testGameOverlay);
   window.addEventListener("beforeunload", clearGameOverlay);
   elements.applyAnnotation.addEventListener("click", () => setSelectedAnnotation(elements.annotation.value));
   elements.annotation.addEventListener("keydown", (event) => {
@@ -714,6 +777,7 @@ function initialize() {
     elements.environment.textContent = "Browser preview";
     setStatus("Open this app in Alt1; a browser cannot read RuneScape pixels", "warn");
   }
+  updateOverlayStatus();
   scanLoop();
 }
 

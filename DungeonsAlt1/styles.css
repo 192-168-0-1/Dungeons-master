@@ -210,6 +210,19 @@ summary {
 .options label { display: flex; gap: 7px; align-items: center; }
 .options input { min-height: auto; }
 
+.overlay-tools {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding-top: 2px;
+}
+
+.overlay-tools small {
+  flex: 1 1 160px;
+  color: var(--muted);
+}
+
 .team-grid {
   display: grid;
   grid-template-columns: 48px minmax(0, 1fr);
