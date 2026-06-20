@@ -223,6 +223,12 @@ function updateLocalGatestones(next) {
   state.localGatestones = next;
 }
 
+function clearTeamGatestones() {
+  if (!state.teamGatestones.size) return;
+  state.teamGatestones.clear();
+  render();
+}
+
 function updateStats() {
   if (!state.gameMap) {
     elements.stats.textContent = "No map read yet";
@@ -728,19 +734,21 @@ function bindEvents() {
   });
 
   elements.teamCreate.addEventListener("click", () => {
+    clearTeamGatestones();
     elements.teamRoom.value = createRoomCode();
     elements.teamRoom.value = teamSync.connect(elements.teamRoom.value, elements.teamName.value);
   });
   elements.teamJoin.addEventListener("click", () => {
+    clearTeamGatestones();
     elements.teamRoom.value = teamSync.connect(elements.teamRoom.value, elements.teamName.value);
   });
   elements.teamDisconnect.addEventListener("click", () => {
     teamSync.disconnect();
-    state.teamGatestones.clear();
-    render();
+    clearTeamGatestones();
   });
   teamSync.addEventListener("status", (event) => { elements.teamStatus.textContent = event.detail; });
   teamSync.addEventListener("connected", sendTeamSnapshot);
+  teamSync.addEventListener("disconnected", clearTeamGatestones);
   teamSync.addEventListener("hello", sendTeamSnapshot);
   teamSync.addEventListener("annotation", (event) => {
     const { point, text } = event.detail;

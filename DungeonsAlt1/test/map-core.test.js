@@ -98,3 +98,17 @@ test("player-arrow pixels are excluded while real G2 pixels remain detectable", 
   for (const x of [9, 10, 11]) setPixel(gateImage, gateOrigin.x + x, gateOrigin.y + 9, [80, 20, 25, 255]);
   assert.deepEqual(detectGatestones(gateImage, readGameMap(gateImage, floor))[2], { x: 0, y: 0 });
 });
+
+test("group-gatestone palette pixels are not detected as personal G1", () => {
+  const floor = FLOOR_SIZES.find((candidate) => candidate.name === "Small");
+  const target = image(floor.imageWidth, floor.imageHeight);
+  const [signature] = [...SIGNATURES.entries()].find(([, type]) => type === RoomType.E);
+  const origin = mapToImage({ x: 0, y: 0 }, floor);
+  paintSignature(target, origin, signature);
+
+  // Bucket 0x05080A occurs in GroupGatestone.png and also satisfies the broad
+  // teal G1 range. It must lower the score rather than create a false G1.
+  for (const x of [9, 10, 11, 12]) setPixel(target, origin.x + x, origin.y + 9, [80, 128, 160, 255]);
+
+  assert.equal(detectGatestones(target, readGameMap(target, floor))[1], undefined);
+});
