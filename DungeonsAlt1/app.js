@@ -433,19 +433,22 @@ function drawSelection(floor) {
   context.restore();
 }
 
-function mixColor(r, g, b, a = 255) {
-  return (b << 0) + (g << 8) + (r << 16) + (a << 24);
+function mixColor(r, g, b) {
+  // Alt1's native overlay expects the same 24-bit RGB integer used by a1lib's
+  // mixColor. Do not include an alpha channel here: ARGB values can become
+  // negative JavaScript integers and make Alt1 ignore the draw call.
+  return (r << 16) + (g << 8) + b;
 }
 
 function annotationOverlayColor(text) {
   const value = String(text || "").toLowerCase();
-  if (value.startsWith("go")) return mixColor(255, 215, 0, 255);
-  if (value.startsWith("gr")) return mixColor(100, 255, 100, 255);
-  if (value.startsWith("o")) return mixColor(255, 165, 0, 255);
-  if (value.startsWith("y")) return mixColor(255, 240, 70, 255);
-  if (value.startsWith("b")) return mixColor(105, 200, 255, 255);
-  if (value.startsWith("p")) return mixColor(220, 175, 255, 255);
-  return mixColor(240, 245, 245, 255);
+  if (value.startsWith("go")) return mixColor(255, 215, 0);
+  if (value.startsWith("gr")) return mixColor(100, 255, 100);
+  if (value.startsWith("o")) return mixColor(255, 165, 0);
+  if (value.startsWith("y")) return mixColor(255, 240, 70);
+  if (value.startsWith("b")) return mixColor(105, 200, 255);
+  if (value.startsWith("p")) return mixColor(220, 175, 255);
+  return mixColor(240, 245, 245);
 }
 
 function clearGameOverlay() {
@@ -455,6 +458,14 @@ function clearGameOverlay() {
       if (typeof window.alt1.overLayRefreshGroup === "function") window.alt1.overLayRefreshGroup(group);
     }
   }
+}
+
+function clientToOverlay(point) {
+  const api = window.alt1;
+  return {
+    x: Math.round((Number(api.rsX) || 0) + point.x),
+    y: Math.round((Number(api.rsY) || 0) + point.y),
+  };
 }
 
 // Mirrors Clue Trainer's working overlay lifecycle: keep the group frozen to
@@ -510,11 +521,12 @@ function renderGameOverlay() {
     return;
   }
 
-  // Alt1's native overlay calls use coordinates relative to the linked
-  // RuneScape client, exactly like pixel capture. rsX/rsY are absolute screen
-  // coordinates and adding them here moves labels away from the game map.
-  const mapX = Math.round(state.calibration.x);
-  const mapY = Math.round(state.calibration.y);
+  // Pixel capture uses RuneScape-client-relative coordinates, but Alt1's
+  // native overlay is drawn in screen coordinates. Convert once so labels land
+  // on the same in-game map that was captured and read.
+  const mapOrigin = clientToOverlay(state.calibration);
+  const mapX = mapOrigin.x;
+  const mapY = mapOrigin.y;
   drawOverlayGroup(group, () => {
     for (const [pointKey, annotation] of state.annotations) {
       if (!annotation) continue;
@@ -523,16 +535,16 @@ function renderGameOverlay() {
       const origin = mapToImage(point, state.gameMap.floor);
       const centerX = Math.round(mapX + origin.x + ROOM_SIZE / 2);
       const centerY = Math.round(mapY + origin.y + ROOM_SIZE / 2);
-      api.overLayRect(mixColor(1, 1, 1, 180), centerX - 13, centerY - 8, 26, 16, OVERLAY_DURATION, 2);
+      api.overLayRect(mixColor(1, 1, 1), centerX - 13, centerY - 8, 26, 16, OVERLAY_DURATION, 2);
       api.overLayTextEx(annotation, annotationOverlayColor(annotation), 12, centerX, centerY,
         OVERLAY_DURATION, undefined, true, true);
     }
     for (const pointKey of state.manualCritical) {
       const origin = mapToImage(pointFromKey(pointKey), state.gameMap.floor);
-      api.overLayRect(mixColor(60, 220, 238, 220), Math.round(mapX + origin.x + 2),
+      api.overLayRect(mixColor(60, 220, 238), Math.round(mapX + origin.x + 2),
         Math.round(mapY + origin.y + 2), 28, 28, OVERLAY_DURATION, 2);
     }
-    api.overLayTextEx(elements.stats.textContent, mixColor(225, 238, 239, 235), 11, mapX,
+    api.overLayTextEx(elements.stats.textContent, mixColor(225, 238, 239), 11, mapX,
       Math.round(mapY + state.calibration.floor.imageHeight + 4), OVERLAY_DURATION, undefined, false, true);
   });
 }
@@ -556,15 +568,20 @@ function testGameOverlay() {
   }
 
   const group = "dungeons-alt1-test";
-  const x = Math.round(state.calibration?.x ?? Math.max(20, api.rsWidth / 2 - 140));
-  const y = Math.round(state.calibration?.y ?? Math.max(20, api.rsHeight / 2 - 50));
+  const clientPoint = {
+    x: state.calibration?.x ?? Math.max(20, api.rsWidth / 2 - 140),
+    y: state.calibration?.y ?? Math.max(20, api.rsHeight / 2 - 50),
+  };
+  const overlayPoint = clientToOverlay(clientPoint);
+  const x = overlayPoint.x;
+  const y = overlayPoint.y;
   const width = Math.round(state.calibration?.floor.imageWidth ?? 280);
   const height = Math.round(state.calibration?.floor.imageHeight ?? 100);
   let rectangleDrawn;
   let textDrawn;
   drawOverlayGroup(group, () => {
-    rectangleDrawn = api.overLayRect(mixColor(255, 0, 255, 255), x, y, width, height, 8000, 4);
-    textDrawn = api.overLayTextEx("DUNGEONS NATIVE OVERLAY TEST", mixColor(255, 255, 0, 255), 18,
+    rectangleDrawn = api.overLayRect(mixColor(255, 0, 255), x, y, width, height, 8000, 4);
+    textDrawn = api.overLayTextEx("DUNGEONS NATIVE OVERLAY TEST", mixColor(255, 255, 0), 18,
       Math.round(x + width / 2), y + 18, 8000, undefined, true, true);
   });
   updateOverlayStatus(rectangleDrawn === false || textDrawn === false
