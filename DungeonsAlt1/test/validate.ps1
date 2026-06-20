@@ -50,6 +50,13 @@ if ($missingDomIds.Count -ne 0) {
     throw "Missing DOM ids: $($missingDomIds -join ', ')"
 }
 
+if ($app -match 'api\.rs[XY]\s*\+\s*state\.calibration') {
+    throw 'Native Alt1 overlays must use RuneScape-client-relative coordinates, not rsX/rsY screen offsets.'
+}
+if ($app -notmatch 'overLayRefreshGroup') {
+    throw 'Native Alt1 overlay groups must be explicitly refreshed after drawing.'
+}
+
 $manifest = Get-Content (Join-Path $appRoot 'appconfig.json') -Raw | ConvertFrom-Json
 foreach ($relativePath in $manifest.appUrl, $manifest.configUrl, $manifest.iconUrl) {
     if (-not (Test-Path (Join-Path $appRoot $relativePath))) {
@@ -69,4 +76,3 @@ if ($missingAssets.Count -ne 0) {
 }
 
 Write-Output "Validated $($signatureMatches.Count) room signatures, $($domIds.Count) DOM references, the Alt1 manifest and $($ocrAssets.Count) OCR assets."
-

@@ -449,13 +449,20 @@ function renderGameOverlay() {
   if (!hasAlt1() || typeof window.alt1.overLayClearGroup !== "function") return;
   const api = window.alt1;
   const group = "dungeons-alt1";
-  api.overLayClearGroup(group);
-  if (!elements.gameOverlay.checked || !state.calibration || !state.gameMap || api.permissionOverlay === false) return;
   api.overLaySetGroup(group);
-  const canFreeze = typeof api.overLayFreezeGroup === "function" && typeof api.overLayContinueGroup === "function";
+  const canFreeze = typeof api.overLayFreezeGroup === "function" && typeof api.overLayRefreshGroup === "function";
   if (canFreeze) api.overLayFreezeGroup(group);
-  const mapX = api.rsX + state.calibration.x;
-  const mapY = api.rsY + state.calibration.y;
+  api.overLayClearGroup(group);
+  if (!elements.gameOverlay.checked || !state.calibration || !state.gameMap || api.permissionOverlay === false) {
+    if (canFreeze) api.overLayRefreshGroup(group);
+    return;
+  }
+
+  // Alt1's native overlay calls use coordinates relative to the linked
+  // RuneScape client, exactly like pixel capture. rsX/rsY are absolute screen
+  // coordinates and adding them here moves labels away from the game map.
+  const mapX = state.calibration.x;
+  const mapY = state.calibration.y;
   for (const [pointKey, annotation] of state.annotations) {
     if (!annotation) continue;
     const point = pointFromKey(pointKey);
@@ -471,7 +478,7 @@ function renderGameOverlay() {
     api.overLayRect(mixColor(60, 220, 238, 220), mapX + origin.x + 2, mapY + origin.y + 2, 28, 28, 1500, 2);
   }
   api.overLayTextEx(elements.stats.textContent, mixColor(225, 238, 239, 235), 11, mapX, mapY + state.calibration.floor.imageHeight + 4, 1500, "Segoe UI", false, true);
-  if (canFreeze) api.overLayContinueGroup(group);
+  if (canFreeze) api.overLayRefreshGroup(group);
 }
 
 function selectPoint(point) {
