@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101619">
+  <title>Dungeons Alt1</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header class="titlebar">
+    <div class="brand-mark" aria-hidden="true">D</div>
+    <div>
+      <strong>Dungeons</strong>
+      <small id="environment">Loading…</small>
+    </div>
+    <a id="install-link" class="install-link" href="#">Install</a>
+  </header>
+
+  <main>
+    <div id="status" class="status" role="status">Initializing…</div>
+    <div id="stats" class="stats">No map read yet</div>
+
+    <div class="map-shell">
+      <canvas id="map" width="280" height="280" tabindex="0" aria-label="Dungeoneering map"></canvas>
+    </div>
+
+    <div class="toolbar" aria-label="Map actions">
+      <button id="calibrate" type="button">Calibrate</button>
+      <button id="pause" type="button">Pause</button>
+      <button id="save" type="button">Save PNG</button>
+      <button id="clear" type="button">Clear markings</button>
+      <button id="capture-results" type="button">Read results screen</button>
+    </div>
+
+    <section class="selection-panel" aria-labelledby="selection">
+      <div>
+        <strong id="selection">No room selected</strong>
+        <small>Click a room; right-click marks it as critical.</small>
+      </div>
+      <div class="annotation-row">
+        <label for="annotation">Label</label>
+        <input id="annotation" maxlength="4" autocomplete="off" spellcheck="false" placeholder="b, go…">
+        <button id="apply-annotation" type="button">Apply</button>
+      </div>
+    </section>
+
+    <details>
+      <summary>Display</summary>
+      <div class="options">
+        <label><input id="show-capture" type="checkbox" checked> Show original map</label>
+        <label><input id="show-grid" type="checkbox" checked> Show grid</label>
+        <label><input id="game-overlay" type="checkbox" checked> Draw labels in game</label>
+      </div>
+    </details>
+
+    <details>
+      <summary>Dungeon results</summary>
+      <div class="results-panel">
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Timestamp</th><th>Time</th><th>Floor</th><th>Floor XP</th><th>Prestige XP</th><th>Base XP</th>
+                <th>Size</th><th>Size mod</th><th>Bonus</th><th>Difficulty</th><th>Level</th><th>XP boost</th>
+                <th>Total mod</th><th>Final XP</th><th>Rooms</th><th>Dead ends</th>
+              </tr>
+            </thead>
+            <tbody id="results-body"></tbody>
+          </table>
+        </div>
+        <button id="copy-results" type="button">Copy table</button>
+      </div>
+    </details>
+
+    <details>
+      <summary>Team-sync</summary>
+      <div class="team-grid">
+        <label for="team-name">RSN</label>
+        <input id="team-name" maxlength="24" autocomplete="nickname" placeholder="Your name">
+        <label for="team-room">Room</label>
+        <input id="team-room" maxlength="12" autocomplete="off" spellcheck="false">
+        <div class="team-buttons">
+          <button id="team-create" type="button">New room</button>
+          <button id="team-join" type="button">Join</button>
+          <button id="team-disconnect" type="button">Disconnect</button>
+        </div>
+        <small id="team-status">Team-sync offline</small>
+      </div>
+    </details>
+  </main>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

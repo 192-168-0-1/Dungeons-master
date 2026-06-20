@@ -1,0 +1,16 @@
+{
+  "appName": "Dungeons",
+  "description": "Dungeoneering map reader, room counter, annotations and team sync for Alt1.",
+  "appUrl": "./index.html",
+  "configUrl": "./appconfig.json",
+  "iconUrl": "./icon.png",
+  "defaultWidth": 360,
+  "defaultHeight": 620,
+  "minWidth": 300,
+  "minHeight": 380,
+  "maxWidth": 900,
+  "maxHeight": 1000,
+  "requestHandlers": [],
+  "activators": [],
+  "permissions": "pixel, overlay, gamestate"
+}
