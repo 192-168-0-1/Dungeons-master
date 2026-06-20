@@ -53,8 +53,11 @@ if ($missingDomIds.Count -ne 0) {
 if ($app -match 'api\.rs[XY]\s*\+\s*state\.calibration') {
     throw 'Native Alt1 overlays must use RuneScape-client-relative coordinates, not rsX/rsY screen offsets.'
 }
-if ($app -notmatch 'overLayRefreshGroup') {
-    throw 'Native Alt1 overlay groups must be explicitly refreshed after drawing.'
+if ($app -notmatch 'overLayContinueGroup') {
+    throw 'Native Alt1 overlay groups must resume drawing after a batched update.'
+}
+if ($app -match 'overLayRefreshGroup') {
+    throw 'Native Alt1 overlays must not remain frozen after a one-frame group refresh.'
 }
 
 $manifest = Get-Content (Join-Path $appRoot 'appconfig.json') -Raw | ConvertFrom-Json
