@@ -77,6 +77,13 @@ if (-not $webPalette.SetEquals($assetPalette)) {
     throw "Group gatestone palette mismatch. Web=$($webPalette.Count), asset=$($assetPalette.Count)"
 }
 
+if (($mapCore -notmatch 'function isBossMarkerAt\(image, originX, originY\)') -or
+    ($mapCore -notmatch 'BOSS_RED_PROBES') -or
+    ($mapCore -notmatch 'BOSS_JAW_PROBES') -or
+    ($mapCore -notmatch 'BOSS_HOLE_PROBES')) {
+    throw 'Shift-tolerant boss-skull detection is missing from map-core.js.'
+}
+
 $html = Get-Content (Join-Path $appRoot 'index.html') -Raw
 $app = Get-Content (Join-Path $appRoot 'app.js') -Raw
 $overlay = Get-Content (Join-Path $appRoot 'src\alt1-overlay.js') -Raw

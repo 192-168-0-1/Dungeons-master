@@ -23,6 +23,23 @@ function paintSignature(target, origin, signature) {
   });
 }
 
+const BOSS_RED_PROBES = [
+  [11, 5], [20, 5], [10, 6], [21, 6], [9, 8], [22, 8],
+  [8, 11], [23, 11], [23, 13], [14, 18], [17, 18],
+];
+const BOSS_JAW_PROBES = [
+  [13, 9], [18, 9], [8, 13], [11, 22], [20, 22], [14, 25], [17, 25],
+];
+
+function paintBossMarker(target, origin, offsetX, offsetY) {
+  for (const [x, y] of BOSS_RED_PROBES) {
+    setPixel(target, origin.x + x + offsetX, origin.y + y + offsetY, [63, 20, 13, 255]);
+  }
+  for (const [x, y] of BOSS_JAW_PROBES) {
+    setPixel(target, origin.x + x + offsetX, origin.y + y + offsetY, [39, 32, 17, 255]);
+  }
+}
+
 test("calibration finds a large map by its four corners", () => {
   const target = image(700, 500);
   const floor = FLOOR_SIZES.find((candidate) => candidate.name === "Large");
@@ -80,6 +97,23 @@ test("boss-room red pixels are not detected as G2", () => {
   const gameMap = readGameMap(target, floor);
   assert.ok(gameMap.typeAt(0, 0) & RoomType.Boss);
   assert.equal(detectGatestones(target, gameMap)[2], undefined);
+});
+
+test("shifted boss skulls are excluded from G2 detection", () => {
+  const floor = FLOOR_SIZES.find((candidate) => candidate.name === "Small");
+  const [signature] = [...SIGNATURES.entries()].find(([, type]) => type === RoomType.E);
+
+  for (const [offsetX, offsetY] of [[-2, -1], [-1, 2], [1, -2], [2, 1]]) {
+    const target = image(floor.imageWidth, floor.imageHeight);
+    const origin = mapToImage({ x: 0, y: 0 }, floor);
+    paintSignature(target, origin, signature);
+    paintBossMarker(target, origin, offsetX, offsetY);
+
+    const gameMap = readGameMap(target, floor);
+    assert.ok(gameMap.typeAt(0, 0) & RoomType.Boss,
+      `boss marker at offset ${offsetX},${offsetY} should classify the room as boss`);
+    assert.equal(detectGatestones(target, gameMap)[2], undefined);
+  }
 });
 
 test("player-arrow pixels are excluded while real G2 pixels remain detectable", () => {

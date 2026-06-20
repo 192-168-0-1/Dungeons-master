@@ -187,12 +187,69 @@ function signatureAt(image, originX, originY) {
     .join(";");
 }
 
+// Shape probes sampled from Common/Resources/BossOverlay.png. The live boss
+// skull may move a couple of pixels relative to the room grid, so relying on
+// one exact pixel lets its dark-red outline win the G2 score. Combining the
+// symmetric outline, brown jaw and transparent eye sockets distinguishes the
+// skull from a real red gatestone while tolerating small capture offsets.
+const BOSS_RED_PROBES = Object.freeze([
+  [11, 5], [20, 5], [10, 6], [21, 6], [9, 8], [22, 8],
+  [8, 11], [23, 11], [23, 13], [14, 18], [17, 18],
+]);
+const BOSS_JAW_PROBES = Object.freeze([
+  [13, 9], [18, 9], [8, 13], [11, 22], [20, 22], [14, 25], [17, 25],
+]);
+const BOSS_HOLE_PROBES = Object.freeze([
+  [13, 11], [18, 11], [15, 15], [16, 15],
+]);
+
+function isBossRedPixel(color) {
+  return color[3] > 200
+    && color[0] >= 45 && color[0] <= 145
+    && color[1] >= 10 && color[1] <= 70
+    && color[2] >= 8 && color[2] <= 55
+    && color[0] - color[1] >= 25
+    && color[0] - color[2] >= 30;
+}
+
+function isBossJawPixel(color) {
+  return color[3] > 200
+    && color[0] >= 25 && color[0] <= 65
+    && color[1] >= 20 && color[1] <= 50
+    && color[2] >= 10 && color[2] <= 30
+    && Math.abs(color[0] - color[1]) <= 20
+    && color[0] - color[2] >= 10;
+}
+
+function countProbeMatches(image, originX, originY, offsetX, offsetY, probes, predicate) {
+  return probes.reduce((count, [x, y]) => count
+    + (predicate(getPixel(image, originX + x + offsetX, originY + y + offsetY)) ? 1 : 0), 0);
+}
+
+function isBossMarkerAt(image, originX, originY) {
+  for (let offsetY = -2; offsetY <= 2; offsetY += 1) {
+    for (let offsetX = -2; offsetX <= 2; offsetX += 1) {
+      const redMatches = countProbeMatches(image, originX, originY, offsetX, offsetY,
+        BOSS_RED_PROBES, isBossRedPixel);
+      if (redMatches < 8) continue;
+      const jawMatches = countProbeMatches(image, originX, originY, offsetX, offsetY,
+        BOSS_JAW_PROBES, isBossJawPixel);
+      if (jawMatches < 4) continue;
+      const filledHoles = countProbeMatches(image, originX, originY, offsetX, offsetY,
+        BOSS_HOLE_PROBES, isBossRedPixel);
+      if (filledHoles <= 1) return true;
+    }
+  }
+  return false;
+}
+
 export function readRoom(image, originX, originY) {
   let type = SIGNATURES.get(signatureAt(image, originX, originY)) ?? RoomType.Gap;
   const base = getPixel(image, originX + 19, originY + 18);
   const boss = getPixel(image, originX + 8, originY + 11);
   if (base[0] === 150 && base[1] === 145 && base[2] === 105) type |= RoomType.Base;
-  else if (boss[0] === 63 && boss[1] === 20 && boss[2] === 13) type |= RoomType.Boss;
+  else if ((boss[0] === 63 && boss[1] === 20 && boss[2] === 13)
+    || isBossMarkerAt(image, originX, originY)) type |= RoomType.Boss;
   return type;
 }
 
