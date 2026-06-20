@@ -320,17 +320,22 @@ export function detectGatestones(image, gameMap) {
   const best = { 1: null, 2: null };
   for (let y = 0; y < gameMap.floor.height; y += 1) {
     for (let x = 0; x < gameMap.floor.width; x += 1) {
-      if (!isOpened(gameMap.typeAt(x, y))) continue;
+      const roomType = gameMap.typeAt(x, y);
+      // The dark red boss marker shares colors with G2. A personal gatestone
+      // is not useful in the boss room, so exclude that room completely.
+      if (!isOpened(roomType) || (roomType & RoomType.Boss)) continue;
       const origin = mapToImage({ x, y }, gameMap.floor);
       let one = 0;
       let two = 0;
       for (let py = origin.y + 8; py < origin.y + ROOM_SIZE - 5; py += 1) {
         for (let px = origin.x + 8; px < origin.x + ROOM_SIZE - 8; px += 1) {
           const color = getPixel(image, px, py);
+          // Player arrows can overlap the G2 red/brown color range. Classify
+          // them first and never let those pixels contribute to a gate score.
+          if (isPlayerArrowPixel(color)) continue;
+          if (isBrightMapMarkerPixel(color)) { one -= 2; two -= 2; continue; }
           if (isFirstGatestonePixel(color)) one += 1;
           if (isSecondGatestonePixel(color)) two += 1;
-          if (isBrightMapMarkerPixel(color)) { one -= 2; two -= 2; }
-          if (isPlayerArrowPixel(color)) two -= 4;
         }
       }
       if (!best[1] || one > best[1].score) best[1] = { x, y, score: Math.max(0, one) };

@@ -428,6 +428,23 @@ function mixColor(r, g, b, a = 255) {
   return (b << 0) + (g << 8) + (r << 16) + (a << 24);
 }
 
+function annotationOverlayColor(text) {
+  const value = String(text || "").toLowerCase();
+  if (value.startsWith("go")) return mixColor(255, 215, 0, 255);
+  if (value.startsWith("gr")) return mixColor(100, 255, 100, 255);
+  if (value.startsWith("o")) return mixColor(255, 165, 0, 255);
+  if (value.startsWith("y")) return mixColor(255, 240, 70, 255);
+  if (value.startsWith("b")) return mixColor(105, 200, 255, 255);
+  if (value.startsWith("p")) return mixColor(220, 175, 255, 255);
+  return mixColor(240, 245, 245, 255);
+}
+
+function clearGameOverlay() {
+  if (hasAlt1() && typeof window.alt1.overLayClearGroup === "function") {
+    window.alt1.overLayClearGroup("dungeons-alt1");
+  }
+}
+
 function renderGameOverlay() {
   if (!hasAlt1() || typeof window.alt1.overLayClearGroup !== "function") return;
   const api = window.alt1;
@@ -435,19 +452,26 @@ function renderGameOverlay() {
   api.overLayClearGroup(group);
   if (!elements.gameOverlay.checked || !state.calibration || !state.gameMap || api.permissionOverlay === false) return;
   api.overLaySetGroup(group);
+  const canFreeze = typeof api.overLayFreezeGroup === "function" && typeof api.overLayContinueGroup === "function";
+  if (canFreeze) api.overLayFreezeGroup(group);
   const mapX = api.rsX + state.calibration.x;
   const mapY = api.rsY + state.calibration.y;
   for (const [pointKey, annotation] of state.annotations) {
     if (!annotation) continue;
     const point = pointFromKey(pointKey);
+    if (!pointInFloor(point, state.gameMap.floor)) continue;
     const origin = mapToImage(point, state.gameMap.floor);
-    api.overLayTextEx(annotation, mixColor(235, 245, 245, 230), 10, mapX + origin.x + 4, mapY + origin.y + 4, 1200, "Consolas", false, true);
+    const centerX = mapX + origin.x + ROOM_SIZE / 2;
+    const centerY = mapY + origin.y + ROOM_SIZE / 2;
+    api.overLayRect(mixColor(0, 0, 0, 135), centerX - 13, centerY - 8, 26, 16, 1500, 1);
+    api.overLayTextEx(annotation, annotationOverlayColor(annotation), 12, centerX, centerY, 1500, "Consolas", true, true);
   }
   for (const pointKey of state.manualCritical) {
     const origin = mapToImage(pointFromKey(pointKey), state.gameMap.floor);
-    api.overLayRect(mixColor(60, 220, 238, 220), mapX + origin.x + 2, mapY + origin.y + 2, 28, 28, 1200, 2);
+    api.overLayRect(mixColor(60, 220, 238, 220), mapX + origin.x + 2, mapY + origin.y + 2, 28, 28, 1500, 2);
   }
-  api.overLayTextEx(elements.stats.textContent, mixColor(225, 238, 239, 235), 11, mapX, mapY + state.calibration.floor.imageHeight + 4, 1200, "Segoe UI", false, true);
+  api.overLayTextEx(elements.stats.textContent, mixColor(225, 238, 239, 235), 11, mapX, mapY + state.calibration.floor.imageHeight + 4, 1500, "Segoe UI", false, true);
+  if (canFreeze) api.overLayContinueGroup(group);
 }
 
 function selectPoint(point) {
@@ -580,6 +604,7 @@ function bindEvents() {
   elements.showCapture.addEventListener("change", render);
   elements.showGrid.addEventListener("change", render);
   elements.gameOverlay.addEventListener("change", renderGameOverlay);
+  window.addEventListener("beforeunload", clearGameOverlay);
   elements.applyAnnotation.addEventListener("click", () => setSelectedAnnotation(elements.annotation.value));
   elements.annotation.addEventListener("keydown", (event) => {
     if (event.key === "Enter") { setSelectedAnnotation(elements.annotation.value); elements.canvas.focus(); }
