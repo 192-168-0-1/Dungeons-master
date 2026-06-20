@@ -2,7 +2,7 @@ name: Deploy Dungeons Alt1 to GitHub Pages
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
     paths:
       - "DungeonsAlt1/**"
       - ".github/workflows/deploy-dungeons-alt1.yml"

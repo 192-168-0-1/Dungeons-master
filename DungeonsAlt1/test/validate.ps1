@@ -85,8 +85,14 @@ if ($missingDomIds.Count -ne 0) {
     throw "Missing DOM ids: $($missingDomIds -join ', ')"
 }
 
-if ($app -match 'api\.rs[XY]\s*\+\s*state\.calibration') {
-    throw 'Native Alt1 overlays must use RuneScape-client-relative coordinates, not rsX/rsY screen offsets.'
+if ($app -match 'api\.rs[XY]' -or $app -match 'clientToOverlay') {
+    throw 'Native Alt1 overlays must use RuneScape-client capture coordinates directly, without rsX/rsY offsets.'
+}
+if ($app -match 'overLayTextEx\([^;]*undefined') {
+    throw 'Native Alt1 overlay text must pass an explicit font string to overLayTextEx.'
+}
+if ($app -notmatch 'function mixColor\(r, g, b\)' -or $app -match 'mixColor\([^\)]*,[^\)]*,[^\)]*,[^\)]*\)') {
+    throw 'Native Alt1 overlay colors must use 24-bit RGB values without an alpha channel.'
 }
 if ($app -notmatch 'overLayFreezeGroup' -or $app -notmatch 'overLayRefreshGroup') {
     throw 'Native Alt1 overlay groups must use the proven freeze-and-refresh lifecycle.'

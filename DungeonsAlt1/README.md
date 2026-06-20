@@ -47,7 +47,7 @@ The repository includes `.github/workflows/deploy-dungeons-alt1.yml`. It publish
 1. Push the repository to GitHub.
 2. Open **Settings → Pages** in the GitHub repository.
 3. Under **Build and deployment**, set **Source** to **GitHub Actions**.
-4. Run the workflow once from **Actions**, or push a change under `DungeonsAlt1`.
+4. Run the workflow once from **Actions**, or push a change under `DungeonsAlt1` on `main` or `master`.
 5. Install the public manifest in Alt1:
 
 ```text
