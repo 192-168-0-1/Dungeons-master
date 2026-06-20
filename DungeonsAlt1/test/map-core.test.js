@@ -66,3 +66,35 @@ test("game map counts opened rooms and detects a personal gatestone", () => {
   assert.deepEqual(detectGatestones(target, gameMap)[1], { x: 0, y: 0 });
 });
 
+test("boss-room red pixels are not detected as G2", () => {
+  const floor = FLOOR_SIZES.find((candidate) => candidate.name === "Small");
+  const target = image(floor.imageWidth, floor.imageHeight);
+  const [signature] = [...SIGNATURES.entries()].find(([, type]) => type === RoomType.E);
+  const origin = mapToImage({ x: 0, y: 0 }, floor);
+  paintSignature(target, origin, signature);
+  setPixel(target, origin.x + 8, origin.y + 11, [63, 20, 13, 255]);
+  setPixel(target, origin.x + 9, origin.y + 9, [80, 20, 25, 255]);
+  setPixel(target, origin.x + 10, origin.y + 9, [80, 20, 25, 255]);
+  setPixel(target, origin.x + 11, origin.y + 9, [80, 20, 25, 255]);
+
+  const gameMap = readGameMap(target, floor);
+  assert.ok(gameMap.typeAt(0, 0) & RoomType.Boss);
+  assert.equal(detectGatestones(target, gameMap)[2], undefined);
+});
+
+test("player-arrow pixels are excluded while real G2 pixels remain detectable", () => {
+  const floor = FLOOR_SIZES.find((candidate) => candidate.name === "Small");
+  const [signature] = [...SIGNATURES.entries()].find(([, type]) => type === RoomType.E);
+
+  const arrowImage = image(floor.imageWidth, floor.imageHeight);
+  const arrowOrigin = mapToImage({ x: 0, y: 0 }, floor);
+  paintSignature(arrowImage, arrowOrigin, signature);
+  for (const x of [9, 10, 11]) setPixel(arrowImage, arrowOrigin.x + x, arrowOrigin.y + 9, [100, 30, 10, 255]);
+  assert.equal(detectGatestones(arrowImage, readGameMap(arrowImage, floor))[2], undefined);
+
+  const gateImage = image(floor.imageWidth, floor.imageHeight);
+  const gateOrigin = mapToImage({ x: 0, y: 0 }, floor);
+  paintSignature(gateImage, gateOrigin, signature);
+  for (const x of [9, 10, 11]) setPixel(gateImage, gateOrigin.x + x, gateOrigin.y + 9, [80, 20, 25, 255]);
+  assert.deepEqual(detectGatestones(gateImage, readGameMap(gateImage, floor))[2], { x: 0, y: 0 });
+});

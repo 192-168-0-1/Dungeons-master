@@ -10,8 +10,8 @@ This is the Alt1 version of the `Dungeons` project. It does not use or modify `A
 - Live room count, possible rooms, rooms per minute, dead ends and timer.
 - Original captured map or a clean abstract map view.
 - Grid, automatic critical path and manual critical markings.
-- Labels of up to four characters, including an Alt1 in-game overlay.
-- Personal gatestone detection.
+- Labels of up to four characters, drawn directly over the rooms on the RuneScape map through the native Alt1 overlay.
+- Personal gatestone detection that excludes boss-room markers and player arrows.
 - Shared team labels and gatestones through the existing WebSocket relay.
 - PNG export of the visible map.
 - Dungeoneering results-screen OCR for time, floor, modifiers, bonus and XP.
@@ -74,4 +74,3 @@ Without Node.js, validate the source assets and Alt1 manifest with:
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\test\validate.ps1
 ```
-
