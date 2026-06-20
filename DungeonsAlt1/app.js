@@ -521,12 +521,11 @@ function renderGameOverlay() {
     return;
   }
 
-  // Pixel capture uses RuneScape-client-relative coordinates, but Alt1's
-  // native overlay is drawn in screen coordinates. Convert once so labels land
-  // on the same in-game map that was captured and read.
-  const mapOrigin = clientToOverlay(state.calibration);
-  const mapX = mapOrigin.x;
-  const mapY = mapOrigin.y;
+  // Alt1 overlay coordinates use the same RuneScape-client coordinate space as
+  // pixel capture. This matches the official alt1minimal example, which passes
+  // image-match coordinates directly to overLayRect without rsX/rsY offsets.
+  const mapX = Math.round(state.calibration.x);
+  const mapY = Math.round(state.calibration.y);
   drawOverlayGroup(group, () => {
     for (const [pointKey, annotation] of state.annotations) {
       if (!annotation) continue;
@@ -537,7 +536,7 @@ function renderGameOverlay() {
       const centerY = Math.round(mapY + origin.y + ROOM_SIZE / 2);
       api.overLayRect(mixColor(1, 1, 1), centerX - 13, centerY - 8, 26, 16, OVERLAY_DURATION, 2);
       api.overLayTextEx(annotation, annotationOverlayColor(annotation), 12, centerX, centerY,
-        OVERLAY_DURATION, undefined, true, true);
+        OVERLAY_DURATION, "", true, true);
     }
     for (const pointKey of state.manualCritical) {
       const origin = mapToImage(pointFromKey(pointKey), state.gameMap.floor);
@@ -545,7 +544,7 @@ function renderGameOverlay() {
         Math.round(mapY + origin.y + 2), 28, 28, OVERLAY_DURATION, 2);
     }
     api.overLayTextEx(elements.stats.textContent, mixColor(225, 238, 239), 11, mapX,
-      Math.round(mapY + state.calibration.floor.imageHeight + 4), OVERLAY_DURATION, undefined, false, true);
+      Math.round(mapY + state.calibration.floor.imageHeight + 4), OVERLAY_DURATION, "", false, true);
   });
 }
 
@@ -582,7 +581,7 @@ function testGameOverlay() {
   drawOverlayGroup(group, () => {
     rectangleDrawn = api.overLayRect(mixColor(255, 0, 255), x, y, width, height, 8000, 4);
     textDrawn = api.overLayTextEx("DUNGEONS NATIVE OVERLAY TEST", mixColor(255, 255, 0), 18,
-      Math.round(x + width / 2), y + 18, 8000, undefined, true, true);
+      Math.round(x + width / 2), y + 18, 8000, "", true, true);
   });
   updateOverlayStatus(rectangleDrawn === false || textDrawn === false
     ? "Alt1 rejected the native overlay test"
