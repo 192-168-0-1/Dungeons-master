@@ -13,6 +13,12 @@ import {
   toChess,
 } from "./src/map-core.js";
 import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js";
+import {
+  assignGatestoneSlots,
+  buildMapOverlayCommands,
+  buildTestOverlayCommands,
+  drawOverlayGroup,
+} from "./src/alt1-overlay.js";
 import { TeamSync, createRoomCode } from "./src/team-sync.js";
 import { WinterfaceReader } from "./src/winterface.js";
 
@@ -72,6 +78,7 @@ const state = {
   autoScan: true,
   busy: false,
   lastCalibrationAttempt: 0,
+  lastOverlayReport: null,
   results: [],
 };
 
@@ -379,21 +386,9 @@ function drawAnnotations(floor) {
 }
 
 function drawGatestones(floor) {
-  for (const [index, point] of Object.entries(state.localGatestones)) {
-    drawGatestoneBadge(point, `G${index}`, "#ffd23f", "#111", floor, 0);
+  for (const marker of collectGatestoneMarkers(floor)) {
+    drawGatestoneBadge(marker.point, marker.text, marker.fill, marker.textColor, floor, marker.slot);
   }
-  const grouped = [];
-  for (const owner of state.teamGatestones.values()) {
-    for (const [index, point] of owner.locations) grouped.push({ owner, index, point });
-  }
-  grouped.forEach((marker, index) => drawGatestoneBadge(
-    marker.point,
-    String(marker.index),
-    colorForOwner(marker.owner.id),
-    "#fff",
-    floor,
-    index,
-  ));
 }
 
 function drawGatestoneBadge(point, text, fill, color, floor, slot) {
@@ -422,6 +417,38 @@ function colorForOwner(id) {
   return colors[Math.abs(hash) % colors.length];
 }
 
+function collectGatestoneMarkers(floor = state.gameMap?.floor) {
+  if (!floor) return [];
+  const markers = Object.entries(state.localGatestones)
+    .sort(([left], [right]) => Number(left) - Number(right))
+    .map(([index, point]) => ({
+      source: "local",
+      point,
+      text: `G${index}`,
+      fill: "#ffd23f",
+      textColor: "#111111",
+    }));
+
+  const owners = [...state.teamGatestones.values()]
+    .sort((left, right) => String(left.id).localeCompare(String(right.id)));
+  for (const owner of owners) {
+    const locations = [...owner.locations.entries()]
+      .sort(([left], [right]) => Number(left) - Number(right));
+    for (const [index, point] of locations) {
+      markers.push({
+        source: "team",
+        ownerId: owner.id,
+        ownerName: owner.name,
+        point,
+        text: String(index),
+        fill: colorForOwner(owner.id),
+        textColor: "#ffffff",
+      });
+    }
+  }
+  return assignGatestoneSlots(markers, floor);
+}
+
 function drawSelection(floor) {
   if (!pointInFloor(state.selected, floor)) return;
   const origin = mapToImage(state.selected, floor);
@@ -433,55 +460,12 @@ function drawSelection(floor) {
   context.restore();
 }
 
-function mixColor(r, g, b) {
-  // Alt1's native overlay expects the same 24-bit RGB integer used by a1lib's
-  // mixColor. Do not include an alpha channel here: ARGB values can become
-  // negative JavaScript integers and make Alt1 ignore the draw call.
-  return (r << 16) + (g << 8) + b;
-}
-
-function annotationOverlayColor(text) {
-  const value = String(text || "").toLowerCase();
-  if (value.startsWith("go")) return mixColor(255, 215, 0);
-  if (value.startsWith("gr")) return mixColor(100, 255, 100);
-  if (value.startsWith("o")) return mixColor(255, 165, 0);
-  if (value.startsWith("y")) return mixColor(255, 240, 70);
-  if (value.startsWith("b")) return mixColor(105, 200, 255);
-  if (value.startsWith("p")) return mixColor(220, 175, 255);
-  return mixColor(240, 245, 245);
-}
-
 function clearGameOverlay() {
   if (hasAlt1() && typeof window.alt1.overLayClearGroup === "function") {
     for (const group of ["dungeons-alt1", "dungeons-alt1-test"]) {
       window.alt1.overLayClearGroup(group);
       if (typeof window.alt1.overLayRefreshGroup === "function") window.alt1.overLayRefreshGroup(group);
     }
-  }
-}
-
-function clientToOverlay(point) {
-  const api = window.alt1;
-  return {
-    x: Math.round((Number(api.rsX) || 0) + point.x),
-    y: Math.round((Number(api.rsY) || 0) + point.y),
-  };
-}
-
-// Mirrors Clue Trainer's working overlay lifecycle: keep the group frozen to
-// avoid flicker, replace its draw calls, reset the active group and explicitly
-// refresh the frozen group once.
-function drawOverlayGroup(group, draw) {
-  const api = window.alt1;
-  const canFreeze = typeof api.overLayFreezeGroup === "function" && typeof api.overLayRefreshGroup === "function";
-  if (canFreeze) api.overLayFreezeGroup(group);
-  api.overLayClearGroup(group);
-  api.overLaySetGroup(group);
-  try {
-    draw();
-  } finally {
-    api.overLaySetGroup("");
-    if (canFreeze) api.overLayRefreshGroup(group);
   }
 }
 
@@ -497,55 +481,58 @@ function updateOverlayStatus(text = "") {
   }
   const api = window.alt1;
   const permission = api.permissionOverlay === true ? "yes" : api.permissionOverlay === false ? "no" : "unknown";
+  const markers = collectGatestoneMarkers();
+  const localCount = markers.filter((marker) => marker.source === "local").length;
+  const teamCount = markers.filter((marker) => marker.source === "team").length;
   if (!api.rsLinked) {
-    elements.overlayStatus.textContent = `Native overlay waiting for RuneScape · permission ${permission}`;
+    elements.overlayStatus.textContent = `Native overlay waiting for RuneScape | permission ${permission}`;
   } else if (api.permissionOverlay === false) {
     elements.overlayStatus.textContent = "Native overlay permission is missing; reinstall the app";
   } else if (typeof api.overLayTextEx !== "function" || typeof api.overLayRect !== "function") {
     elements.overlayStatus.textContent = "This Alt1 version does not expose the native overlay API";
   } else if (state.calibration) {
-    elements.overlayStatus.textContent = `Native overlay permission ${permission} · map ${state.calibration.x},${state.calibration.y} · ${state.annotations.size} label(s)`;
+    const report = state.lastOverlayReport;
+    const delivery = report?.rejected
+      ? ` | rejected ${report.rejected}/${report.sent}`
+      : report ? ` | sent ${report.sent}` : "";
+    elements.overlayStatus.textContent = `Native overlay permission ${permission} | map ${state.calibration.x},${state.calibration.y}`
+      + ` | labels ${state.annotations.size} | local gates ${localCount} | team gates ${teamCount}${delivery}`;
   } else {
-    elements.overlayStatus.textContent = `Native overlay permission ${permission} · waiting for map calibration`;
+    elements.overlayStatus.textContent = `Native overlay permission ${permission} | waiting for map calibration`;
   }
 }
 
 function renderGameOverlay() {
-  updateOverlayStatus();
-  if (!hasAlt1() || typeof window.alt1.overLayClearGroup !== "function"
-    || typeof window.alt1.overLaySetGroup !== "function") return;
+  if (!hasAlt1()) {
+    updateOverlayStatus();
+    return;
+  }
   const api = window.alt1;
+  if (typeof api.overLayClearGroup !== "function" || typeof api.overLaySetGroup !== "function") {
+    updateOverlayStatus();
+    return;
+  }
   const group = "dungeons-alt1";
   if (!elements.gameOverlay.checked || !state.calibration || !state.gameMap || api.permissionOverlay === false) {
-    drawOverlayGroup(group, () => {});
+    state.lastOverlayReport = drawOverlayGroup(api, group, []);
+    updateOverlayStatus();
     return;
   }
 
-  // Alt1 overlay coordinates use the same RuneScape-client coordinate space as
-  // pixel capture. This matches the official alt1minimal example, which passes
-  // image-match coordinates directly to overLayRect without rsX/rsY offsets.
-  const mapX = Math.round(state.calibration.x);
-  const mapY = Math.round(state.calibration.y);
-  drawOverlayGroup(group, () => {
-    for (const [pointKey, annotation] of state.annotations) {
-      if (!annotation) continue;
-      const point = pointFromKey(pointKey);
-      if (!pointInFloor(point, state.gameMap.floor)) continue;
-      const origin = mapToImage(point, state.gameMap.floor);
-      const centerX = Math.round(mapX + origin.x + ROOM_SIZE / 2);
-      const centerY = Math.round(mapY + origin.y + ROOM_SIZE / 2);
-      api.overLayRect(mixColor(1, 1, 1), centerX - 13, centerY - 8, 26, 16, OVERLAY_DURATION, 2);
-      api.overLayTextEx(annotation, annotationOverlayColor(annotation), 12, centerX, centerY,
-        OVERLAY_DURATION, "", true, true);
-    }
-    for (const pointKey of state.manualCritical) {
-      const origin = mapToImage(pointFromKey(pointKey), state.gameMap.floor);
-      api.overLayRect(mixColor(60, 220, 238), Math.round(mapX + origin.x + 2),
-        Math.round(mapY + origin.y + 2), 28, 28, OVERLAY_DURATION, 2);
-    }
-    api.overLayTextEx(elements.stats.textContent, mixColor(225, 238, 239), 11, mapX,
-      Math.round(mapY + state.calibration.floor.imageHeight + 4), OVERLAY_DURATION, "", false, true);
+  // Pixel capture and native overlays both use RuneScape-client coordinates.
+  // Screen coordinates such as alt1.rsX/rsY must never be added here.
+  const commands = buildMapOverlayCommands({
+    mapX: state.calibration.x,
+    mapY: state.calibration.y,
+    floor: state.gameMap.floor,
+    annotations: [...state.annotations].map(([pointKey, text]) => ({ point: pointFromKey(pointKey), text })),
+    manualCritical: [...state.manualCritical].map(pointFromKey),
+    gatestones: collectGatestoneMarkers(state.gameMap.floor),
+    stats: elements.stats.textContent,
+    duration: OVERLAY_DURATION,
   });
+  state.lastOverlayReport = drawOverlayGroup(api, group, commands);
+  updateOverlayStatus();
 }
 
 function testGameOverlay() {
@@ -567,25 +554,14 @@ function testGameOverlay() {
   }
 
   const group = "dungeons-alt1-test";
-  const clientPoint = {
-    x: state.calibration?.x ?? Math.max(20, api.rsWidth / 2 - 140),
-    y: state.calibration?.y ?? Math.max(20, api.rsHeight / 2 - 50),
-  };
-  const overlayPoint = clientToOverlay(clientPoint);
-  const x = overlayPoint.x;
-  const y = overlayPoint.y;
+  const x = Math.round(state.calibration?.x ?? Math.max(20, api.rsWidth / 2 - 140));
+  const y = Math.round(state.calibration?.y ?? Math.max(20, api.rsHeight / 2 - 50));
   const width = Math.round(state.calibration?.floor.imageWidth ?? 280);
   const height = Math.round(state.calibration?.floor.imageHeight ?? 100);
-  let rectangleDrawn;
-  let textDrawn;
-  drawOverlayGroup(group, () => {
-    rectangleDrawn = api.overLayRect(mixColor(255, 0, 255), x, y, width, height, 8000, 4);
-    textDrawn = api.overLayTextEx("DUNGEONS NATIVE OVERLAY TEST", mixColor(255, 255, 0), 18,
-      Math.round(x + width / 2), y + 18, 8000, "", true, true);
-  });
-  updateOverlayStatus(rectangleDrawn === false || textDrawn === false
-    ? "Alt1 rejected the native overlay test"
-    : "Test sent: look for a pink box on the RuneScape map (8 seconds)");
+  const report = drawOverlayGroup(api, group, buildTestOverlayCommands({ x, y, width, height }));
+  updateOverlayStatus(report.rejected
+    ? `Alt1 rejected ${report.rejected}/${report.sent} native overlay test calls`
+    : `Test sent at client ${x},${y}: look for a pink box on the RuneScape map (8 seconds)`);
 }
 
 function selectPoint(point) {

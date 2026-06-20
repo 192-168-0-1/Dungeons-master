@@ -79,26 +79,31 @@ if (-not $webPalette.SetEquals($assetPalette)) {
 
 $html = Get-Content (Join-Path $appRoot 'index.html') -Raw
 $app = Get-Content (Join-Path $appRoot 'app.js') -Raw
+$overlay = Get-Content (Join-Path $appRoot 'src\alt1-overlay.js') -Raw
+$nativeOverlaySource = $app + "`n" + $overlay
 $domIds = @([regex]::Matches($app, 'querySelector\("#(?<id>[a-z0-9-]+)"\)') | ForEach-Object { $_.Groups['id'].Value })
 $missingDomIds = @($domIds | Where-Object { $html -notmatch ('id="' + [regex]::Escape($_) + '"') })
 if ($missingDomIds.Count -ne 0) {
     throw "Missing DOM ids: $($missingDomIds -join ', ')"
 }
 
-if ($app -match 'api\.rs[XY]' -or $app -match 'clientToOverlay') {
+if ($nativeOverlaySource -match 'api\.rs[XY]' -or $nativeOverlaySource -match 'clientToOverlay') {
     throw 'Native Alt1 overlays must use RuneScape-client capture coordinates directly, without rsX/rsY offsets.'
 }
-if ($app -match 'overLayTextEx\([^;]*undefined') {
+if ($nativeOverlaySource -match 'overLayTextEx\([^;]*undefined' -or $overlay -notmatch 'font:\s*""') {
     throw 'Native Alt1 overlay text must pass an explicit font string to overLayTextEx.'
 }
-if ($app -notmatch 'function mixColor\(r, g, b\)' -or $app -match 'mixColor\([^\)]*,[^\)]*,[^\)]*,[^\)]*\)') {
-    throw 'Native Alt1 overlay colors must use 24-bit RGB values without an alpha channel.'
+if ($overlay -notmatch 'function mixColor\(r, g, b, a = 255\)' -or $overlay -notmatch '\(a << 24\)') {
+    throw 'Native Alt1 overlay colors must use the official signed 32-bit ARGB format with an opaque default alpha.'
 }
-if ($app -notmatch 'overLayFreezeGroup' -or $app -notmatch 'overLayRefreshGroup') {
+if ($overlay -notmatch 'overLayFreezeGroup' -or $overlay -notmatch 'overLayRefreshGroup') {
     throw 'Native Alt1 overlay groups must use the proven freeze-and-refresh lifecycle.'
 }
-if ($app -notmatch 'overLaySetGroup\(""\)') {
+if ($overlay -notmatch 'overLaySetGroup\(""\)') {
     throw 'Native Alt1 overlay rendering must reset the active group after drawing.'
+}
+if ($app -notmatch 'gatestones:\s*collectGatestoneMarkers' -or $overlay -notmatch 'for \(const marker of gatestones\)') {
+    throw 'Local and team gatestones must be included in the native RuneScape overlay.'
 }
 
 $manifest = Get-Content (Join-Path $appRoot 'appconfig.json') -Raw | ConvertFrom-Json

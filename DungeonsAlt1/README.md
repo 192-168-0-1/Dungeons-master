@@ -11,6 +11,7 @@ This is the Alt1 version of the `Dungeons` project. It does not use or modify `A
 - Original captured map or a clean abstract map view.
 - Grid, automatic critical path and manual critical markings.
 - Labels of up to four characters, drawn directly over the rooms on the RuneScape map through the native Alt1 overlay.
+- Local G1/G2 and color-coded team gatestones drawn on the native RuneScape map overlay.
 - Personal gatestone detection that excludes boss-room markers and player arrows.
 - Shared team labels and gatestones through the existing WebSocket relay.
 - PNG export of the visible map.
@@ -38,7 +39,7 @@ http://localhost:8080/DungeonsAlt1/appconfig.json
 
 The app now waits automatically. Open a Dungeoneering map and it will calibrate without pressing the button.
 
-Keep **Display → Draw labels in game** enabled to render annotations directly on the native RuneScape map.
+Keep **Display → Draw labels and gatestones in game** enabled to render annotations and gatestones directly on the native RuneScape map.
 
 ## Publish with GitHub Pages
 
