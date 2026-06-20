@@ -38,6 +38,8 @@ http://localhost:8080/DungeonsAlt1/appconfig.json
 
 The app now waits automatically. Open a Dungeoneering map and it will calibrate without pressing the button.
 
+Keep **Display → Draw labels in game** enabled to render annotations directly on the native RuneScape map.
+
 ## Publish with GitHub Pages
 
 The repository includes `.github/workflows/deploy-dungeons-alt1.yml`. It publishes only the `DungeonsAlt1` directory, with no build step or permanent local server.
