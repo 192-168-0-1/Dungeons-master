@@ -460,6 +460,14 @@ function clearGameOverlay() {
   }
 }
 
+function clientToOverlay(point) {
+  const api = window.alt1;
+  return {
+    x: Math.round((Number(api.rsX) || 0) + point.x),
+    y: Math.round((Number(api.rsY) || 0) + point.y),
+  };
+}
+
 // Mirrors Clue Trainer's working overlay lifecycle: keep the group frozen to
 // avoid flicker, replace its draw calls, reset the active group and explicitly
 // refresh the frozen group once.
@@ -559,8 +567,13 @@ function testGameOverlay() {
   }
 
   const group = "dungeons-alt1-test";
-  const x = Math.round(state.calibration?.x ?? Math.max(20, api.rsWidth / 2 - 140));
-  const y = Math.round(state.calibration?.y ?? Math.max(20, api.rsHeight / 2 - 50));
+  const clientPoint = {
+    x: state.calibration?.x ?? Math.max(20, api.rsWidth / 2 - 140),
+    y: state.calibration?.y ?? Math.max(20, api.rsHeight / 2 - 50),
+  };
+  const overlayPoint = clientToOverlay(clientPoint);
+  const x = overlayPoint.x;
+  const y = overlayPoint.y;
   const width = Math.round(state.calibration?.floor.imageWidth ?? 280);
   const height = Math.round(state.calibration?.floor.imageHeight ?? 100);
   let rectangleDrawn;
