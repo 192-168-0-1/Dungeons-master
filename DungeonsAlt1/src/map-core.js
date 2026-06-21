@@ -228,6 +228,7 @@ function countProbeMatches(image, originX, originY, offsetX, offsetY, probes, pr
 }
 
 function isBossMarkerAt(image, originX, originY) {
+  if (hasBossPaletteSignature(image, originX, originY)) return true;
   for (let offsetY = -4; offsetY <= 4; offsetY += 1) {
     for (let offsetX = -4; offsetX <= 4; offsetX += 1) {
       const redMatches = countProbeMatches(image, originX, originY, offsetX, offsetY,
@@ -379,16 +380,37 @@ function isBrightMapMarkerPixel(color) {
   return color[3] > 200 && max >= 175 && max - min >= 85;
 }
 
-// Quantized from Common/Resources/Gatestones/GroupGatestone.png. Group
-// gatestones and cyan player arrows overlap the broad G1 color range, so
-// these colors must reduce the personal-gatestone score instead of raising it.
+// Every palette below is quantized with Math.floor(channel / 16), matching the
+// C# integer division used by the original desktop detector. Requiring several
+// distinct personal buckets prevents a flat player arrow or the four-color
+// boss skull from winning on a merely "cyan-like" or "red-like" pixel count.
+const PERSONAL_GATESTONE_1_PALETTE = new Set([
+  0x010202, 0x010203, 0x010302, 0x010303, 0x010304, 0x010404, 0x020303,
+  0x020304, 0x020403, 0x020404, 0x020405, 0x020504, 0x030404, 0x030405,
+  0x030504, 0x030505, 0x030506, 0x030605, 0x030606, 0x040505, 0x040506,
+  0x040605, 0x040606, 0x040607, 0x040706, 0x040707, 0x040807, 0x050706,
+  0x050707, 0x050807, 0x050808, 0x060807, 0x060808, 0x060908, 0x060909,
+  0x070909, 0x070A09, 0x070A0A,
+]);
+
+const PERSONAL_GATESTONE_2_PALETTE = new Set([
+  0x020000, 0x020001, 0x020100, 0x020101, 0x030000, 0x030001, 0x030100,
+  0x030101, 0x030102, 0x030201, 0x030202, 0x040101, 0x040201, 0x040202,
+  0x050101, 0x050201, 0x050202, 0x060201, 0x060202, 0x060203, 0x060302,
+  0x060303, 0x070202, 0x070302, 0x080202, 0x080302, 0x080303, 0x090302,
+  0x090303,
+]);
+
 const GROUP_GATESTONE_PALETTE = new Set([
-  0x020405, 0x030405, 0x030406, 0x030506, 0x030507, 0x040507, 0x040607,
-  0x040608, 0x040609, 0x040708, 0x040709, 0x050608, 0x050708, 0x050709,
-  0x05070A, 0x05080A, 0x05080B, 0x060709, 0x060809, 0x06080A, 0x06080B,
-  0x06090B, 0x06090C, 0x060A0C, 0x060A0D, 0x07080A, 0x07080B, 0x07090A,
-  0x07090B, 0x07090C, 0x070A0C, 0x070A0D, 0x080A0C, 0x080A0D, 0x080B0D,
-  0x080B0E, 0x090B0E,
+  0x020304, 0x020305, 0x020405, 0x020406, 0x030405, 0x030406, 0x030506,
+  0x030507, 0x030607, 0x040507, 0x040607, 0x040608, 0x040609, 0x040709,
+  0x050608, 0x050708, 0x050709, 0x05070A, 0x05080A, 0x05080B, 0x060709,
+  0x060809, 0x06080A, 0x06080B, 0x06090B, 0x06090C, 0x060A0D, 0x07080A,
+  0x07080B, 0x07090B, 0x07090C, 0x070A0C, 0x080A0C, 0x080A0D, 0x080B0D,
+]);
+
+const BOSS_MARKER_PALETTE = new Set([
+  0x030100, 0x050101, 0x060101, 0x080302,
 ]);
 
 function isPaletteCandidatePixel(color) {
@@ -407,6 +429,34 @@ function isGroupGatestonePixel(color) {
   return isPaletteCandidatePixel(color) && GROUP_GATESTONE_PALETTE.has(quantizePaletteColor(color));
 }
 
+function addPersonalPaletteEvidence(color, firstEvidence, secondEvidence) {
+  if (!isPaletteCandidatePixel(color)) return;
+  const bucket = quantizePaletteColor(color);
+  if (PERSONAL_GATESTONE_1_PALETTE.has(bucket) && !GROUP_GATESTONE_PALETTE.has(bucket)) {
+    firstEvidence.add(bucket);
+  }
+  if (PERSONAL_GATESTONE_2_PALETTE.has(bucket) && !BOSS_MARKER_PALETTE.has(bucket)) {
+    secondEvidence.add(bucket);
+  }
+}
+
+function hasBossPaletteSignature(image, originX, originY) {
+  const bossEvidence = new Set();
+  const personalG2Evidence = new Set();
+  for (let y = originY + 2; y < originY + ROOM_SIZE - 2; y += 1) {
+    for (let x = originX + 2; x < originX + ROOM_SIZE - 2; x += 1) {
+      const color = getPixel(image, x, y);
+      if (!isPaletteCandidatePixel(color)) continue;
+      const bucket = quantizePaletteColor(color);
+      if (BOSS_MARKER_PALETTE.has(bucket)) bossEvidence.add(bucket);
+      if (PERSONAL_GATESTONE_2_PALETTE.has(bucket) && !BOSS_MARKER_PALETTE.has(bucket)) {
+        personalG2Evidence.add(bucket);
+      }
+    }
+  }
+  return bossEvidence.size >= 3 && personalG2Evidence.size < 3;
+}
+
 export function detectGatestones(image, gameMap) {
   const best = { 1: null, 2: null };
   for (let y = 0; y < gameMap.floor.height; y += 1) {
@@ -418,18 +468,27 @@ export function detectGatestones(image, gameMap) {
       const origin = mapToImage({ x, y }, gameMap.floor);
       let one = 0;
       let two = 0;
+      const oneEvidence = new Set();
+      const twoEvidence = new Set();
       for (let py = origin.y + 8; py < origin.y + ROOM_SIZE - 5; py += 1) {
         for (let px = origin.x + 8; px < origin.x + ROOM_SIZE - 8; px += 1) {
           const color = getPixel(image, px, py);
           if (isFirstGatestonePixel(color)) one += 1;
           if (isSecondGatestonePixel(color)) two += 1;
+          addPersonalPaletteEvidence(color, oneEvidence, twoEvidence);
           if (isBrightMapMarkerPixel(color)) { one -= 2; two -= 2; }
           if (isPlayerArrowPixel(color)) two -= 4;
           if (isGroupGatestonePixel(color)) one -= 2;
         }
       }
-      if (!best[1] || one > best[1].score) best[1] = { x, y, score: Math.max(0, one) };
-      if (!best[2] || two > best[2].score) best[2] = { x, y, score: Math.max(0, two) };
+      const oneScore = Math.max(0, one) + oneEvidence.size;
+      const twoScore = Math.max(0, two) + twoEvidence.size;
+      if (oneEvidence.size >= 3 && (!best[1] || oneScore > best[1].score)) {
+        best[1] = { x, y, score: oneScore, evidence: oneEvidence.size };
+      }
+      if (twoEvidence.size >= 3 && (!best[2] || twoScore > best[2].score)) {
+        best[2] = { x, y, score: twoScore, evidence: twoEvidence.size };
+      }
     }
   }
 

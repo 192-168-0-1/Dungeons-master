@@ -42,39 +42,62 @@ if ($signatureMatches.Count -ne 34 -or $signatureErrors.Count -ne 0) {
     throw "Room signatures invalid. Found=$($signatureMatches.Count), mismatches=$($signatureErrors -join ', ')"
 }
 
-$paletteBlock = [regex]::Match(
-    $mapCore,
-    'const GROUP_GATESTONE_PALETTE = new Set\(\[(?<colors>[\s\S]*?)\]\);')
-if (-not $paletteBlock.Success) {
-    throw 'The group gatestone palette is missing from map-core.js.'
+function Get-WebPalette([string]$name) {
+    $block = [regex]::Match(
+        $mapCore,
+        ('const ' + [regex]::Escape($name) + ' = new Set\(\[(?<colors>[\s\S]*?)\]\);'))
+    if (-not $block.Success) {
+        throw "Palette $name is missing from map-core.js."
+    }
+    $palette = [System.Collections.Generic.HashSet[int]]::new()
+    [regex]::Matches($block.Groups['colors'].Value, '0x[0-9A-Fa-f]{6}') | ForEach-Object {
+        [void]$palette.Add([Convert]::ToInt32($_.Value.Substring(2), 16))
+    }
+    return ,$palette
 }
 
-$webPalette = [System.Collections.Generic.HashSet[int]]::new()
-[regex]::Matches($paletteBlock.Groups['colors'].Value, '0x[0-9A-Fa-f]{6}') | ForEach-Object {
-    [void]$webPalette.Add([Convert]::ToInt32($_.Value.Substring(2), 16))
-}
-
-$assetPalette = [System.Collections.Generic.HashSet[int]]::new()
-$groupGatestone = [System.Drawing.Bitmap]::FromFile((Join-Path $repoRoot 'Common\Resources\Gatestones\GroupGatestone.png'))
-try {
-    for ($y = 0; $y -lt $groupGatestone.Height; $y++) {
-        for ($x = 0; $x -lt $groupGatestone.Width; $x++) {
-            $color = $groupGatestone.GetPixel($x, $y)
-            $max = [Math]::Max($color.R, [Math]::Max($color.G, $color.B))
-            $min = [Math]::Min($color.R, [Math]::Min($color.G, $color.B))
-            if ($color.A -gt 160 -and $max -ge 35 -and $max -le 220 -and ($max - $min) -ge 25) {
-                $bucket = (([int]($color.R / 16)) -shl 16) -bor (([int]($color.G / 16)) -shl 8) -bor [int]($color.B / 16)
-                [void]$assetPalette.Add($bucket)
+function Get-AssetPalette([string]$path) {
+    $palette = [System.Collections.Generic.HashSet[int]]::new()
+    $bitmap = [System.Drawing.Bitmap]::FromFile($path)
+    try {
+        for ($y = 0; $y -lt $bitmap.Height; $y++) {
+            for ($x = 0; $x -lt $bitmap.Width; $x++) {
+                $color = $bitmap.GetPixel($x, $y)
+                $max = [Math]::Max($color.R, [Math]::Max($color.G, $color.B))
+                $min = [Math]::Min($color.R, [Math]::Min($color.G, $color.B))
+                if ($color.A -gt 160 -and $max -ge 35 -and $max -le 220 -and ($max - $min) -ge 25) {
+                    # Match JavaScript Math.floor and C# integer division. A
+                    # PowerShell [int] cast rounds and previously hid a real
+                    # runtime palette mismatch.
+                    $red = [int][Math]::Floor($color.R / 16)
+                    $green = [int][Math]::Floor($color.G / 16)
+                    $blue = [int][Math]::Floor($color.B / 16)
+                    $bucket = ($red -shl 16) -bor ($green -shl 8) -bor $blue
+                    [void]$palette.Add($bucket)
+                }
             }
         }
     }
-}
-finally {
-    $groupGatestone.Dispose()
+    finally {
+        $bitmap.Dispose()
+    }
+    return ,$palette
 }
 
-if (-not $webPalette.SetEquals($assetPalette)) {
-    throw "Group gatestone palette mismatch. Web=$($webPalette.Count), asset=$($assetPalette.Count)"
+$paletteSpecs = @(
+    @('PERSONAL_GATESTONE_1_PALETTE', 'Common\Resources\Gatestones\PersonalGatestone1.png'),
+    @('PERSONAL_GATESTONE_2_PALETTE', 'Common\Resources\Gatestones\PersonalGatestone2.png'),
+    @('GROUP_GATESTONE_PALETTE', 'Common\Resources\Gatestones\GroupGatestone.png'),
+    @('BOSS_MARKER_PALETTE', 'Common\Resources\BossOverlay.png')
+)
+$paletteColorCount = 0
+foreach ($spec in $paletteSpecs) {
+    $webPalette = Get-WebPalette $spec[0]
+    $assetPalette = Get-AssetPalette (Join-Path $repoRoot $spec[1])
+    if (-not $webPalette.SetEquals($assetPalette)) {
+        throw "$($spec[0]) mismatch. Web=$($webPalette.Count), asset=$($assetPalette.Count)"
+    }
+    $paletteColorCount += $webPalette.Count
 }
 
 if (($mapCore -notmatch 'function isBossMarkerAt\(image, originX, originY\)') -or
@@ -151,4 +174,4 @@ if ($missingAssets.Count -ne 0) {
     throw "Missing OCR assets: $($missingAssets -join ', ')"
 }
 
-Write-Output "Validated $($signatureMatches.Count) room signatures, $($webPalette.Count) gatestone colors, $($domIds.Count) DOM references, the Alt1 manifest and $($ocrAssets.Count) OCR assets."
+Write-Output "Validated $($signatureMatches.Count) room signatures, $paletteColorCount marker colors, $($domIds.Count) DOM references, the Alt1 manifest and $($ocrAssets.Count) OCR assets."

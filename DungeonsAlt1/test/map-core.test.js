@@ -76,9 +76,9 @@ test("game map counts opened rooms and detects a personal gatestone", () => {
   const origin = mapToImage({ x: 0, y: 0 }, floor);
   paintSignature(target, origin, signature);
   setPixel(target, origin.x + 19, origin.y + 18, [150, 145, 105, 255]);
-  setPixel(target, origin.x + 9, origin.y + 9, [20, 120, 110, 255]);
-  setPixel(target, origin.x + 10, origin.y + 9, [20, 120, 110, 255]);
-  setPixel(target, origin.x + 11, origin.y + 9, [20, 120, 110, 255]);
+  setPixel(target, origin.x + 9, origin.y + 9, [70, 118, 105, 255]);
+  setPixel(target, origin.x + 10, origin.y + 9, [85, 130, 118, 255]);
+  setPixel(target, origin.x + 11, origin.y + 9, [100, 146, 132, 255]);
 
   const gameMap = readGameMap(target, floor);
   assert.equal(gameMap.openedRoomCount, 1);
@@ -146,8 +146,11 @@ test("a dense compact G2 cluster is not mistaken for a boss skull", () => {
   const [signature] = [...SIGNATURES.entries()].find(([, type]) => type === RoomType.E);
   const origin = mapToImage({ x: 0, y: 0 }, floor);
   paintSignature(target, origin, signature);
+  const gateColors = [[55, 35, 25, 255], [70, 35, 35, 255], [115, 35, 35, 255]];
   for (let y = 10; y <= 14; y += 1) {
-    for (let x = 10; x <= 14; x += 1) setPixel(target, origin.x + x, origin.y + y, [80, 20, 25, 255]);
+    for (let x = 10; x <= 14; x += 1) {
+      setPixel(target, origin.x + x, origin.y + y, gateColors[(x + y) % gateColors.length]);
+    }
   }
 
   const gameMap = readGameMap(target, floor);
@@ -168,8 +171,40 @@ test("player-arrow pixels are excluded while real G2 pixels remain detectable", 
   const gateImage = image(floor.imageWidth, floor.imageHeight);
   const gateOrigin = mapToImage({ x: 0, y: 0 }, floor);
   paintSignature(gateImage, gateOrigin, signature);
-  for (const x of [9, 10, 11]) setPixel(gateImage, gateOrigin.x + x, gateOrigin.y + 9, [80, 20, 25, 255]);
+  [[55, 35, 25, 255], [70, 35, 35, 255], [115, 35, 35, 255]].forEach((color, index) => {
+    setPixel(gateImage, gateOrigin.x + 9 + index, gateOrigin.y + 9, color);
+  });
   assert.deepEqual(detectGatestones(gateImage, readGameMap(gateImage, floor))[2], { x: 0, y: 0 });
+});
+
+test("a cyan player arrow cannot satisfy the personal G1 palette evidence", () => {
+  const floor = FLOOR_SIZES.find((candidate) => candidate.name === "Small");
+  const target = image(floor.imageWidth, floor.imageHeight);
+  const [signature] = [...SIGNATURES.entries()].find(([, type]) => type === RoomType.E);
+  const origin = mapToImage({ x: 0, y: 0 }, floor);
+  paintSignature(target, origin, signature);
+
+  for (let row = 0; row < 7; row += 1) {
+    for (let column = row; column < 12 - row; column += 1) {
+      setPixel(target, origin.x + 9 + column, origin.y + 8 + row, [20, 130, 145, 255]);
+    }
+  }
+
+  assert.equal(detectGatestones(target, readGameMap(target, floor))[1], undefined);
+});
+
+test("boss palette evidence finds a skull away from the old fixed probes", () => {
+  const floor = FLOOR_SIZES.find((candidate) => candidate.name === "Small");
+  const target = image(floor.imageWidth, floor.imageHeight);
+  const [signature] = [...SIGNATURES.entries()].find(([, type]) => type === RoomType.E);
+  const origin = mapToImage({ x: 0, y: 0 }, floor);
+  paintSignature(target, origin, signature);
+  [[63, 20, 13, 255], [82, 26, 17, 255], [102, 31, 21, 255], [132, 57, 46, 255]]
+    .forEach((color, index) => setPixel(target, origin.x + 24, origin.y + 20 + index, color));
+
+  const gameMap = readGameMap(target, floor);
+  assert.ok(gameMap.typeAt(0, 0) & RoomType.Boss);
+  assert.equal(detectGatestones(target, gameMap)[2], undefined);
 });
 
 test("group-gatestone palette pixels are not detected as personal G1", () => {
