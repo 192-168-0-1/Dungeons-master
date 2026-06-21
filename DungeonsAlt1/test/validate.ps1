@@ -80,7 +80,9 @@ if (-not $webPalette.SetEquals($assetPalette)) {
 if (($mapCore -notmatch 'function isBossMarkerAt\(image, originX, originY\)') -or
     ($mapCore -notmatch 'BOSS_RED_PROBES') -or
     ($mapCore -notmatch 'BOSS_JAW_PROBES') -or
-    ($mapCore -notmatch 'BOSS_HOLE_PROBES')) {
+    ($mapCore -notmatch 'BOSS_HOLE_PROBES') -or
+    ($mapCore -notmatch 'offsetX = -4') -or
+    ($mapCore -notmatch 'jawMatches < 2 && redMatches < 10')) {
     throw 'Shift-tolerant boss-skull detection is missing from map-core.js.'
 }
 

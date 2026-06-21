@@ -31,12 +31,15 @@ const BOSS_JAW_PROBES = [
   [13, 9], [18, 9], [8, 13], [11, 22], [20, 22], [14, 25], [17, 25],
 ];
 
-function paintBossMarker(target, origin, offsetX, offsetY) {
-  for (const [x, y] of BOSS_RED_PROBES) {
+function paintBossMarker(target, origin, offsetX, offsetY, {
+  redCount = BOSS_RED_PROBES.length,
+  jawColor = [39, 32, 17, 255], jawCount = BOSS_JAW_PROBES.length,
+} = {}) {
+  for (const [x, y] of BOSS_RED_PROBES.slice(0, redCount)) {
     setPixel(target, origin.x + x + offsetX, origin.y + y + offsetY, [63, 20, 13, 255]);
   }
-  for (const [x, y] of BOSS_JAW_PROBES) {
-    setPixel(target, origin.x + x + offsetX, origin.y + y + offsetY, [39, 32, 17, 255]);
+  for (const [x, y] of BOSS_JAW_PROBES.slice(0, jawCount)) {
+    setPixel(target, origin.x + x + offsetX, origin.y + y + offsetY, jawColor);
   }
 }
 
@@ -114,6 +117,42 @@ test("shifted boss skulls are excluded from G2 detection", () => {
       `boss marker at offset ${offsetX},${offsetY} should classify the room as boss`);
     assert.equal(detectGatestones(target, gameMap)[2], undefined);
   }
+});
+
+test("far-shifted and brighter live boss skull variants are excluded from G2", () => {
+  const floor = FLOOR_SIZES.find((candidate) => candidate.name === "Small");
+  const [signature] = [...SIGNATURES.entries()].find(([, type]) => type === RoomType.E);
+  const variants = [
+    { offsetX: -4, offsetY: 1, redCount: 8, jawColor: [72, 52, 30, 255], jawCount: 2 },
+    { offsetX: 3, offsetY: -4, redCount: 10, jawColor: [86, 58, 35, 255], jawCount: 0 },
+  ];
+
+  for (const variant of variants) {
+    const target = image(floor.imageWidth, floor.imageHeight);
+    const origin = mapToImage({ x: 0, y: 0 }, floor);
+    paintSignature(target, origin, signature);
+    paintBossMarker(target, origin, variant.offsetX, variant.offsetY, variant);
+
+    const gameMap = readGameMap(target, floor);
+    assert.ok(gameMap.typeAt(0, 0) & RoomType.Boss,
+      `live boss variant at ${variant.offsetX},${variant.offsetY} should classify the room as boss`);
+    assert.equal(detectGatestones(target, gameMap)[2], undefined);
+  }
+});
+
+test("a dense compact G2 cluster is not mistaken for a boss skull", () => {
+  const floor = FLOOR_SIZES.find((candidate) => candidate.name === "Small");
+  const target = image(floor.imageWidth, floor.imageHeight);
+  const [signature] = [...SIGNATURES.entries()].find(([, type]) => type === RoomType.E);
+  const origin = mapToImage({ x: 0, y: 0 }, floor);
+  paintSignature(target, origin, signature);
+  for (let y = 10; y <= 14; y += 1) {
+    for (let x = 10; x <= 14; x += 1) setPixel(target, origin.x + x, origin.y + y, [80, 20, 25, 255]);
+  }
+
+  const gameMap = readGameMap(target, floor);
+  assert.equal(Boolean(gameMap.typeAt(0, 0) & RoomType.Boss), false);
+  assert.deepEqual(detectGatestones(target, gameMap)[2], { x: 0, y: 0 });
 });
 
 test("player-arrow pixels are excluded while real G2 pixels remain detectable", () => {

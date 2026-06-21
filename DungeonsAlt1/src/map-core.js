@@ -191,7 +191,8 @@ function signatureAt(image, originX, originY) {
 // skull may move a couple of pixels relative to the room grid, so relying on
 // one exact pixel lets its dark-red outline win the G2 score. Combining the
 // symmetric outline, brown jaw and transparent eye sockets distinguishes the
-// skull from a real red gatestone while tolerating small capture offsets.
+// skull from a real red gatestone while tolerating capture offsets and the
+// slightly brighter/compact skull palette seen in some live map captures.
 const BOSS_RED_PROBES = Object.freeze([
   [11, 5], [20, 5], [10, 6], [21, 6], [9, 8], [22, 8],
   [8, 11], [23, 11], [23, 13], [14, 18], [17, 18],
@@ -214,11 +215,11 @@ function isBossRedPixel(color) {
 
 function isBossJawPixel(color) {
   return color[3] > 200
-    && color[0] >= 25 && color[0] <= 65
-    && color[1] >= 20 && color[1] <= 50
-    && color[2] >= 10 && color[2] <= 30
-    && Math.abs(color[0] - color[1]) <= 20
-    && color[0] - color[2] >= 10;
+    && color[0] >= 25 && color[0] <= 95
+    && color[1] >= 15 && color[1] <= 70
+    && color[2] >= 8 && color[2] <= 45
+    && Math.abs(color[0] - color[1]) <= 35
+    && color[0] - color[2] >= 8;
 }
 
 function countProbeMatches(image, originX, originY, offsetX, offsetY, probes, predicate) {
@@ -227,14 +228,19 @@ function countProbeMatches(image, originX, originY, offsetX, offsetY, probes, pr
 }
 
 function isBossMarkerAt(image, originX, originY) {
-  for (let offsetY = -2; offsetY <= 2; offsetY += 1) {
-    for (let offsetX = -2; offsetX <= 2; offsetX += 1) {
+  for (let offsetY = -4; offsetY <= 4; offsetY += 1) {
+    for (let offsetX = -4; offsetX <= 4; offsetX += 1) {
       const redMatches = countProbeMatches(image, originX, originY, offsetX, offsetY,
         BOSS_RED_PROBES, isBossRedPixel);
-      if (redMatches < 8) continue;
+      // The outline probes span both sides and the jaw of the skull. A G2 or
+      // player arrow is too compact to match seven of these at one offset.
+      if (redMatches < 7) continue;
       const jawMatches = countProbeMatches(image, originX, originY, offsetX, offsetY,
         BOSS_JAW_PROBES, isBossJawPixel);
-      if (jawMatches < 4) continue;
+      // Some live skulls render most of the jaw with the red outline palette.
+      // Accept that red-heavy variant, but otherwise still require two brown
+      // jaw anchors so ordinary room pixels cannot form a skull by accident.
+      if (jawMatches < 2 && redMatches < 10) continue;
       const filledHoles = countProbeMatches(image, originX, originY, offsetX, offsetY,
         BOSS_HOLE_PROBES, isBossRedPixel);
       if (filledHoles <= 1) return true;
