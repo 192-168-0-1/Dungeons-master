@@ -87,7 +87,6 @@
       <SubType>Component</SubType>
     </Compile>
     <Compile Include="NativeMethods.cs" />
-    <Compile Include="ProcessWindow.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Properties\Resources.Designer.cs">
@@ -95,6 +94,7 @@
       <DesignTime>True</DesignTime>
       <DependentUpon>Resources.resx</DependentUpon>
     </Compile>
+    <Compile Include="RuneScapeMapScaling.cs" />
     <Compile Include="Properties\Settings.Designer.cs">
       <AutoGen>True</AutoGen>
       <DesignTimeSharedInput>True</DesignTimeSharedInput>
@@ -134,18 +134,15 @@
     <Content Include="ring-of-kinship-32x32.ico" />
     <Content Include="ring-of-kinship.ico" />
     <Content Include="ring-of-kinship.png" />
-    <Content Include="..\Common\Resources\Gatestones\PersonalGatestone1.png">
-      <Link>Gatestones\PersonalGatestone1.png</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="..\Common\Resources\Gatestones\PersonalGatestone2.png">
-      <Link>Gatestones\PersonalGatestone2.png</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="..\Common\Resources\Gatestones\GroupGatestone.png">
-      <Link>Gatestones\GroupGatestone.png</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
+    <EmbeddedResource Include="..\Common\Resources\Gatestones\PersonalGatestone1.png">
+      <LogicalName>Dungeons.Gatestones.PersonalGatestone1.png</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\Common\Resources\Gatestones\PersonalGatestone2.png">
+      <LogicalName>Dungeons.Gatestones.PersonalGatestone2.png</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\Common\Resources\Gatestones\GroupGatestone.png">
+      <LogicalName>Dungeons.Gatestones.GroupGatestone.png</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
   <ItemGroup>
     <BootstrapperPackage Include=".NETFramework,Version=v4.7.2">
@@ -163,5 +160,6 @@
     <Folder Include="Resources\" />
   </ItemGroup>
   <Import Project="..\Common\Common.projitems" Label="Shared" />
+  <Import Project="..\ScreenCapture\Dungeons.ScreenCapture.projitems" Label="Shared" />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

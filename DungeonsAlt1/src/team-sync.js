@@ -1,5 +1,6 @@
 import {
   addPartyMember,
+  normalizeObservedParty,
   normalizePartyRoster,
   parsePartyRoster,
   removePartyMember,
@@ -122,6 +123,11 @@ export class TeamSync extends EventTarget {
     this.send("GAT", index, point?.x ?? -1, point?.y ?? -1, this.slot ?? 0);
   }
 
+  sendPartyOrder(members) {
+    const party = normalizeObservedParty(members);
+    if (party.length) this.send("PARTY", JSON.stringify(party));
+  }
+
   setRoster(value) {
     this.roster = normalizePartyRoster(value);
     const memberIds = new Set(this.roster.map((member) => member.id));
@@ -222,6 +228,12 @@ export class TeamSync extends EventTarget {
       this.dispatchEvent(new CustomEvent("leave", { detail: { senderId, senderName } }));
     } else if (type === "PING") {
       // Presence is recorded above; no UI event is needed.
+    } else if (type === "PARTY" && fields.length >= 5) {
+      let members = [];
+      try { members = normalizeObservedParty(JSON.parse(fields[4])); } catch { /* Ignore malformed scans. */ }
+      if (members.length) {
+        this.dispatchEvent(new CustomEvent("party", { detail: { senderId, senderName, members } }));
+      }
     } else if (type === "CLEAR") {
       this.dispatchEvent(new CustomEvent("clear", { detail: { senderId, senderName } }));
     } else if (type === "ANN" && fields.length >= 7) {

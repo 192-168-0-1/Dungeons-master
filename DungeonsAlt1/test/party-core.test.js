@@ -4,6 +4,9 @@ import {
   PARTY_COLORS,
   addPartyMember,
   normalizePartyRoster,
+  normalizePartyName,
+  normalizeObservedParty,
+  observedPartySlot,
   parsePartyRoster,
   partyColor,
   partyTextColor,
@@ -61,4 +64,25 @@ test("untrusted roster data is normalized before it reaches the UI", () => {
     { id: "safe-id", name: "Name", slot: 2 },
   ]);
   assert.deepEqual(parsePartyRoster("not-json"), []);
+});
+
+test("OCR party names override join order with conservative fuzzy matching", () => {
+  const observed = [
+    { slot: 1, name: "A Ninja", occupied: true },
+    { slot: 2, name: "s If", occupied: true },
+  ];
+  assert.equal(normalizePartyName("A_Ninja"), "aninja");
+  assert.equal(observedPartySlot(observed, "A_Ninja"), 1);
+  assert.equal(observedPartySlot(observed, "sIf"), 2);
+  assert.equal(observedPartySlot(observed, "A Nlnja"), 1);
+  assert.equal(observedPartySlot(observed, "unknown"), null);
+  assert.deepEqual(normalizeObservedParty([
+    { slot: 2, name: " s If " },
+    { slot: 1, name: "A Ninja" },
+    { slot: 2, name: "Duplicate slot" },
+    { slot: 6, name: "Outside" },
+  ]), [
+    { slot: 1, name: "A Ninja", occupied: true },
+    { slot: 2, name: "s If", occupied: true },
+  ]);
 });

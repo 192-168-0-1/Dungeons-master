@@ -53,6 +53,15 @@ export function assignGatestoneSlots(markers, floor) {
   return result;
 }
 
+export function formatMapStats({ rooms = 0, mystery = 0, deadEnds = 0, minutes = 0 } = {}) {
+  const roomCount = Math.max(0, Number(rooms) || 0);
+  const possible = roomCount + Math.max(0, Number(mystery) || 0);
+  const elapsedMinutes = Math.max(Number(minutes) || 0, 1 / 60);
+  const rpm = Math.max(0, (roomCount - 0.8) / elapsedMinutes).toFixed(1);
+  const roomLabel = roomCount === 1 ? "room" : "rooms";
+  return `${roomCount} ${roomLabel} (${possible}) | ${rpm} rpm | ${Math.max(0, Number(deadEnds) || 0)} dead ends`;
+}
+
 function rect(color, x, y, width, height, duration, lineWidth) {
   return { type: "rect", color, x, y, width, height, duration, lineWidth };
 }
@@ -119,8 +128,18 @@ export function buildMapOverlayCommands({
   }
 
   if (stats) {
-    commands.push(text(stats, mixColor(225, 238, 239, 235), 11, originX,
-      Math.round(originY + floor.imageHeight + 4), duration, false, true));
+    const fontSize = 12;
+    const paddingX = 3;
+    const barTop = Math.round(originY + floor.imageHeight);
+    const barHeight = 21;
+    const estimatedTextWidth = Math.ceil(String(stats).length * 6.25);
+    const barWidth = Math.max(floor.imageWidth, estimatedTextWidth + paddingX * 2);
+    // Alt1 rectangles are outlines. Using the full bar height as line width
+    // produces the same solid black strip shown beneath the desktop EXE map.
+    commands.push(rect(mixColor(0, 0, 0), originX, barTop,
+      barWidth, barHeight, duration, barHeight));
+    commands.push(text(stats, mixColor(255, 255, 255), fontSize, originX + paddingX,
+      barTop + 3, duration, false, false));
   }
 
   return commands;

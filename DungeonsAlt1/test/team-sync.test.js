@@ -55,6 +55,20 @@ test("annotation and gatestone packets carry the sender party slot", () => {
   assert.deepEqual(decoded[1].slice(3), ["GAT", "2", "3", "1", "3"]);
 });
 
+test("scanned RuneScape party order is relayed as sanitized name and slot data", () => {
+  const { client, sent } = connectedClient("Player");
+  client.sendPartyOrder([
+    { slot: 2, name: " s If ", occupied: true },
+    { slot: 1, name: "A Ninja", occupied: true },
+  ]);
+  const fields = sent[0].split("|").map(decodeURIComponent);
+  assert.equal(fields[3], "PARTY");
+  assert.deepEqual(JSON.parse(fields[4]), [
+    { slot: 1, name: "A Ninja", occupied: true },
+    { slot: 2, name: "s If", occupied: true },
+  ]);
+});
+
 test("timed-out members free their slot and the party compacts", () => {
   const { client: host } = connectedClient("Leader");
   host.setRoster([

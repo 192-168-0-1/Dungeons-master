@@ -325,6 +325,30 @@ summary {
 .team-grid small { grid-column: 2; }
 .team-grid small { color: var(--muted); }
 
+.party-scan-option {
+  grid-column: 2;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 3px;
+  color: #c9d7da;
+}
+
+.party-scan-option input { min-height: auto; }
+
+.party-scan-tools {
+  grid-column: 2;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.party-scan-tools small {
+  flex: 1 1 150px;
+  color: var(--muted);
+}
+
 .results-panel { padding-top: 8px; }
 
 .table-scroll {

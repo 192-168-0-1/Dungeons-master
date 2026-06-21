@@ -113,6 +113,7 @@ $html = Get-Content (Join-Path $appRoot 'index.html') -Raw
 $app = Get-Content (Join-Path $appRoot 'app.js') -Raw
 $overlay = Get-Content (Join-Path $appRoot 'src\alt1-overlay.js') -Raw
 $partyCore = Get-Content (Join-Path $appRoot 'src\party-core.js') -Raw
+$partyInterface = Get-Content (Join-Path $appRoot 'src\party-interface.js') -Raw
 $teamSync = Get-Content (Join-Path $appRoot 'src\team-sync.js') -Raw
 $nativeOverlaySource = $app + "`n" + $overlay
 $domIds = @([regex]::Matches($app, 'querySelector\("#(?<id>[a-z0-9-]+)"\)') | ForEach-Object { $_.Groups['id'].Value })
@@ -154,6 +155,19 @@ if (($teamSync -notmatch 'send\("ROSTER"') -or
 if (($app -notmatch 'ownerColor\(annotation\.ownerId') -or
     ($overlay -notmatch 'hexToOverlayColor\(annotation\.color')) {
     throw 'Both canvas and native annotations must use their owner party color.'
+}
+if (($partyInterface -notmatch 'function findPartyPanel') -or
+    ($partyInterface -notmatch 'ocr\.findReadLine') -or
+    ($partyCore -notmatch 'function observedPartySlot') -or
+    ($teamSync -notmatch 'send\("PARTY"') -or
+    ($app -notmatch 'scanPartyInterface')) {
+    throw 'RuneScape party-interface detection, OCR and slot matching must remain connected.'
+}
+$alt1OcrScripts = [regex]::Matches(
+    $html,
+    '<script src="https://unpkg\.com/alt1@0\.1\.3/dist/[^\"]+" integrity="sha384-[A-Za-z0-9+/=]+" crossorigin="anonymous" referrerpolicy="no-referrer"></script>')
+if ($alt1OcrScripts.Count -ne 3) {
+    throw 'The three official Alt1 OCR scripts must be version-pinned and protected by SHA-384 SRI.'
 }
 
 $manifest = Get-Content (Join-Path $appRoot 'appconfig.json') -Raw | ConvertFrom-Json

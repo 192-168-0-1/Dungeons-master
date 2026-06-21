@@ -15,7 +15,7 @@ namespace Dungeons
         const int GatestonePaletteBucketSize = 16;
 
         static readonly Font AnnotationFont = new Font("Consolas", 7);
-        static readonly Font GatestoneFont = new Font("Segoe UI", 7, FontStyle.Bold);
+        static readonly Font TeamGatestoneFont = new Font("Segoe UI", 5, FontStyle.Bold);
         //static readonly Font DistanceAnnotationFont = new Font("Arial", 7);
         static readonly Color AnnotationColor = Color.FromArgb(140, 240, 240, 240);
         //static readonly Pen AnnotationPen = new Pen(AnnotationColor, 1);
@@ -302,7 +302,8 @@ namespace Dungeons
         {
             if (Image != null)
             {
-                var s = FloorSize.ClientToMapCoords(e.Location, Image.Size);
+                var imageLocation = ControlToImageLocation(e.Location);
+                var s = FloorSize.ClientToMapCoords(imageLocation, Image.Size);
                 if (FloorSize.IsInRange(s))
                 {
                     if (e.Button == MouseButtons.Left)
@@ -324,8 +325,29 @@ namespace Dungeons
 
             e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.HighQuality;
 
-            DrawAnnotations(e);
-            DrawGatestones(e);
+            var state = e.Graphics.Save();
+            try
+            {
+                if (Image != null && (ClientSize.Width != Image.Width || ClientSize.Height != Image.Height))
+                    e.Graphics.ScaleTransform(ClientSize.Width / (float)Image.Width, ClientSize.Height / (float)Image.Height);
+
+                DrawAnnotations(e);
+                DrawGatestones(e);
+            }
+            finally
+            {
+                e.Graphics.Restore(state);
+            }
+        }
+
+        private Point ControlToImageLocation(Point location)
+        {
+            if (Image == null || ClientSize.Width <= 0 || ClientSize.Height <= 0)
+                return location;
+
+            return new Point(
+                Math.Min(Image.Width - 1, Math.Max(0, (int)(location.X * Image.Width / (float)ClientSize.Width))),
+                Math.Min(Image.Height - 1, Math.Max(0, (int)(location.Y * Image.Height / (float)ClientSize.Height))));
         }
 
         protected override void OnPaintBackground(PaintEventArgs pevent)
@@ -373,35 +395,71 @@ namespace Dungeons
             if (Image == null)
                 return;
 
-            foreach (var owner in teamGatestones.Values)
-                foreach (var pair in owner.Locations.OrderBy(pair => pair.Key))
-                    DrawTeamGatestone(e.Graphics, owner, pair.Key, pair.Value);
+            var markers = teamGatestones.Values
+                .SelectMany(owner => owner.Locations.Select(pair => new TeamGatestoneMarker(owner, pair.Key, pair.Value)))
+                .OrderBy(marker => marker.Owner.Name, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(marker => marker.Owner.Id, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(marker => marker.GatestoneIndex)
+                .GroupBy(marker => marker.Location);
+
+            foreach (var roomMarkers in markers)
+                DrawTeamGatestoneCluster(e.Graphics, roomMarkers.Key, roomMarkers.ToList());
         }
 
-        private void DrawTeamGatestone(Graphics g, TeamGatestoneOwner owner, int gatestoneIndex, Point location)
+        private void DrawTeamGatestoneCluster(Graphics g, Point location, IList<TeamGatestoneMarker> markers)
         {
             var p = FloorSize.MapToClientCoords(location, Image.Size);
-            const int markerSize = 12;
-            var roomCenter = new Point(p.X + MapUtils.RoomSize / 2, p.Y + MapUtils.RoomSize / 2);
-            var sameRoomGateCount = owner.Locations.Count(pair => pair.Value == location);
-            var xOffset = sameRoomGateCount > 1
-                ? gatestoneIndex == 1 ? -markerSize - 1 : 1
-                : -markerSize / 2;
-            var yOffset = -markerSize / 2;
-            var markerRect = new Rectangle(roomCenter.X + xOffset, roomCenter.Y + yOffset, markerSize, markerSize);
-            var labelLocation = new Point(markerRect.X + markerSize + 2, markerRect.Y - 1);
-            using var fillBrush = new SolidBrush(owner.Color);
-            using var shadowBrush = new SolidBrush(Color.FromArgb(210, 0, 0, 0));
-            using var borderPen = new Pen(Color.White, 1);
-            using var textBrush = new SolidBrush(GetReadableTextColor(owner.Color));
-            using var labelBrush = new SolidBrush(owner.Color);
+            var badgeSize = markers.Count <= 4 ? 8 : 7;
 
-            g.FillEllipse(shadowBrush, markerRect.X + 1, markerRect.Y + 1, markerRect.Width, markerRect.Height);
-            g.FillEllipse(fillBrush, markerRect);
-            g.DrawEllipse(borderPen, markerRect);
-            g.DrawString(gatestoneIndex.ToString(), GatestoneFont, textBrush, markerRect.X + 2, markerRect.Y - 2);
-            g.DrawString(GetInitials(owner.Name), GatestoneFont, shadowBrush, labelLocation.X + 1, labelLocation.Y + 1);
-            g.DrawString(GetInitials(owner.Name), GatestoneFont, labelBrush, labelLocation);
+            for (var i = 0; i < markers.Count; i++)
+            {
+                var marker = markers[i];
+                var badgeRect = GetTeamGatestoneBadgeRect(p, i, badgeSize);
+                DrawTeamGatestoneBadge(g, marker, badgeRect);
+            }
+        }
+
+        private static Rectangle GetTeamGatestoneBadgeRect(Point roomOrigin, int index, int badgeSize)
+        {
+            const int padding = 2;
+            var middle = (MapUtils.RoomSize - badgeSize) / 2;
+            var far = MapUtils.RoomSize - padding - badgeSize;
+            var slots = new[]
+            {
+                new Point(padding, padding),
+                new Point(far, padding),
+                new Point(padding, far),
+                new Point(far, far),
+                new Point(middle, padding),
+                new Point(middle, far),
+                new Point(padding, middle),
+                new Point(far, middle)
+            };
+
+            var slot = slots[index % slots.Length];
+            return new Rectangle(roomOrigin.X + slot.X, roomOrigin.Y + slot.Y, badgeSize, badgeSize);
+        }
+
+        private static void DrawTeamGatestoneBadge(Graphics g, TeamGatestoneMarker marker, Rectangle badgeRect)
+        {
+            var fillColor = Color.FromArgb(215, marker.Owner.Color);
+            var borderColor = Color.FromArgb(185, Color.White);
+            var shadowRect = new Rectangle(badgeRect.X + 1, badgeRect.Y + 1, badgeRect.Width, badgeRect.Height);
+            using var shadowBrush = new SolidBrush(Color.FromArgb(110, 0, 0, 0));
+            using var fillBrush = new SolidBrush(fillColor);
+            using var borderPen = new Pen(borderColor, 1);
+
+            g.FillRectangle(shadowBrush, shadowRect);
+            g.FillRectangle(fillBrush, badgeRect);
+            g.DrawRectangle(borderPen, badgeRect);
+
+            TextRenderer.DrawText(
+                g,
+                marker.GatestoneIndex.ToString(),
+                TeamGatestoneFont,
+                badgeRect,
+                GetReadableTextColor(marker.Owner.Color),
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
         }
 
         private static string GetInitials(string name)
@@ -558,13 +616,29 @@ namespace Dungeons
         {
             public TeamGatestoneOwner(string ownerId, string name)
             {
+                Id = ownerId;
                 Name = string.IsNullOrWhiteSpace(name) ? "Team mate" : name;
                 Color = GetTeamGatestoneColor(ownerId);
             }
 
+            public string Id { get; }
             public string Name { get; set; }
             public Color Color { get; set; }
             public Dictionary<int, Point> Locations { get; } = new Dictionary<int, Point>();
+        }
+
+        private sealed class TeamGatestoneMarker
+        {
+            public TeamGatestoneMarker(TeamGatestoneOwner owner, int gatestoneIndex, Point location)
+            {
+                Owner = owner;
+                GatestoneIndex = gatestoneIndex;
+                Location = location;
+            }
+
+            public TeamGatestoneOwner Owner { get; }
+            public int GatestoneIndex { get; }
+            public Point Location { get; }
         }
 
         private sealed class GatestonePalettes
@@ -584,16 +658,13 @@ namespace Dungeons
             public static GatestonePalettes Load()
             {
                 var directory = FindGatestoneTemplateDirectory();
-                if (directory == null)
-                    return new GatestonePalettes(new Dictionary<int, HashSet<int>>(), new HashSet<int>());
-
                 return new GatestonePalettes(
                     new Dictionary<int, HashSet<int>>
                     {
-                        [1] = LoadPalette(Path.Combine(directory, "PersonalGatestone1.png")),
-                        [2] = LoadPalette(Path.Combine(directory, "PersonalGatestone2.png"))
+                        [1] = LoadPalette("Dungeons.Gatestones.PersonalGatestone1.png", directory, "PersonalGatestone1.png"),
+                        [2] = LoadPalette("Dungeons.Gatestones.PersonalGatestone2.png", directory, "PersonalGatestone2.png")
                     },
-                    LoadPalette(Path.Combine(directory, "GroupGatestone.png")));
+                    LoadPalette("Dungeons.Gatestones.GroupGatestone.png", directory, "GroupGatestone.png"));
             }
 
             public bool IsPersonalGatestonePixel(int gatestoneIndex, Color color)
@@ -609,13 +680,29 @@ namespace Dungeons
                     && groupPalette.Contains(QuantizePaletteColor(color));
             }
 
-            private static HashSet<int> LoadPalette(string path)
+            private static HashSet<int> LoadPalette(string resourceName, string directory, string fileName)
             {
-                var palette = new HashSet<int>();
-                if (!File.Exists(path))
-                    return palette;
+                using var resourceStream = typeof(MapPictureBox).Assembly.GetManifestResourceStream(resourceName);
+                if (resourceStream != null)
+                    return LoadPalette(resourceStream);
+
+                var path = directory == null ? null : Path.Combine(directory, fileName);
+                if (path == null || !File.Exists(path))
+                    return new HashSet<int>();
 
                 using var bitmap = new Bitmap(path);
+                return LoadPalette(bitmap);
+            }
+
+            private static HashSet<int> LoadPalette(Stream stream)
+            {
+                using var bitmap = new Bitmap(stream);
+                return LoadPalette(bitmap);
+            }
+
+            private static HashSet<int> LoadPalette(Bitmap bitmap)
+            {
+                var palette = new HashSet<int>();
                 for (var y = 0; y < bitmap.Height; y++)
                 {
                     for (var x = 0; x < bitmap.Width; x++)

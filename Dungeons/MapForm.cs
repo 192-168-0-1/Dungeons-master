@@ -1,4 +1,5 @@
 ﻿using Dungeons.Common;
+using Dungeons.ScreenCapture;
 using System;
 using System.Collections.Generic;
 using System.Drawing;
@@ -23,6 +24,9 @@ namespace Dungeons
         private bool autoAlignMapEnabled = true;
         private bool showMapStatsOnly;
         private bool useScreenCapture;
+        private bool captureExclusionApplied;
+        private bool captureExclusionWarningLogged;
+        private int runeScapeInterfaceScalePercent = 100;
 
         private static readonly Keys[] KeysToEat =
         {
@@ -97,11 +101,12 @@ namespace Dungeons
 
         public async Task CalibrateAsync()
         {
-            var (mapLocation, floorSize) = await FindMapAsync();
-            if (mapLocation != MapUtils.Invalid)
+            var match = await FindMapAsync();
+            if (match.IsValid)
             {
-                Log($"Calibrated! Map location = {mapLocation}, Size = {floorSize}");
-                Properties.Settings.Default.MapLocation = mapLocation;
+                runeScapeInterfaceScalePercent = match.ScalePercent;
+                Log($"Calibrated! Map location = {match.Location}, Size = {match.FloorSize}, Interface scaling = {match.ScalePercent}%");
+                Properties.Settings.Default.MapLocation = match.Location;
                 Properties.Settings.Default.Save();
                 UpdateMap();
             }
@@ -229,6 +234,7 @@ namespace Dungeons
         protected override void OnLoad(EventArgs e)
         {
             base.OnLoad(e);
+            ApplyCaptureExclusion();
             startingSize = Size;
             var isValidLocation = false;
 
@@ -250,24 +256,17 @@ namespace Dungeons
             Application.Exit();
         }
 
-        private async Task<(Point, FloorSize)> FindMapAsync()
+        private async Task<RuneScapeMapMatch> FindMapAsync()
         {
             var window = dataWindow.SelectedWindow;
             if (window != null && !window.HasExited)
             {
-                using var bmp = window.Capture(useScreenCapture);
-                // Search for map marker
-                foreach (var floorSize in FloorSize.RSSizes)
-                {
-                    var match = await Task.Run(() => UnsafeBitmap.FindMapByCorners(bmp, rsMapSizes[floorSize]));
-                    if (match != MapUtils.Invalid)
-                    {
-                        return (match, floorSize);
-                    }
-                }
+                using var bmp = CaptureRuneScape(window);
+                if (bmp != null)
+                    return await Task.Run(() => RuneScapeMapScaling.FindMap(bmp, rsMapSizes));
             }
 
-            return (MapUtils.Invalid, FloorSize.Small);
+            return RuneScapeMapMatch.Invalid;
         }
 
         private void SaveCalibrationDebug()
@@ -276,31 +275,90 @@ namespace Dungeons
             if (window == null || window.HasExited)
                 return;
 
-            using var bmp = window.Capture(useScreenCapture);
-            if (bmp == null)
-                return;
-
             var directory = Path.GetFullPath(Path.Combine(
                 Properties.Settings.Default.MapSaveLocation,
                 "CalibrationDebug"));
             Directory.CreateDirectory(directory);
 
             var timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
-            var imagePath = Path.Combine(directory, $"client_{timestamp}.png");
             var infoPath = Path.Combine(directory, $"client_{timestamp}.txt");
+            var captures = new List<(string Name, bool UseScreenCapture, Bitmap Bitmap)>();
+            var captureLines = new List<string>();
 
-            bmp.Save(imagePath);
+            void AddCapture(string name, bool screenCapture)
+            {
+                var capture = CaptureRuneScape(window, screenCapture);
+                captures.Add((name, screenCapture, capture));
+            }
+
+            try
+            {
+                AddCapture("primary", useScreenCapture);
+                if (window.Handle != IntPtr.Zero)
+                    AddCapture("alternate", !useScreenCapture);
+
+                foreach (var capture in captures)
+                {
+                    var mode = GetCaptureModeDescription(window, capture.UseScreenCapture);
+                    if (capture.Bitmap == null)
+                    {
+                        captureLines.Add($"{capture.Name}: {mode}: failed");
+                        continue;
+                    }
+
+                    var imagePath = Path.Combine(directory, $"client_{timestamp}_{capture.Name}.png");
+                    capture.Bitmap.Save(imagePath);
+                    captureLines.Add($"{capture.Name}: {mode}: {DescribeCapture(capture.Bitmap)}: {imagePath}");
+                }
+            }
+            finally
+            {
+                foreach (var capture in captures)
+                    capture.Bitmap?.Dispose();
+            }
+
             File.WriteAllLines(infoPath, new[]
             {
                 $"Window: {window.Title}",
                 $"Client size: {window.Size.Width}x{window.Size.Height}",
-                $"Capture mode: {(window.Handle == IntPtr.Zero ? "Entire screen" : useScreenCapture ? "Visible screen region" : "Window DC")}",
                 $"Virtual screen: {SystemInformation.VirtualScreen}",
                 $"Current map search location: {Properties.Settings.Default.MapLocation}",
-                $"Expected map sizes: {string.Join(", ", rsMapSizes.Select(pair => $"{pair.Key}={pair.Value.Width}x{pair.Value.Height}"))}"
-            });
+                $"Detected interface scaling: {runeScapeInterfaceScalePercent}%",
+                $"Expected map sizes: {string.Join(", ", rsMapSizes.Select(pair => $"{pair.Key}={pair.Value.Width}x{pair.Value.Height}"))}",
+                "",
+                "Captures:",
+            }.Concat(captureLines));
 
-            Log($"Calibration debug saved to {imagePath}");
+            Log($"Calibration debug saved to {infoPath}");
+        }
+
+        private static string GetCaptureModeDescription(ProcessWindow window, bool screenCapture)
+        {
+            if (window.Handle == IntPtr.Zero)
+                return "Entire screen";
+
+            return screenCapture ? "Visible screen region" : "Window DC";
+        }
+
+        private static string DescribeCapture(Bitmap bitmap)
+        {
+            var step = Math.Max(1, Math.Min(bitmap.Width, bitmap.Height) / 120);
+            var total = 0;
+            var black = 0;
+
+            for (var y = 0; y < bitmap.Height; y += step)
+            {
+                for (var x = 0; x < bitmap.Width; x += step)
+                {
+                    var color = bitmap.GetPixel(x, y);
+                    if (color.R < 8 && color.G < 8 && color.B < 8)
+                        black++;
+                    total++;
+                }
+            }
+
+            var blackPercentage = total == 0 ? 0 : black * 100.0 / total;
+            return $"{bitmap.Width}x{bitmap.Height}, {blackPercentage:0.0}% black samples";
         }
 
         private void UpdateMap()
@@ -317,14 +375,16 @@ namespace Dungeons
                 if (Properties.Settings.Default.MapLocation != MapUtils.Invalid)
                 {
                     var mapSize = rsMapSizes[floorSize];
-                    var bmp = window.Capture(new Rectangle(Properties.Settings.Default.MapLocation, mapSize), useScreenCapture);
-                    if (bmp == null)
+                    var captureSize = RuneScapeMapScaling.ScaleSize(mapSize, runeScapeInterfaceScalePercent);
+                    using var capture = CaptureRuneScape(window, new Rectangle(Properties.Settings.Default.MapLocation, captureSize));
+                    if (capture == null)
                         return; // Break out of the loop, window capture won't work for the other cases either.
+                    var bmp = RuneScapeMapScaling.Normalize(capture, mapSize);
 
                     if (MapReader.IsValidInGameMap(bmp))
                     {
                         FloorSize = floorSize;
-                        mapPictureBox.Size = LogicalToDeviceUnits(mapSize);
+                        mapPictureBox.Size = captureSize;
                         UpdateOverlayLayout();
                         AlignOverlayToRuneScapeMap(window);
                         timer.Start();
@@ -354,6 +414,45 @@ namespace Dungeons
                         bmp.Dispose();
                     }
                 }
+            }
+        }
+
+        private Bitmap CaptureRuneScape(ProcessWindow window)
+        {
+            return CaptureRuneScape(window, new Rectangle(Point.Empty, window.Size), useScreenCapture);
+        }
+
+        private Bitmap CaptureRuneScape(ProcessWindow window, bool screenCapture)
+        {
+            return CaptureRuneScape(window, new Rectangle(Point.Empty, window.Size), screenCapture);
+        }
+
+        private Bitmap CaptureRuneScape(ProcessWindow window, Rectangle region)
+        {
+            return CaptureRuneScape(window, region, useScreenCapture);
+        }
+
+        private Bitmap CaptureRuneScape(ProcessWindow window, Rectangle region, bool screenCapture)
+        {
+            if (window == null || window.HasExited)
+                return null;
+
+            if (screenCapture || window.Handle == IntPtr.Zero)
+                ApplyCaptureExclusion();
+
+            return window.Capture(region, screenCapture);
+        }
+
+        private void ApplyCaptureExclusion()
+        {
+            if (captureExclusionApplied || !IsHandleCreated)
+                return;
+
+            captureExclusionApplied = WindowCapturePolicy.TryExclude(Handle);
+            if (!captureExclusionApplied && !captureExclusionWarningLogged)
+            {
+                captureExclusionWarningLogged = true;
+                Log("Overlay capture exclusion is not supported by this Windows setup.");
             }
         }
 

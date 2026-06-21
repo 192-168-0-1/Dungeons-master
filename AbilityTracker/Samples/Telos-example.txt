@@ -1,0 +1,18 @@
+Phase 1
+(tc) + :bloat: + :vulnbomb: → :deathskulls: + :adrenrenewal: → :omniguard: :spec: → :soulsap: → :deathsparkorsoulreave: → :touchofdeath: → :soulsap: → :deathsparkorsoulreave: + :surge:
+
+Phase 2
+:livingdeath: → :touchofdeath: → :commandskeleton: → :fingerofdeath: → :necrobasic: → (tendrils) :volleyofsouls: → :divert: → :soulsap: → :deathskulls:
+
+Phase 3
+:bloat: → :splitsoul: → :soulsap: → :deathskulls: → :commandzombie: + :dive: to :redbeam: → :commandskeleton: → :fingerofdeath:
+
+Phase 4
+⬥ Ordinary instruction lines are shown as non-blocking notes.
+
+Drop Down
+>50% adren: :omniguard: :spec: → :deathguard90: :eofspec: → :touchofdeath: → :necrobasic: + :dive:
+<50% adren: :soulstrike: → :soulstrike: → :deathguard90: :eofspec: → :soulsap: → :touchofdeath: → :necrobasic: + :dive:
+
+Font 1
+:divert: → :prep: → :anticlearheaded: → :firstnecrohandwrap: :conjurearmy: :cinderbanes: → ( :soulsap: / :necrobasic: ) → :commandghost: → :commandskeleton: → :volleyofsouls: → :fingerofdeath: + :surge: + :dive:

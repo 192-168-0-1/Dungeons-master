@@ -18,9 +18,16 @@ import {
   buildMapOverlayCommands,
   buildTestOverlayCommands,
   drawOverlayGroup,
+  formatMapStats,
 } from "./src/alt1-overlay.js";
 import { TeamSync, createRoomCode } from "./src/team-sync.js";
-import { PARTY_COLORS, partyColor, partyTextColor } from "./src/party-core.js";
+import {
+  PARTY_COLORS,
+  observedPartySlot,
+  partyColor,
+  partyTextColor,
+} from "./src/party-core.js";
+import { readPartyInterface } from "./src/party-interface.js";
 import { WinterfaceReader } from "./src/winterface.js";
 
 const SCAN_INTERVAL = 600;
@@ -28,6 +35,7 @@ const AUTO_CALIBRATION_INTERVAL = 2500;
 const STORAGE_PREFIX = "dungeons-alt1";
 const INVALID_CAPTURES_BEFORE_RECALIBRATION = 3;
 const OVERLAY_DURATION = 30000;
+const PARTY_SCAN_INTERVAL = 5000;
 
 const elements = {
   titlebar: document.querySelector(".titlebar"),
@@ -54,6 +62,9 @@ const elements = {
   teamDisconnect: document.querySelector("#team-disconnect"),
   teamStatus: document.querySelector("#team-status"),
   partySlots: [...document.querySelectorAll(".party-slot")],
+  partyInterface: document.querySelector("#party-interface"),
+  partyScan: document.querySelector("#party-scan"),
+  partyScanStatus: document.querySelector("#party-scan-status"),
   installLink: document.querySelector("#install-link"),
   environment: document.querySelector("#environment"),
   resultsBody: document.querySelector("#results-body"),
@@ -82,6 +93,10 @@ const state = {
   lastCalibrationAttempt: 0,
   lastOverlayReport: null,
   results: [],
+  observedParty: [],
+  partyPanel: null,
+  partyScanBusy: false,
+  lastPartyScan: 0,
 };
 
 function loadCalibration() {
@@ -123,6 +138,14 @@ function samePoint(left, right) {
 }
 
 function participantSlot(ownerId, hintedSlot = null) {
+  if (elements.partyInterface.checked && state.observedParty.length) {
+    const syncedName = teamSync.member(ownerId)?.name;
+    const localName = ownerId === teamSync.clientId
+      ? (elements.teamName.value.trim() || teamSync.name)
+      : "";
+    const observed = observedPartySlot(state.observedParty, syncedName || localName);
+    if (observed) return observed;
+  }
   const rosterSlot = teamSync.member(ownerId)?.slot;
   if (rosterSlot) return rosterSlot;
   const slot = Number(hintedSlot);
@@ -209,8 +232,19 @@ async function updateMap() {
   let shouldRecalibrate = false;
   try {
     assertAlt1Ready();
-    const { x, y, floor } = state.calibration;
-    const image = captureRegion(x, y, floor.imageWidth, floor.imageHeight);
+    let { x, y, floor } = state.calibration;
+    let image = captureRegion(x, y, floor.imageWidth, floor.imageHeight);
+    if (!isValidMap(image)) {
+      // Reacquire a moved map immediately so native labels, gatestones and the
+      // stats strip remain magnetically attached to its client coordinates.
+      const relocated = findMapByCorners(captureFullRuneScape());
+      if (relocated) {
+        state.calibration = relocated;
+        ({ x, y, floor } = relocated);
+        saveCalibration();
+        image = captureRegion(x, y, floor.imageWidth, floor.imageHeight);
+      }
+    }
     if (!isValidMap(image)) {
       state.invalidCaptures += 1;
       setStatus(`Map image lost (${state.invalidCaptures}/${INVALID_CAPTURES_BEFORE_RECALIBRATION})`, "warn");
@@ -270,6 +304,17 @@ function updateStats() {
   const elapsedSeconds = state.floorStart ? Math.max(0, Math.floor((Date.now() - state.floorStart) / 1000)) : 0;
   const elapsed = `${String(Math.floor(elapsedSeconds / 60)).padStart(2, "0")}:${String(elapsedSeconds % 60).padStart(2, "0")}`;
   elements.stats.textContent = `${rooms} rooms (${possible}) · ${rpm} rpm · ${state.gameMap.deadEndCount} dead ends · ${elapsed}`;
+}
+
+function currentOverlayStats() {
+  if (!state.gameMap) return "";
+  const minutes = state.floorStart ? Math.max((Date.now() - state.floorStart) / 60_000, 1 / 60) : 0;
+  return formatMapStats({
+    rooms: state.gameMap.openedRoomCount,
+    mystery: state.gameMap.mysteryCount,
+    deadEnds: state.gameMap.deadEndCount,
+    minutes,
+  });
 }
 
 function render() {
@@ -555,7 +600,7 @@ function renderGameOverlay() {
     })),
     manualCritical: [...state.manualCritical].map(pointFromKey),
     gatestones: collectGatestoneMarkers(state.gameMap.floor),
-    stats: elements.stats.textContent,
+    stats: currentOverlayStats(),
     duration: OVERLAY_DURATION,
   });
   state.lastOverlayReport = drawOverlayGroup(api, group, commands);
@@ -702,14 +747,99 @@ async function copyResults() {
 
 function renderParty() {
   const members = teamSync.members;
+  const observed = elements.partyInterface.checked ? state.observedParty : [];
+  const localName = elements.teamName.value.trim() || teamSync.name;
+  const observedSelfSlot = observedPartySlot(observed, localName);
   for (const row of elements.partySlots) {
     const slot = Number(row.dataset.slot);
-    const member = members.find((candidate) => candidate.slot === slot);
+    const scanned = observed.find((candidate) => candidate.slot === slot);
+    const member = observed.length
+      ? members.find((candidate) => observedPartySlot(observed, candidate.name) === slot)
+      : members.find((candidate) => candidate.slot === slot);
+    const displayName = scanned?.name || (scanned?.occupied ? `Player ${slot}` : "") || member?.name;
     row.style.setProperty("--player-color", partyColor(slot, "#6d6a62"));
-    row.dataset.occupied = String(Boolean(member));
-    row.dataset.self = String(member?.id === teamSync.clientId);
-    row.querySelector(".party-name").textContent = member?.name ?? "Empty slot";
-    row.title = member ? `Player ${slot}: ${member.name}` : `Player ${slot}: empty`;
+    row.dataset.occupied = String(Boolean(displayName));
+    row.dataset.self = String(observedSelfSlot ? observedSelfSlot === slot : member?.id === teamSync.clientId);
+    row.querySelector(".party-name").textContent = displayName || "Empty slot";
+    row.title = displayName ? `Player ${slot}: ${displayName}` : `Player ${slot}: empty`;
+  }
+}
+
+function partyOcrRuntime() {
+  const fontModule = window.Alt1Fonts;
+  return {
+    capture: window.A1lib?.capture,
+    ocr: window.OCR,
+    font: fontModule?.default ?? fontModule,
+  };
+}
+
+function globalPartyPanel(panel, offset) {
+  return {
+    ...panel,
+    x: panel.x + offset.x,
+    y: panel.y + offset.y,
+    lineLeft: panel.lineLeft + offset.x,
+    lineRight: panel.lineRight + offset.x,
+    firstDividerY: panel.firstDividerY + offset.y,
+  };
+}
+
+async function scanPartyInterface({ manual = false, forceFull = false } = {}) {
+  if (state.partyScanBusy || !elements.partyInterface.checked) return false;
+  state.lastPartyScan = Date.now();
+  if (!hasAlt1() || !window.alt1.rsLinked) {
+    if (manual) elements.partyScanStatus.textContent = "Link Alt1 to RuneScape before scanning the party";
+    return false;
+  }
+  const runtime = partyOcrRuntime();
+  if (!runtime.capture || !runtime.ocr?.findReadLine || !runtime.font?.chars) {
+    elements.partyScanStatus.textContent = "Alt1 OCR runtime unavailable; using team join order";
+    return false;
+  }
+
+  state.partyScanBusy = true;
+  elements.partyScan.disabled = true;
+  try {
+    const attempts = [];
+    if (state.partyPanel && !forceFull) {
+      const margin = 8;
+      attempts.push({
+        x: Math.max(0, state.partyPanel.x - margin),
+        y: Math.max(0, state.partyPanel.y - margin),
+        width: 0,
+        height: 0,
+      });
+      const cached = attempts.at(-1);
+      cached.width = Math.min(window.alt1.rsWidth - cached.x, state.partyPanel.width + margin * 2);
+      cached.height = Math.min(window.alt1.rsHeight - cached.y, state.partyPanel.height + margin * 2);
+    }
+    attempts.push({ x: 0, y: 0, width: window.alt1.rsWidth, height: window.alt1.rsHeight });
+
+    for (const area of attempts) {
+      const image = runtime.capture(area.x, area.y, area.width, area.height);
+      const result = readPartyInterface(image, runtime);
+      if (!result) continue;
+      state.partyPanel = globalPartyPanel(result.panel, area);
+      state.observedParty = result.members;
+      const named = result.members.filter((member) => member.name).length;
+      const occupied = result.members.filter((member) => member.occupied).length;
+      elements.partyScanStatus.textContent = named
+        ? `RuneScape party read: ${named}/${occupied} names · positions active`
+        : `Party rows found (${occupied}/5), but names could not be read · join-order fallback`;
+      if (named) teamSync.sendPartyOrder(result.members);
+      renderParty();
+      render();
+      return true;
+    }
+    if (manual) elements.partyScanStatus.textContent = "DG party interface not found; keep it open and try again";
+    return false;
+  } catch (error) {
+    elements.partyScanStatus.textContent = `Party scan failed: ${error.message || error}`;
+    return false;
+  } finally {
+    state.partyScanBusy = false;
+    elements.partyScan.disabled = false;
   }
 }
 
@@ -718,6 +848,7 @@ function sendTeamSnapshot() {
     teamSync.sendAnnotation(pointFromKey(pointKey), annotation.text);
   }
   for (const [index, point] of Object.entries(state.localGatestones)) teamSync.sendGatestone(index, point);
+  teamSync.sendPartyOrder(state.observedParty);
 }
 
 function bindEvents() {
@@ -785,10 +916,32 @@ function bindEvents() {
     teamSync.disconnect();
     clearTeamGatestones();
   });
+  elements.partyScan.addEventListener("click", () => scanPartyInterface({ manual: true, forceFull: true }));
+  elements.partyInterface.addEventListener("change", () => {
+    if (!elements.partyInterface.checked) {
+      state.observedParty = [];
+      state.partyPanel = null;
+      elements.partyScanStatus.textContent = "RuneScape party positions disabled; using team join order";
+      renderParty();
+      render();
+      return;
+    }
+    elements.partyScanStatus.textContent = "Open the DG party interface to scan its player order";
+    scanPartyInterface({ manual: true, forceFull: true });
+  });
   teamSync.addEventListener("status", (event) => { elements.teamStatus.textContent = event.detail; });
-  teamSync.addEventListener("connected", sendTeamSnapshot);
+  teamSync.addEventListener("connected", () => {
+    sendTeamSnapshot();
+    scanPartyInterface({ forceFull: !state.partyPanel });
+  });
   teamSync.addEventListener("disconnected", clearTeamGatestones);
   teamSync.addEventListener("hello", sendTeamSnapshot);
+  teamSync.addEventListener("party", (event) => {
+    state.observedParty = event.detail.members;
+    elements.partyScanStatus.textContent = `RuneScape party order received from ${event.detail.senderName}`;
+    renderParty();
+    render();
+  });
   teamSync.addEventListener("roster", () => {
     renderParty();
     const memberIds = new Set(teamSync.members.map((member) => member.id));
@@ -841,6 +994,14 @@ async function scanLoop() {
   setTimeout(scanLoop, SCAN_INTERVAL);
 }
 
+async function partyScanLoop() {
+  if (elements.partyInterface.checked && (teamSync.connected || state.partyPanel)
+    && Date.now() - state.lastPartyScan >= PARTY_SCAN_INTERVAL) {
+    await scanPartyInterface();
+  }
+  setTimeout(partyScanLoop, 1000);
+}
+
 async function scanOnce() {
   if (!state.autoScan || state.busy) return;
   if (state.calibration) {
@@ -859,7 +1020,11 @@ function initialize() {
   updateStats();
   elements.teamRoom.value = createRoomCode();
   elements.teamName.value = localStorage.getItem(`${STORAGE_PREFIX}:name`) || "";
-  elements.teamName.addEventListener("change", () => localStorage.setItem(`${STORAGE_PREFIX}:name`, elements.teamName.value));
+  elements.teamName.addEventListener("change", () => {
+    localStorage.setItem(`${STORAGE_PREFIX}:name`, elements.teamName.value);
+    renderParty();
+    render();
+  });
 
   const configUrl = new URL("appconfig.json", window.location.href).href;
   elements.installLink.href = `alt1://addapp/${configUrl}`;
@@ -874,6 +1039,7 @@ function initialize() {
   }
   updateOverlayStatus();
   scanLoop();
+  partyScanLoop();
 }
 
 initialize();

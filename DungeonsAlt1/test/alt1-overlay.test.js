@@ -6,6 +6,7 @@ import {
   buildMapOverlayCommands,
   buildTestOverlayCommands,
   drawOverlayGroup,
+  formatMapStats,
   hexToOverlayColor,
   mixColor,
 } from "../src/alt1-overlay.js";
@@ -34,6 +35,13 @@ test("gatestone slots are allocated per room and invalid points are ignored", ()
   ]);
 });
 
+test("map stats match the desktop EXE wording and RPM calculation", () => {
+  assert.equal(formatMapStats({ rooms: 1, mystery: 3, deadEnds: 2, minutes: 2 }),
+    "1 room (4) | 0.1 rpm | 2 dead ends");
+  assert.equal(formatMapStats({ rooms: 12, mystery: 4, deadEnds: 5, minutes: 2 }),
+    "12 rooms (16) | 5.6 rpm | 5 dead ends");
+});
+
 test("map commands use client-relative coordinates and include every marker type", () => {
   const gatestones = assignGatestoneSlots([
     { source: "local", point: { x: 1, y: 1 }, text: "G1", fill: "#ffd23f", textColor: "#111111" },
@@ -50,7 +58,7 @@ test("map commands use client-relative coordinates and include every marker type
     ],
     manualCritical: [{ x: 2, y: 2 }, { x: -1, y: 0 }],
     gatestones,
-    stats: "4 rooms",
+    stats: "4 rooms (7) | 3.2 rpm | 1 dead ends",
     duration: 30_000,
   });
 
@@ -64,7 +72,15 @@ test("map commands use client-relative coordinates and include every marker type
   assert.deepEqual({ x: local.x, y: local.y }, { x: 151, y: 152 });
   assert.notDeepEqual({ x: team.x, y: team.y }, { x: local.x, y: local.y });
   assert.equal(commands.some((command) => command.text === "invalid"), false);
-  assert.equal(commands.some((command) => command.text === "4 rooms"), true);
+  const stats = commands.find((command) => command.text === "4 rooms (7) | 3.2 rpm | 1 dead ends");
+  const statsBackground = commands.find((command) => command.type === "rect"
+    && command.y === 202 && command.height === 21);
+  assert.deepEqual({ x: stats.x, y: stats.y, centered: stats.centered, shadow: stats.shadow },
+    { x: 103, y: 205, centered: false, shadow: false });
+  assert.equal(stats.color, mixColor(255, 255, 255));
+  assert.ok(statsBackground);
+  assert.equal(statsBackground.color, mixColor(0, 0, 0));
+  assert.ok(statsBackground.width >= floor.imageWidth);
 });
 
 test("test overlay stays in RuneScape-client coordinates", () => {

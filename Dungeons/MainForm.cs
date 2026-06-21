@@ -1,4 +1,5 @@
 ﻿using Dungeons.Common;
+using Dungeons.ScreenCapture;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -101,7 +102,7 @@ namespace Dungeons
             NativeMethods.RegisterHotKey(Handle, 0, 0, NativeMethods.VK_F11);
             dataGridView1.Font = new Font("Calibri", 11);
 
-            windowComboBox.DataSource = (from x in Process.GetProcessesByName("rs2client") select new ProcessWindow(x)).ToList();
+            RefreshProcessesList();
             Log("Started up, calibrating");
             _ = mapForm.CalibrateAsync();
             if (Screen.FromPoint(Properties.Settings.Default.MainFormLocation) != null)
@@ -238,6 +239,7 @@ namespace Dungeons
             captureScreenCheckBox = new CheckBox
             {
                 AutoSize = true,
+                Checked = true,
                 FlatStyle = FlatStyle.System,
                 Location = new Point(390, y + 2),
                 Text = "Screen capture"

@@ -15,6 +15,7 @@ This is the Alt1 version of the `Dungeons` project. It does not use or modify `A
 - Personal gatestone detection that excludes boss-room markers and player arrows.
 - Shared team labels and gatestones through the existing WebSocket relay.
 - A five-player Dungeoneering party panel that assigns the fixed red, cyan, green, yellow and grey player colors by join order. Labels and G1/G2 markers use the owner's current party color on every connected screen.
+- Optional RuneScape party-interface scanning uses the official Alt1 sprite OCR to read the five colored RSN rows. A successfully read row overrides join order locally; closing the interface or an OCR miss safely falls back to the synced roster.
 - PNG export of the visible map.
 - Dungeoneering results-screen OCR for time, floor, modifiers, bonus and XP.
 

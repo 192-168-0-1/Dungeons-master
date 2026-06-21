@@ -29,6 +29,65 @@ export function partyTextColor(slot, fallback = "#111111") {
   return partyStyle(slot)?.textColor ?? fallback;
 }
 
+export function normalizePartyName(value) {
+  return String(value ?? "").toLowerCase().replace(/[_\s]+/g, "").replace(/[^a-z0-9]/g, "");
+}
+
+function editDistance(left, right) {
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    const current = [leftIndex];
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      current[rightIndex] = Math.min(
+        current[rightIndex - 1] + 1,
+        previous[rightIndex] + 1,
+        previous[rightIndex - 1] + (left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1),
+      );
+    }
+    previous.splice(0, previous.length, ...current);
+  }
+  return previous[right.length];
+}
+
+export function observedPartySlot(members, name) {
+  const target = normalizePartyName(name);
+  if (!target) return null;
+  const candidates = (members ?? [])
+    .filter((member) => member?.occupied !== false && Number.isInteger(Number(member?.slot)))
+    .map((member) => ({ member, key: normalizePartyName(member.name) }))
+    .filter((candidate) => candidate.key);
+  const exact = candidates.find((candidate) => candidate.key === target);
+  if (exact) return Number(exact.member.slot);
+
+  const limit = target.length >= 10 ? 2 : target.length >= 4 ? 1 : 0;
+  if (!limit) return null;
+  const ranked = candidates
+    .map((candidate) => ({ ...candidate, distance: editDistance(candidate.key, target) }))
+    .sort((left, right) => left.distance - right.distance);
+  if (!ranked.length || ranked[0].distance > limit
+    || (ranked[1] && ranked[1].distance === ranked[0].distance)) return null;
+  return Number(ranked[0].member.slot);
+}
+
+export function normalizeObservedParty(value) {
+  if (!Array.isArray(value)) return [];
+  const slots = new Set();
+  const names = new Set();
+  const result = [];
+  for (const candidate of value) {
+    const slot = Number(candidate?.slot);
+    const name = String(candidate?.name ?? "").replace(/[^a-z0-9 _-]/gi, "")
+      .replace(/\s+/g, " ").trim().slice(0, 24);
+    const key = normalizePartyName(name);
+    if (!Number.isInteger(slot) || slot < 1 || slot > PARTY_SIZE || !key
+      || slots.has(slot) || names.has(key)) continue;
+    slots.add(slot);
+    names.add(key);
+    result.push({ slot, name, occupied: true });
+  }
+  return result.sort((left, right) => left.slot - right.slot);
+}
+
 export function normalizePartyRoster(value) {
   if (!Array.isArray(value)) return [];
   const members = [];
