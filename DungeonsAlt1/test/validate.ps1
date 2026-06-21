@@ -87,6 +87,8 @@ if (($mapCore -notmatch 'function isBossMarkerAt\(image, originX, originY\)') -o
 $html = Get-Content (Join-Path $appRoot 'index.html') -Raw
 $app = Get-Content (Join-Path $appRoot 'app.js') -Raw
 $overlay = Get-Content (Join-Path $appRoot 'src\alt1-overlay.js') -Raw
+$partyCore = Get-Content (Join-Path $appRoot 'src\party-core.js') -Raw
+$teamSync = Get-Content (Join-Path $appRoot 'src\team-sync.js') -Raw
 $nativeOverlaySource = $app + "`n" + $overlay
 $domIds = @([regex]::Matches($app, 'querySelector\("#(?<id>[a-z0-9-]+)"\)') | ForEach-Object { $_.Groups['id'].Value })
 $missingDomIds = @($domIds | Where-Object { $html -notmatch ('id="' + [regex]::Escape($_) + '"') })
@@ -111,6 +113,22 @@ if ($overlay -notmatch 'overLaySetGroup\(""\)') {
 }
 if ($app -notmatch 'gatestones:\s*collectGatestoneMarkers' -or $overlay -notmatch 'for \(const marker of gatestones\)') {
     throw 'Local and team gatestones must be included in the native RuneScape overlay.'
+}
+if (([regex]::Matches($html, 'class="party-slot" data-slot="[1-5]"')).Count -ne 5) {
+    throw 'The Dungeoneering party interface must contain exactly five visible slots.'
+}
+if (($partyCore -notmatch 'PARTY_SIZE = 5') -or
+    ([regex]::Matches($partyCore, 'color: "#[0-9a-f]{6}"').Count -ne 5)) {
+    throw 'The fixed five-player color palette is missing from party-core.js.'
+}
+if (($teamSync -notmatch 'send\("ROSTER"') -or
+    ($teamSync -notmatch 'send\("FULL"') -or
+    ($teamSync -notmatch 'this\.slot \?\? 0')) {
+    throw 'Team-sync must distribute the five-player roster and sender slot metadata.'
+}
+if (($app -notmatch 'ownerColor\(annotation\.ownerId') -or
+    ($overlay -notmatch 'hexToOverlayColor\(annotation\.color')) {
+    throw 'Both canvas and native annotations must use their owner party color.'
 }
 
 $manifest = Get-Content (Join-Path $appRoot 'appconfig.json') -Raw | ConvertFrom-Json

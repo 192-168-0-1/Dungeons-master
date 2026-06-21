@@ -92,7 +92,10 @@ export function buildMapOverlayCommands({
     const centerX = Math.round(originX + origin.x + ROOM_SIZE / 2);
     const centerY = Math.round(originY + origin.y + ROOM_SIZE / 2);
     commands.push(rect(mixColor(1, 1, 1, 180), centerX - 13, centerY - 8, 26, 16, duration, 2));
-    commands.push(text(annotation.text, annotationOverlayColor(annotation.text), 12,
+    const color = annotation.color
+      ? hexToOverlayColor(annotation.color, 255)
+      : annotationOverlayColor(annotation.text);
+    commands.push(text(annotation.text, color, 12,
       centerX, centerY, duration));
   }
 

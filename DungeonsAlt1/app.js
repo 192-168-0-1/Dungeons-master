@@ -20,6 +20,7 @@ import {
   drawOverlayGroup,
 } from "./src/alt1-overlay.js";
 import { TeamSync, createRoomCode } from "./src/team-sync.js";
+import { PARTY_COLORS, partyColor, partyTextColor } from "./src/party-core.js";
 import { WinterfaceReader } from "./src/winterface.js";
 
 const SCAN_INTERVAL = 600;
@@ -52,6 +53,7 @@ const elements = {
   teamJoin: document.querySelector("#team-join"),
   teamDisconnect: document.querySelector("#team-disconnect"),
   teamStatus: document.querySelector("#team-status"),
+  partySlots: [...document.querySelectorAll(".party-slot")],
   installLink: document.querySelector("#install-link"),
   environment: document.querySelector("#environment"),
   resultsBody: document.querySelector("#results-body"),
@@ -118,6 +120,26 @@ function pointFromKey(value) {
 
 function samePoint(left, right) {
   return Boolean(left && right && left.x === right.x && left.y === right.y);
+}
+
+function participantSlot(ownerId, hintedSlot = null) {
+  const rosterSlot = teamSync.member(ownerId)?.slot;
+  if (rosterSlot) return rosterSlot;
+  const slot = Number(hintedSlot);
+  return Number.isInteger(slot) && slot >= 1 && slot <= PARTY_COLORS.length ? slot : null;
+}
+
+function ownerColor(ownerId, hintedSlot, fallback) {
+  return partyColor(participantSlot(ownerId, hintedSlot), fallback);
+}
+
+function localAnnotation(text) {
+  return {
+    text,
+    ownerId: teamSync.clientId,
+    ownerName: teamSync.name,
+    slot: teamSync.slot,
+  };
 }
 
 function pointInFloor(point, floor = state.gameMap?.floor) {
@@ -356,7 +378,7 @@ function drawCriticalRooms(gameMap) {
   context.restore();
 }
 
-function annotationColor(text) {
+function legacyAnnotationColor(text) {
   const value = String(text || "").toLowerCase();
   if (value.startsWith("go")) return "rgba(255, 215, 0, .95)";
   if (value.startsWith("gr")) return "rgba(100, 255, 100, .95)";
@@ -374,13 +396,13 @@ function drawAnnotations(floor) {
   context.textBaseline = "top";
   context.shadowColor = "rgba(0,0,0,.9)";
   context.shadowBlur = 2;
-  for (const [pointKey, text] of state.annotations) {
-    if (!text) continue;
+  for (const [pointKey, annotation] of state.annotations) {
+    if (!annotation?.text) continue;
     const point = pointFromKey(pointKey);
     if (!pointInFloor(point, floor)) continue;
     const origin = mapToImage(point, floor);
-    context.fillStyle = annotationColor(text);
-    context.fillText(text, origin.x + 3, origin.y + 3);
+    context.fillStyle = ownerColor(annotation.ownerId, annotation.slot, legacyAnnotationColor(annotation.text));
+    context.fillText(annotation.text, origin.x + 3, origin.y + 3);
   }
   context.restore();
 }
@@ -410,28 +432,28 @@ function drawGatestoneBadge(point, text, fill, color, floor, slot) {
   context.restore();
 }
 
-function colorForOwner(id) {
-  const colors = ["#e7502b", "#35b7e8", "#52be4c", "#eed340", "#aaafb2"];
-  let hash = 17;
-  for (const character of String(id)) hash = ((hash * 31) + character.charCodeAt(0)) | 0;
-  return colors[Math.abs(hash) % colors.length];
-}
-
 function collectGatestoneMarkers(floor = state.gameMap?.floor) {
   if (!floor) return [];
+  const localSlot = participantSlot(teamSync.clientId, teamSync.slot);
   const markers = Object.entries(state.localGatestones)
     .sort(([left], [right]) => Number(left) - Number(right))
     .map(([index, point]) => ({
       source: "local",
+      ownerId: teamSync.clientId,
+      ownerName: teamSync.name,
+      partySlot: localSlot,
       point,
       text: `G${index}`,
-      fill: "#ffd23f",
-      textColor: "#111111",
+      fill: partyColor(localSlot, "#ffd23f"),
+      textColor: partyTextColor(localSlot, "#111111"),
     }));
 
   const owners = [...state.teamGatestones.values()]
-    .sort((left, right) => String(left.id).localeCompare(String(right.id)));
+    .sort((left, right) => (participantSlot(left.id, left.slot) ?? 99)
+      - (participantSlot(right.id, right.slot) ?? 99)
+      || String(left.id).localeCompare(String(right.id)));
   for (const owner of owners) {
+    const slot = participantSlot(owner.id, owner.slot);
     const locations = [...owner.locations.entries()]
       .sort(([left], [right]) => Number(left) - Number(right));
     for (const [index, point] of locations) {
@@ -439,10 +461,11 @@ function collectGatestoneMarkers(floor = state.gameMap?.floor) {
         source: "team",
         ownerId: owner.id,
         ownerName: owner.name,
+        partySlot: slot,
         point,
         text: String(index),
-        fill: colorForOwner(owner.id),
-        textColor: "#ffffff",
+        fill: partyColor(slot, "#aaafb2"),
+        textColor: partyTextColor(slot, "#ffffff"),
       });
     }
   }
@@ -525,7 +548,11 @@ function renderGameOverlay() {
     mapX: state.calibration.x,
     mapY: state.calibration.y,
     floor: state.gameMap.floor,
-    annotations: [...state.annotations].map(([pointKey, text]) => ({ point: pointFromKey(pointKey), text })),
+    annotations: [...state.annotations].map(([pointKey, annotation]) => ({
+      point: pointFromKey(pointKey),
+      text: annotation.text,
+      color: ownerColor(annotation.ownerId, annotation.slot, null),
+    })),
     manualCritical: [...state.manualCritical].map(pointFromKey),
     gatestones: collectGatestoneMarkers(state.gameMap.floor),
     stats: elements.stats.textContent,
@@ -567,9 +594,9 @@ function testGameOverlay() {
 function selectPoint(point) {
   if (!pointInFloor(point)) return;
   state.selected = point;
-  const annotation = state.annotations.get(floorPointKey(point)) ?? "";
+  const annotation = state.annotations.get(floorPointKey(point));
   elements.selection.textContent = `${toChess(point)} · ${isOpened(state.gameMap.typeAt(point.x, point.y)) ? "room" : "unknown"}`;
-  elements.annotation.value = annotation;
+  elements.annotation.value = annotation?.text ?? "";
   elements.annotation.focus();
   elements.annotation.select();
   render();
@@ -579,7 +606,7 @@ function setSelectedAnnotation(value, notify = true) {
   if (!pointInFloor(state.selected)) return;
   const text = String(value ?? "").slice(0, 4);
   const pointKey = floorPointKey(state.selected);
-  if (text) state.annotations.set(pointKey, text);
+  if (text) state.annotations.set(pointKey, localAnnotation(text));
   else state.annotations.delete(pointKey);
   elements.annotation.value = text;
   if (notify) teamSync.sendAnnotation(state.selected, text);
@@ -673,8 +700,23 @@ async function copyResults() {
   setStatus("Results table copied to the clipboard", "ok");
 }
 
+function renderParty() {
+  const members = teamSync.members;
+  for (const row of elements.partySlots) {
+    const slot = Number(row.dataset.slot);
+    const member = members.find((candidate) => candidate.slot === slot);
+    row.style.setProperty("--player-color", partyColor(slot, "#6d6a62"));
+    row.dataset.occupied = String(Boolean(member));
+    row.dataset.self = String(member?.id === teamSync.clientId);
+    row.querySelector(".party-name").textContent = member?.name ?? "Empty slot";
+    row.title = member ? `Player ${slot}: ${member.name}` : `Player ${slot}: empty`;
+  }
+}
+
 function sendTeamSnapshot() {
-  for (const [pointKey, annotation] of state.annotations) teamSync.sendAnnotation(pointFromKey(pointKey), annotation);
+  for (const [pointKey, annotation] of state.annotations) {
+    teamSync.sendAnnotation(pointFromKey(pointKey), annotation.text);
+  }
   for (const [index, point] of Object.entries(state.localGatestones)) teamSync.sendGatestone(index, point);
 }
 
@@ -695,7 +737,10 @@ function bindEvents() {
   elements.showGrid.addEventListener("change", render);
   elements.gameOverlay.addEventListener("change", renderGameOverlay);
   elements.testOverlay.addEventListener("click", testGameOverlay);
-  window.addEventListener("beforeunload", clearGameOverlay);
+  window.addEventListener("beforeunload", () => {
+    clearGameOverlay();
+    teamSync.disconnect(false);
+  });
   elements.applyAnnotation.addEventListener("click", () => setSelectedAnnotation(elements.annotation.value));
   elements.annotation.addEventListener("keydown", (event) => {
     if (event.key === "Enter") { setSelectedAnnotation(elements.annotation.value); elements.canvas.focus(); }
@@ -728,7 +773,9 @@ function bindEvents() {
   elements.teamCreate.addEventListener("click", () => {
     clearTeamGatestones();
     elements.teamRoom.value = createRoomCode();
-    elements.teamRoom.value = teamSync.connect(elements.teamRoom.value, elements.teamName.value);
+    elements.teamRoom.value = teamSync.connect(
+      elements.teamRoom.value, elements.teamName.value, undefined, { create: true },
+    );
   });
   elements.teamJoin.addEventListener("click", () => {
     clearTeamGatestones();
@@ -742,22 +789,46 @@ function bindEvents() {
   teamSync.addEventListener("connected", sendTeamSnapshot);
   teamSync.addEventListener("disconnected", clearTeamGatestones);
   teamSync.addEventListener("hello", sendTeamSnapshot);
+  teamSync.addEventListener("roster", () => {
+    renderParty();
+    const memberIds = new Set(teamSync.members.map((member) => member.id));
+    if (memberIds.size) {
+      for (const ownerId of state.teamGatestones.keys()) {
+        if (!memberIds.has(ownerId)) state.teamGatestones.delete(ownerId);
+      }
+      for (const [pointKey, annotation] of state.annotations) {
+        if (annotation.ownerId !== teamSync.clientId && !memberIds.has(annotation.ownerId)) {
+          state.annotations.delete(pointKey);
+        }
+      }
+    }
+    render();
+  });
+  teamSync.addEventListener("full", clearTeamGatestones);
   teamSync.addEventListener("annotation", (event) => {
-    const { point, text } = event.detail;
+    const { senderId, senderName, point, text, slot } = event.detail;
     if (!pointInFloor(point)) return;
-    if (text) state.annotations.set(floorPointKey(point), String(text).slice(0, 4));
+    if (text) {
+      state.annotations.set(floorPointKey(point), {
+        text: String(text).slice(0, 4),
+        ownerId: senderId,
+        ownerName: senderName,
+        slot,
+      });
+    }
     else state.annotations.delete(floorPointKey(point));
     render();
   });
   teamSync.addEventListener("clear", () => clearAnnotations(false));
   teamSync.addEventListener("gatestone", (event) => {
-    const { senderId, senderName, index, point } = event.detail;
+    const { senderId, senderName, index, point, slot } = event.detail;
     let owner = state.teamGatestones.get(senderId);
     if (!owner) {
-      owner = { id: senderId, name: senderName, locations: new Map() };
+      owner = { id: senderId, name: senderName, slot, locations: new Map() };
       state.teamGatestones.set(senderId, owner);
     }
     owner.name = senderName;
+    owner.slot = slot ?? owner.slot;
     if (pointInFloor(point)) owner.locations.set(index, point);
     else owner.locations.delete(index);
     if (!owner.locations.size) state.teamGatestones.delete(senderId);
@@ -783,6 +854,7 @@ async function scanOnce() {
 
 function initialize() {
   bindEvents();
+  renderParty();
   drawEmptyState();
   updateStats();
   elements.teamRoom.value = createRoomCode();

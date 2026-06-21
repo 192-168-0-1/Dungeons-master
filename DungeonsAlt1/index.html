@@ -77,19 +77,31 @@
       </div>
     </details>
 
-    <details>
+    <details open>
       <summary>Team-sync</summary>
-      <div class="team-grid">
-        <label for="team-name">RSN</label>
-        <input id="team-name" maxlength="24" autocomplete="nickname" placeholder="Your name">
-        <label for="team-room">Room</label>
-        <input id="team-room" maxlength="12" autocomplete="off" spellcheck="false">
-        <div class="team-buttons">
-          <button id="team-create" type="button">New room</button>
-          <button id="team-join" type="button">Join</button>
-          <button id="team-disconnect" type="button">Disconnect</button>
+      <div class="team-panel">
+        <div class="dg-party" aria-label="Dungeoneering party">
+          <img class="party-emblem" src="./icon.png" alt="" aria-hidden="true">
+          <ol class="party-roster">
+            <li class="party-slot" data-slot="1"><span class="party-arrow"></span><span class="party-name">Empty slot</span><span class="party-you">YOU</span></li>
+            <li class="party-slot" data-slot="2"><span class="party-arrow"></span><span class="party-name">Empty slot</span><span class="party-you">YOU</span></li>
+            <li class="party-slot" data-slot="3"><span class="party-arrow"></span><span class="party-name">Empty slot</span><span class="party-you">YOU</span></li>
+            <li class="party-slot" data-slot="4"><span class="party-arrow"></span><span class="party-name">Empty slot</span><span class="party-you">YOU</span></li>
+            <li class="party-slot" data-slot="5"><span class="party-arrow"></span><span class="party-name">Empty slot</span><span class="party-you">YOU</span></li>
+          </ol>
         </div>
-        <small id="team-status">Team-sync offline</small>
+        <div class="team-grid">
+          <label for="team-name">RSN</label>
+          <input id="team-name" maxlength="24" autocomplete="nickname" placeholder="Your name">
+          <label for="team-room">Room</label>
+          <input id="team-room" maxlength="12" autocomplete="off" spellcheck="false">
+          <div class="team-buttons">
+            <button id="team-create" type="button">New room</button>
+            <button id="team-join" type="button">Join</button>
+            <button id="team-disconnect" type="button">Disconnect</button>
+          </div>
+          <small id="team-status">Team-sync offline</small>
+        </div>
       </div>
     </details>
   </main>

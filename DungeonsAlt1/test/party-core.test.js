@@ -1,0 +1,64 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import {
+  PARTY_COLORS,
+  addPartyMember,
+  normalizePartyRoster,
+  parsePartyRoster,
+  partyColor,
+  partyTextColor,
+  removePartyMember,
+} from "../src/party-core.js";
+
+test("party slots use the fixed RuneScape player color order", () => {
+  assert.deepEqual(PARTY_COLORS.map((entry) => entry.color), [
+    "#e7502b", "#35b7e8", "#52be4c", "#eed340", "#aaafb2",
+  ]);
+  assert.equal(partyColor(1), "#e7502b");
+  assert.equal(partyColor(5), "#aaafb2");
+  assert.equal(partyColor(null, "#123456"), "#123456");
+  assert.equal(partyTextColor(4), "#171303");
+});
+
+test("members are assigned by join order and a sixth member is rejected", () => {
+  let roster = [{ id: "leader", name: "Leader", slot: 1 }];
+  for (let number = 2; number <= 5; number += 1) {
+    const result = addPartyMember(roster, { id: `player${number}`, name: `Player ${number}` });
+    assert.equal(result.full, false);
+    assert.equal(result.member.slot, number);
+    roster = result.roster;
+  }
+
+  const full = addPartyMember(roster, { id: "player6", name: "Player 6" });
+  assert.equal(full.full, true);
+  assert.equal(full.member, null);
+  assert.equal(full.roster.length, 5);
+});
+
+test("leaving compacts the visible party positions and their colors", () => {
+  const roster = [
+    { id: "leader", name: "Leader", slot: 1 },
+    { id: "second", name: "Second", slot: 2 },
+    { id: "third", name: "Third", slot: 3 },
+  ];
+  assert.deepEqual(removePartyMember(roster, "second"), [
+    { id: "leader", name: "Leader", slot: 1 },
+    { id: "third", name: "Third", slot: 2 },
+  ]);
+  assert.equal(partyColor(removePartyMember(roster, "second")[1].slot), "#35b7e8");
+});
+
+test("untrusted roster data is normalized before it reaches the UI", () => {
+  const roster = normalizePartyRoster([
+    { id: "safe-id", name: "  Name  ", slot: 2 },
+    { id: "safe-id", name: "Duplicate", slot: 3 },
+    { id: "other", name: "Duplicate slot", slot: 2 },
+    { id: "bad id!", name: "Clean id", slot: 1 },
+    { id: "out", name: "Out", slot: 6 },
+  ]);
+  assert.deepEqual(roster, [
+    { id: "badid", name: "Clean id", slot: 1 },
+    { id: "safe-id", name: "Name", slot: 2 },
+  ]);
+  assert.deepEqual(parsePartyRoster("not-json"), []);
+});

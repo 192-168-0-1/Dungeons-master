@@ -195,7 +195,7 @@ summary {
 }
 
 .options,
-.team-grid,
+.team-panel,
 .results-panel {
   padding: 2px 9px 9px;
   border-top: 1px solid var(--line);
@@ -230,6 +230,96 @@ summary {
   align-items: center;
   padding-top: 8px;
 }
+
+.team-panel {
+  padding-top: 8px;
+}
+
+.dg-party {
+  position: relative;
+  width: min(100%, 338px);
+  height: 181px;
+  margin: 0 auto 9px;
+  overflow: hidden;
+  border: 2px solid #6b5a39;
+  border-radius: 2px;
+  background:
+    linear-gradient(90deg, rgba(255,255,255,.025), transparent 34px),
+    #282521;
+  box-shadow:
+    inset 0 0 0 2px #171713,
+    inset 0 0 0 4px #3b3528,
+    0 0 0 1px #090b0b;
+}
+
+.party-emblem {
+  position: absolute;
+  z-index: 2;
+  top: 10px;
+  left: 10px;
+  width: 27px;
+  height: 27px;
+  object-fit: contain;
+  filter: drop-shadow(0 1px 1px #000);
+}
+
+.party-roster {
+  height: 100%;
+  margin: 0 13px 0 44px;
+  padding: 7px 0;
+  list-style: none;
+}
+
+.party-slot {
+  --player-color: #6d6a62;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 33px;
+  padding: 0 7px 0 3px;
+  border-bottom: 2px solid #151512;
+  color: #706e67;
+  font: 600 15px "Palatino Linotype", Georgia, serif;
+  letter-spacing: .01em;
+  text-shadow: 1px 1px #080808;
+}
+
+.party-slot:last-child { border-bottom: 0; }
+
+.party-slot[data-occupied="true"] {
+  color: var(--player-color);
+}
+
+.party-arrow {
+  width: 0;
+  height: 0;
+  border-right: 6px solid transparent;
+  border-bottom: 9px solid var(--player-color);
+  border-left: 6px solid transparent;
+  filter: drop-shadow(0 1px 0 #080808);
+  transform: rotate(180deg);
+  opacity: .35;
+}
+
+.party-slot[data-occupied="true"] .party-arrow { opacity: 1; }
+
+.party-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.party-you {
+  display: none;
+  margin-left: auto;
+  color: #d5c89f;
+  font: 700 9px "Segoe UI", sans-serif;
+  letter-spacing: .08em;
+  text-shadow: 1px 1px #000;
+}
+
+.party-slot[data-self="true"] .party-you { display: inline; }
 
 .team-buttons,
 .team-grid small { grid-column: 2; }

@@ -45,7 +45,7 @@ test("map commands use client-relative coordinates and include every marker type
     mapY: 50,
     floor,
     annotations: [
-      { point: { x: 0, y: 0 }, text: "b" },
+      { point: { x: 0, y: 0 }, text: "b", color: "#e7502b" },
       { point: { x: 9, y: 9 }, text: "invalid" },
     ],
     manualCritical: [{ x: 2, y: 2 }, { x: -1, y: 0 }],
@@ -57,6 +57,7 @@ test("map commands use client-relative coordinates and include every marker type
   const annotation = commands.find((command) => command.type === "text" && command.text === "b");
   assert.deepEqual({ x: annotation.x, y: annotation.y }, { x: 128, y: 174 });
   assert.equal(annotation.color >>> 24, 255);
+  assert.equal(annotation.color, hexToOverlayColor("#e7502b"));
 
   const local = commands.find((command) => command.type === "text" && command.text === "G1");
   const team = commands.find((command) => command.type === "text" && command.text === "2");
