@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   findPartyPanel,
   isPartySlotPixel,
+  normalizeOcrPartyName,
   readPartyInterface,
   resolvePartyOcrRuntime,
 } from "../src/party-interface.js";
@@ -51,6 +52,14 @@ test("OCR runtime resolves the globals exported by the Alt1 browser bundles", ()
   assert.equal(runtime.ocr.findReadLine, findReadLine);
   assert.equal(runtime.font, font);
   assert.deepEqual(runtime.fonts, [font, largerFont]);
+});
+
+test("OCR party-name validation rejects divider garbage", () => {
+  assert.equal(normalizeOcrPartyName("A Ninja"), "A Ninja");
+  assert.equal(normalizeOcrPartyName("s_If"), "s If");
+  assert.equal(normalizeOcrPartyName("I-----------"), "");
+  assert.equal(normalizeOcrPartyName("_--- ---"), "");
+  assert.equal(normalizeOcrPartyName("_"), "");
 });
 
 test("four evenly spaced dividers locate a five-row DG party panel", () => {

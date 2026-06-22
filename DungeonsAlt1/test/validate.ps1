@@ -165,14 +165,15 @@ if (($partyInterface -notmatch 'function findPartyPanel') -or
 }
 $alt1OcrScripts = [regex]::Matches(
     $html,
-    '<script src="https://unpkg\.com/alt1@0\.1\.3/dist/[^\"]+" integrity="sha384-[A-Za-z0-9+/=]+" crossorigin="anonymous" referrerpolicy="no-referrer"></script>')
-if ($alt1OcrScripts.Count -ne 3) {
-    throw 'The three official Alt1 OCR scripts must be version-pinned and protected by SHA-384 SRI.'
+    '<script src="https://unpkg\.com/alt1@0\.1\.3/dist/[^\"]+" integrity="sha(256|384)-[A-Za-z0-9+/=]+" crossorigin="anonymous" referrerpolicy="no-referrer"></script>')
+if ($alt1OcrScripts.Count -ne 6) {
+    throw 'The six official Alt1 OCR scripts must be version-pinned and protected by SRI.'
 }
 
 $manifest = Get-Content (Join-Path $appRoot 'appconfig.json') -Raw | ConvertFrom-Json
 foreach ($relativePath in $manifest.appUrl, $manifest.configUrl, $manifest.iconUrl) {
-    if (-not (Test-Path (Join-Path $appRoot $relativePath))) {
+    $localPath = ($relativePath -split '[?#]', 2)[0]
+    if (-not (Test-Path (Join-Path $appRoot $localPath))) {
         throw "Manifest target does not exist: $relativePath"
     }
 }

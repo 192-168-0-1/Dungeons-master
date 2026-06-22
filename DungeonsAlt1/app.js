@@ -19,7 +19,7 @@ import {
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260622-1";
+} from "./src/alt1-overlay.js?v=20260622-2";
 import { TeamSync, createRoomCode } from "./src/team-sync.js";
 import {
   PARTY_COLORS,
@@ -27,7 +27,7 @@ import {
   partyColor,
   partyTextColor,
 } from "./src/party-core.js";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260622-1";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260622-2";
 import { WinterfaceReader } from "./src/winterface.js";
 
 const SCAN_INTERVAL = 600;
@@ -824,9 +824,10 @@ async function scanPartyInterface({ manual = false, forceFull = false } = {}) {
       state.observedParty = result.members;
       const named = result.members.filter((member) => member.name).length;
       const occupied = result.members.filter((member) => member.occupied).length;
+      const rowEvidence = result.members.map((member) => member.pixelCount).join("/");
       elements.partyScanStatus.textContent = named
         ? `RuneScape party read: ${named}/${occupied} names · positions active`
-        : `Party rows found (${occupied}/5), but names could not be read · join-order fallback`;
+        : `Party rows ${occupied}/5, OCR missed names · pixels ${rowEvidence}`;
       if (named) teamSync.sendPartyOrder(result.members);
       renderParty();
       render();
@@ -1026,7 +1027,7 @@ function initialize() {
     render();
   });
 
-  const configUrl = new URL("appconfig.json", window.location.href).href;
+  const configUrl = new URL("appconfig.json?v=20260622-2", window.location.href).href;
   elements.installLink.href = `alt1://addapp/${configUrl}`;
   if (hasAlt1()) {
     identifyApp();

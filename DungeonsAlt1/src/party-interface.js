@@ -19,6 +19,7 @@ export function resolvePartyOcrRuntime(root = globalThis) {
   const fontModule = root?.Alt1Fonts ?? root?.alt1fonts;
   const fonts = [
     fontModule?.aa_8px,
+    fontModule?.aa_8px_mono,
     fontModule?.aa_10px_mono,
     fontModule?.aa_12px_mono,
     fontModule?.default,
@@ -187,8 +188,20 @@ export function findPartyPanel(image) {
   return best;
 }
 
-function cleanOcrName(value) {
-  return String(value ?? "").replace(/[^a-z0-9 _-]/gi, "").replace(/\s+/g, " ").trim().slice(0, 24);
+export function normalizeOcrPartyName(value) {
+  const name = String(value ?? "")
+    .replace(/_+/g, " ")
+    .replace(/[^a-z0-9 -]/gi, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 12);
+  const compact = name.replace(/\s/g, "");
+  const alphanumeric = compact.replace(/[^a-z0-9]/gi, "");
+  const letters = alphanumeric.replace(/[^a-z]/gi, "");
+  const hyphens = (compact.match(/-/g) ?? []).length;
+  if (alphanumeric.length < 2 || letters.length < 1 || hyphens > 2
+    || /--/.test(name) || alphanumeric.length / Math.max(1, compact.length) < 0.7) return "";
+  return name;
 }
 
 function readRowName(image, panel, row, ocr, fonts) {
@@ -200,7 +213,7 @@ function readRowName(image, panel, row, ocr, fonts) {
       for (let xOffset = -40; xOffset <= 40; xOffset += 10) {
         try {
           const result = ocr.findReadLine(image, font, row.colors, centerX + xOffset, row.centerY + yOffset);
-          const name = cleanOcrName(result?.text);
+          const name = normalizeOcrPartyName(result?.text);
           if (name.length > best.length) best = name;
         } catch {
           // An OCR miss at one probe point is expected; try the next point/font.
