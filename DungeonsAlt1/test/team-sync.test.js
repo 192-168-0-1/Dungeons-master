@@ -87,6 +87,103 @@ test("timed-out members free their slot and the party compacts", () => {
   ]);
 });
 
+test("host can promote manual roster members within non-host slots", () => {
+  const { client: host, sent } = connectedClient("Leader");
+  host.setRoster([
+    { id: host.clientId, name: host.name, slot: 1 },
+    { id: "second", name: "Second", slot: 2 },
+    { id: "third", name: "Third", slot: 3 },
+    { id: "fourth", name: "Fourth", slot: 4 },
+  ]);
+
+  const promoted = host.promoteMember("fourth");
+  assert.equal(promoted.ok, true);
+  assert.deepEqual(host.members.map(({ id, slot }) => ({ id, slot })), [
+    { id: host.clientId, slot: 1 },
+    { id: "second", slot: 2 },
+    { id: "fourth", slot: 3 },
+    { id: "third", slot: 4 },
+  ]);
+  assert.equal(sent.some((line) => decodeURIComponent(line).includes("|ROSTER|")), true);
+
+  const hostLocked = host.promoteMember("second");
+  assert.equal(hostLocked.ok, false);
+  assert.match(hostLocked.message, /host-locked/);
+});
+
+test("non-host clients cannot promote or kick manual roster members", () => {
+  const { client } = connectedClient("Second");
+  client.setRoster([
+    { id: "leader", name: "Leader", slot: 1 },
+    { id: client.clientId, name: client.name, slot: 2 },
+  ]);
+
+  assert.equal(client.promoteMember(client.clientId).ok, false);
+  assert.equal(client.kickMember("leader").ok, false);
+});
+
+test("host kick sends KICK, compacts roster and broadcasts the update", () => {
+  const { client: host, sent } = connectedClient("Leader");
+  host.setRoster([
+    { id: host.clientId, name: host.name, slot: 1 },
+    { id: "second", name: "Second", slot: 2 },
+    { id: "third", name: "Third", slot: 3 },
+  ]);
+
+  const result = host.kickMember("second");
+  assert.equal(result.ok, true);
+  const decoded = sent.map((line) => line.split("|").map(decodeURIComponent));
+  assert.equal(decoded.some((fields) => fields[3] === "KICK" && fields[4] === "second"), true);
+  assert.equal(decoded.some((fields) => fields[3] === "ROSTER"), true);
+  assert.deepEqual(host.members.map(({ id, slot }) => ({ id, slot })), [
+    { id: host.clientId, slot: 1 },
+    { id: "third", slot: 2 },
+  ]);
+});
+
+test("a kicked client disconnects locally when targeted by KICK", () => {
+  const { client } = connectedClient("Second");
+  let closed = false;
+  client.socket.close = () => { closed = true; };
+  client.mode = "manual";
+  client.setRoster([
+    { id: "leader", name: "Leader", slot: 1 },
+    { id: client.clientId, name: client.name, slot: 2 },
+  ]);
+
+  let kicked = false;
+  client.addEventListener("kicked", () => { kicked = true; });
+  client.handleMessage(message("leader", "Leader", "KICK", client.clientId));
+
+  assert.equal(kicked, true);
+  assert.equal(closed, true);
+  assert.equal(client.mode, "offline");
+  assert.deepEqual(client.members, []);
+});
+
+test("manual rooms ignore packets from senders outside the current roster", () => {
+  const { client } = connectedClient("Leader");
+  client.setRoster([
+    { id: client.clientId, name: client.name, slot: 1 },
+    { id: "known", name: "Known", slot: 2 },
+  ]);
+  let annotations = 0;
+  let gatestones = 0;
+  let parties = 0;
+  client.addEventListener("annotation", () => { annotations += 1; });
+  client.addEventListener("gatestone", () => { gatestones += 1; });
+  client.addEventListener("party", () => { parties += 1; });
+
+  client.handleMessage(message("unknown", "Unknown", "ANN", 1, 2, "go", 3));
+  client.handleMessage(message("unknown", "Unknown", "GAT", 1, 2, 3, 3));
+  client.handleMessage(message("unknown", "Unknown", "PARTY", JSON.stringify([{ slot: 1, name: "Unknown" }])));
+  client.handleMessage(message("known", "Known", "ANN", 1, 2, "go", 2));
+
+  assert.equal(annotations, 1);
+  assert.equal(gatestones, 0);
+  assert.equal(parties, 0);
+});
+
 test("automatic party clients share a peer room without electing duplicate hosts", () => {
   const originalWebSocket = globalThis.WebSocket;
   const sockets = [];

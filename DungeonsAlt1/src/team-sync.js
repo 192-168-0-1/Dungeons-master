@@ -4,7 +4,7 @@ import {
   normalizePartyRoster,
   parsePartyRoster,
   removePartyMember,
-} from "./party-core.js?v=20260622-11";
+} from "./party-core.js?v=20260622-12";
 
 const DEFAULT_RELAY = "wss://dungeons-master.onrender.com/team-sync";
 const HEARTBEAT_INTERVAL = 5_000;
@@ -16,6 +16,10 @@ function cleanRoomCode(value) {
 
 function cleanName(value) {
   return String(value ?? "").trim() || "Team mate";
+}
+
+function cleanClientId(value) {
+  return String(value ?? "").replace(/[^a-z0-9_-]/gi, "").slice(0, 80);
 }
 
 function escapeField(value) {
@@ -190,6 +194,49 @@ export class TeamSync extends EventTarget {
     if (this.isHost) this.send("ROSTER", JSON.stringify(this.roster));
   }
 
+  rosterMember(id) {
+    return this.roster.find((member) => member.id === cleanClientId(id)) ?? null;
+  }
+
+  promoteMember(id) {
+    if (!this.isHost) return { ok: false, message: "Only the red host can promote players" };
+    const target = this.rosterMember(id);
+    if (!target) return { ok: false, message: "Player is not in this team room" };
+    if (target.id === this.clientId || target.slot <= 2) {
+      return { ok: false, message: "Slot 1 is host-locked; host transfer is not available yet" };
+    }
+    const previousSlot = target.slot - 1;
+    const previous = this.roster.find((member) => member.slot === previousSlot);
+    const nextRoster = this.roster.map((member) => {
+      if (member.id === target.id) return { ...member, slot: previousSlot };
+      if (previous && member.id === previous.id) return { ...member, slot: target.slot };
+      return { ...member };
+    });
+    this.setRoster(nextRoster);
+    this.sendRoster();
+    return { ok: true, message: `${target.name} promoted to slot ${previousSlot}` };
+  }
+
+  kickMember(id) {
+    if (!this.isHost) return { ok: false, message: "Only the red host can kick players" };
+    const target = this.rosterMember(id);
+    if (!target) return { ok: false, message: "Player is not in this team room" };
+    if (target.id === this.clientId || target.slot === 1) {
+      return { ok: false, message: "The host cannot kick themselves" };
+    }
+    this.send("KICK", target.id);
+    this.setRoster(removePartyMember(this.roster, target.id));
+    this.sendRoster();
+    this.dispatchEvent(new CustomEvent("leave", {
+      detail: { senderId: target.id, senderName: target.name, kicked: true },
+    }));
+    return { ok: true, message: `${target.name} was kicked from the team room` };
+  }
+
+  senderInRoster(senderId) {
+    return !this.roster.length || this.roster.some((member) => member.id === senderId);
+  }
+
   startHeartbeat() {
     this.stopHeartbeat();
     this.lastSeen.set(this.clientId, Date.now());
@@ -272,6 +319,20 @@ export class TeamSync extends EventTarget {
       this.setRoster([]);
       this.setStatus("This team room is full (5/5)");
       this.dispatchEvent(new CustomEvent("full"));
+    } else if (type === "KICK" && fields[4] === this.clientId && this.mode !== "offline") {
+      const leader = this.roster.find((member) => member.slot === 1);
+      if (!leader || leader.id !== senderId) return;
+      const socket = this.socket;
+      this.socket = null;
+      this.stopHeartbeat();
+      if (socket && socket.readyState < WebSocket.CLOSING) socket.close();
+      this.isHost = false;
+      this.mode = "offline";
+      this.lastSeen.clear();
+      this.setRoster([]);
+      this.setStatus("You were kicked from the team room");
+      this.dispatchEvent(new CustomEvent("kicked", { detail: { senderId, senderName } }));
+      this.dispatchEvent(new CustomEvent("disconnected"));
     } else if (type === "LEAVE") {
       this.lastSeen.delete(senderId);
       const departingWasLeader = this.roster.some((member) => member.id === senderId && member.slot === 1);
@@ -283,14 +344,17 @@ export class TeamSync extends EventTarget {
     } else if (type === "PING") {
       // Presence is recorded above; no UI event is needed.
     } else if (type === "PARTY" && fields.length >= 5) {
+      if (!this.senderInRoster(senderId)) return;
       let members = [];
       try { members = normalizeObservedParty(JSON.parse(fields[4])); } catch { /* Ignore malformed scans. */ }
       if (members.length) {
         this.dispatchEvent(new CustomEvent("party", { detail: { senderId, senderName, members } }));
       }
     } else if (type === "CLEAR") {
+      if (!this.senderInRoster(senderId)) return;
       this.dispatchEvent(new CustomEvent("clear", { detail: { senderId, senderName } }));
     } else if (type === "ANN" && fields.length >= 7) {
+      if (!this.senderInRoster(senderId)) return;
       this.dispatchEvent(new CustomEvent("annotation", {
         detail: {
           senderId,
@@ -301,6 +365,7 @@ export class TeamSync extends EventTarget {
         },
       }));
     } else if (type === "GAT" && fields.length >= 7) {
+      if (!this.senderInRoster(senderId)) return;
       this.dispatchEvent(new CustomEvent("gatestone", {
         detail: {
           senderId,

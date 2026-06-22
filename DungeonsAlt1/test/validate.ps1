@@ -116,9 +116,10 @@ $partyCore = Get-Content (Join-Path $appRoot 'src\party-core.js') -Raw
 $partyInterface = Get-Content (Join-Path $appRoot 'src\party-interface.js') -Raw
 $teamSync = Get-Content (Join-Path $appRoot 'src\team-sync.js') -Raw
 $teamGates = Get-Content (Join-Path $appRoot 'src\team-gates.js') -Raw
+$partyMenu = Get-Content (Join-Path $appRoot 'src\party-menu.js') -Raw
 $mapLocator = Get-Content (Join-Path $appRoot 'src\alt1-map-locator.js') -Raw
 $nativeOverlaySource = $app + "`n" + $overlay
-$runtimeSource = $app + "`n" + $overlay + "`n" + $partyCore + "`n" + $partyInterface + "`n" + $teamSync + "`n" + $teamGates + "`n" + $mapLocator
+$runtimeSource = $app + "`n" + $overlay + "`n" + $partyCore + "`n" + $partyInterface + "`n" + $teamSync + "`n" + $teamGates + "`n" + $partyMenu + "`n" + $mapLocator
 $domIds = @([regex]::Matches($app, 'querySelector\("#(?<id>[a-z0-9-]+)"\)') | ForEach-Object { $_.Groups['id'].Value })
 $missingDomIds = @($domIds | Where-Object { $html -notmatch ('id="' + [regex]::Escape($_) + '"') })
 if ($missingDomIds.Count -ne 0) {
@@ -166,25 +167,43 @@ if (($partyInterface -notmatch 'function findPartyPanel') -or
     ($app -notmatch 'scanPartyInterface')) {
     throw 'RuneScape party-interface detection, OCR and slot matching must remain connected.'
 }
-if (($html -notmatch 'id="auto-room"[^>]*checked') -or
-    ($html -notmatch 'id="party-forget"') -or
+if (($html -match 'id="auto-room"') -or
+    ($app -match 'syncAutomaticPartyRoom') -or
+    ($app -match 'teamSync\.connect\(status\.roomCode')) {
+    throw 'Automatic party-room joining must stay removed from the active Alt1 UI and app workflow.'
+}
+if (($html -notmatch 'id="party-forget"') -or
     ($partyCore -notmatch 'function mergeObservedPartyCache') -or
-    ($partyCore -notmatch 'function automaticPartyRoom') -or
-    ($partyCore -notmatch 'function partyRoomCodeFromLeader') -or
     ($app -notmatch 'partyAutoScan') -or
-    ($app -notmatch 'syncAutomaticPartyRoom')) {
-    throw 'Session party caching and automatic leader-based room sync are incomplete.'
+    ($app -notmatch 'manual room order unchanged')) {
+    throw 'RuneScape party scanning must remain a helper that does not replace manual room order.'
 }
-if (($app -notmatch 'team-sync\.js\?v=20260622-11') -or
-    ($app -notmatch 'party-core\.js\?v=20260622-11') -or
-    ($app -notmatch 'team-gates\.js\?v=20260622-11') -or
-    ($teamSync -notmatch 'party-core\.js\?v=20260622-11')) {
+if (($html -notmatch 'id="party-context-menu"') -or
+    ($html -notmatch 'Choose Option') -or
+    ($html -notmatch 'data-action="inspect"') -or
+    ($html -notmatch 'data-action="kick"') -or
+    ($html -notmatch 'data-action="promote"') -or
+    ($html -notmatch 'data-action="cancel"') -or
+    ($app -notmatch 'showPartyContextMenu') -or
+    ($app -notmatch 'mouseleave') -or
+    ($partyMenu -notmatch 'clampContextMenuPosition')) {
+    throw 'The RuneScape-style party context menu and viewport clamping are incomplete.'
+}
+if (($teamSync -notmatch 'send\("KICK"') -or
+    ($teamSync -notmatch 'promoteMember') -or
+    ($teamSync -notmatch 'kickMember') -or
+    ($teamSync -notmatch 'senderInRoster') -or
+    ($app -notmatch 'Only the red host can kick players') -or
+    ($app -notmatch 'Only the red host can promote players')) {
+    throw 'Manual host roster controls must support promote, kick and sender filtering.'
+}
+if (($app -notmatch 'team-sync\.js\?v=20260622-12') -or
+    ($app -notmatch 'party-core\.js\?v=20260622-12') -or
+    ($app -notmatch 'party-menu\.js\?v=20260622-12') -or
+    ($app -notmatch 'team-gates\.js\?v=20260622-12') -or
+    ($teamSync -notmatch 'party-core\.js\?v=20260622-12') -or
+    ($teamGates -notmatch 'party-core\.js\?v=20260622-12')) {
     throw 'Changed team-sync modules must be cache-busted for existing Alt1 installations.'
-}
-if (($teamSync -notmatch 'mode === "peer"') -or
-    ($teamSync -notmatch 'setPeerSlot') -or
-    ($teamSync -notmatch 'this\.mode !== "peer"')) {
-    throw 'TeamSync peer mode must avoid host and roster election for automatic party rooms.'
 }
 if (($app -notmatch 'buildVisibleRemoteGatestones') -or
     ($teamGates -notmatch 'source: "team"') -or

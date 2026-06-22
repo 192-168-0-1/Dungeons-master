@@ -8,7 +8,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>Dungeons Alt1</title>
-  <link rel="stylesheet" href="./styles.css?v=20260622-11">
+  <link rel="stylesheet" href="./styles.css?v=20260622-12">
 </head>
 <body>
   <header class="titlebar">
@@ -104,8 +104,7 @@
             <button id="team-disconnect" type="button">Disconnect</button>
           </div>
           <small id="team-status">Team-sync offline</small>
-          <label class="party-scan-option"><input id="party-interface" type="checkbox" checked> Use RuneScape party positions</label>
-          <label class="party-scan-option"><input id="auto-room" type="checkbox" checked> Auto-join scanned party room</label>
+          <label class="party-scan-option"><input id="party-interface" type="checkbox" checked> Use RuneScape party positions helper</label>
           <div class="party-scan-tools">
             <button id="party-scan" type="button">Scan DG party</button>
             <button id="party-forget" type="button">Forget party</button>
@@ -116,11 +115,19 @@
     </details>
   </main>
 
+  <div id="party-context-menu" class="rs-context-menu" role="menu" hidden>
+    <div class="rs-context-title">Choose Option</div>
+    <button type="button" role="menuitem" data-action="inspect">Inspect</button>
+    <button type="button" role="menuitem" data-action="kick">Kick</button>
+    <button type="button" role="menuitem" data-action="promote">Promote</button>
+    <button type="button" role="menuitem" data-action="cancel">Cancel</button>
+  </div>
+
   <script>
     (function bootstrapDungeons() {
       "use strict";
 
-      var fallbackVersion = "20260622-11";
+      var fallbackVersion = "20260622-12";
       var appStarted = false;
       var environment = document.getElementById("environment");
       var status = document.getElementById("status");

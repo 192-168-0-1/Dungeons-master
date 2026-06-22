@@ -321,6 +321,51 @@ summary {
 
 .party-slot[data-self="true"] .party-you { display: inline; }
 
+.rs-context-menu {
+  position: fixed;
+  z-index: 10000;
+  min-width: 112px;
+  padding: 2px 0 3px;
+  border: 1px solid #c8c8c8;
+  border-right-color: #5a5a5a;
+  border-bottom-color: #5a5a5a;
+  background: #050505;
+  color: #fff3b0;
+  box-shadow: 1px 1px 0 #000;
+  font: 13px "Courier New", monospace;
+  line-height: 1.05;
+  text-shadow: 1px 1px #000;
+}
+
+.rs-context-menu[hidden] { display: none; }
+
+.rs-context-title {
+  padding: 0 6px 2px;
+  color: #fff3b0;
+  white-space: nowrap;
+}
+
+.rs-context-menu button {
+  display: block;
+  width: 100%;
+  min-height: 0;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #fff;
+  font: inherit;
+  line-height: 1.05;
+  text-align: left;
+  box-shadow: none;
+}
+
+.rs-context-menu button:hover,
+.rs-context-menu button:focus {
+  outline: 0;
+  background: #4b4b4b;
+}
+
 .team-buttons,
 .team-grid small { grid-column: 2; }
 .team-grid small { color: var(--muted); }

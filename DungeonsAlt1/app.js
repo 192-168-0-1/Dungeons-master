@@ -17,20 +17,18 @@ import {
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260622-11";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260622-11";
+} from "./src/alt1-overlay.js?v=20260622-12";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260622-12";
 import {
   PARTY_COLORS,
-  automaticPartyRoomStatus,
-  isTrustedPartySnapshot,
   mergeObservedPartyCache,
-  normalizePartyName,
   observedPartySlot,
   partyColor,
   reconcileObservedParty,
-} from "./src/party-core.js?v=20260622-11";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260622-11";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260622-11";
+} from "./src/party-core.js?v=20260622-12";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260622-12";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260622-12";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260622-12";
 import { WinterfaceReader } from "./src/winterface.js";
 
 const SCAN_INTERVAL = 600;
@@ -66,10 +64,10 @@ const elements = {
   teamStatus: document.querySelector("#team-status"),
   partySlots: [...document.querySelectorAll(".party-slot")],
   partyInterface: document.querySelector("#party-interface"),
-  autoRoom: document.querySelector("#auto-room"),
   partyScan: document.querySelector("#party-scan"),
   partyForget: document.querySelector("#party-forget"),
   partyScanStatus: document.querySelector("#party-scan-status"),
+  partyContextMenu: document.querySelector("#party-context-menu"),
   installLink: document.querySelector("#install-link"),
   environment: document.querySelector("#environment"),
   resultsBody: document.querySelector("#results-body"),
@@ -105,6 +103,7 @@ const state = {
   partyAutoScan: false,
   lastPartyScan: 0,
   syncedLocalGatestones: new Set(),
+  partyMenuTarget: null,
 };
 
 function loadCalibration() {
@@ -172,7 +171,9 @@ function samePoint(left, right) {
 }
 
 function participantSlot(ownerId, hintedSlot = null) {
-  if (elements.partyInterface.checked && state.observedParty.length) {
+  const rosterSlot = teamSync.member(ownerId)?.slot;
+  if (rosterSlot) return rosterSlot;
+  if (!teamSync.members.length && elements.partyInterface.checked && state.observedParty.length) {
     const syncedName = teamSync.member(ownerId)?.name;
     const localName = ownerId === teamSync.clientId
       ? (elements.teamName.value.trim() || teamSync.name)
@@ -180,10 +181,7 @@ function participantSlot(ownerId, hintedSlot = null) {
     const observed = observedPartySlot(state.observedParty, syncedName || localName);
     if (observed) return observed;
   }
-  const rosterSlot = teamSync.member(ownerId)?.slot;
-  if (rosterSlot) return rosterSlot;
-  const slot = Number(hintedSlot);
-  return Number.isInteger(slot) && slot >= 1 && slot <= PARTY_COLORS.length ? slot : null;
+  return validHintedSlot(hintedSlot);
 }
 
 function ownerColor(ownerId, hintedSlot, fallback) {
@@ -769,10 +767,6 @@ async function copyResults() {
   setStatus("Results table copied to the clipboard", "ok");
 }
 
-function localPartyName() {
-  return elements.teamName.value.trim() || teamSync.name;
-}
-
 function applyObservedParty(incoming, source = "scan") {
   const merged = mergeObservedPartyCache(
     state.observedParty,
@@ -785,74 +779,161 @@ function applyObservedParty(incoming, source = "scan") {
   return merged.changed;
 }
 
-function stopAutomaticRoom(message = "") {
-  if (teamSync.mode === "peer") {
-    teamSync.disconnect(false);
-    state.syncedLocalGatestones.clear();
-    clearRemoteTeamState();
-  }
-  if (message) elements.teamStatus.textContent = message;
-}
-
-function syncAutomaticPartyRoom() {
-  if (!elements.partyInterface.checked || !elements.autoRoom.checked) return false;
-  const status = automaticPartyRoomStatus(state.observedParty, elements.teamName.value.trim());
-  if (!status.ready) {
-    stopAutomaticRoom(status.message);
-    return false;
-  }
-
-  elements.teamRoom.value = status.roomCode;
-  if (teamSync.mode === "peer" && teamSync.roomCode === status.roomCode
-    && normalizePartyName(teamSync.name) === normalizePartyName(elements.teamName.value)) {
-    teamSync.setPeerSlot(status.localSlot);
-    elements.teamStatus.textContent = status.message;
-    return true;
-  }
-
-  clearRemoteTeamState();
-  state.syncedLocalGatestones.clear();
-  teamSync.connect(status.roomCode, elements.teamName.value, undefined, {
-    mode: "peer",
-    slot: status.localSlot,
-  });
-  return true;
-}
-
 function forgetParty() {
   state.observedParty = [];
   state.partyPendingChanges.clear();
   state.partyPanel = null;
   state.partyAutoScan = false;
-  stopAutomaticRoom();
-  clearRemoteTeamState();
   renderParty();
   elements.partyScanStatus.textContent = "Party forgotten; open the DG party interface and scan again";
 }
 
-function trustedPeerSender(senderName) {
-  return teamSync.mode !== "peer"
-    || Boolean(observedPartySlot(state.observedParty, senderName));
+function validHintedSlot(slot) {
+  const number = Number(slot);
+  return Number.isInteger(number) && number >= 1 && number <= PARTY_COLORS.length ? number : null;
+}
+
+function trustedTeamSender(senderId) {
+  if (!teamSync.members.length) return true;
+  return teamSync.members.some((member) => member.id === senderId);
+}
+
+function clearTeamMemberState(memberId) {
+  state.teamGatestones.delete(memberId);
+  for (const [pointKey, annotation] of state.annotations) {
+    if (annotation.ownerId === memberId) state.annotations.delete(pointKey);
+  }
+}
+
+function partyRowMember(row) {
+  const memberId = row?.dataset?.memberId;
+  if (memberId) return teamSync.members.find((member) => member.id === memberId) ?? null;
+  const slot = Number(row?.dataset?.slot);
+  return teamSync.members.find((member) => member.slot === slot) ?? null;
+}
+
+function partyRowDisplay(row) {
+  const member = partyRowMember(row);
+  if (member) return { member, slot: member.slot, name: member.name, source: "room" };
+  const slot = Number(row?.dataset?.slot);
+  const scanned = elements.partyInterface.checked
+    ? state.observedParty.find((candidate) => candidate.slot === slot)
+    : null;
+  return {
+    member: null,
+    slot,
+    name: scanned?.name || (scanned?.occupied ? `Player ${slot}` : ""),
+    source: scanned ? "scan" : "empty",
+  };
 }
 
 function renderParty() {
   const members = teamSync.members;
-  const observed = elements.partyInterface.checked ? state.observedParty : [];
+  const rosterActive = members.length > 0;
+  const observed = !rosterActive && elements.partyInterface.checked ? state.observedParty : [];
   const localName = elements.teamName.value.trim() || teamSync.name;
-  const observedSelfSlot = observedPartySlot(observed, localName);
+  const observedSelfSlot = !rosterActive ? observedPartySlot(observed, localName) : null;
   for (const row of elements.partySlots) {
     const slot = Number(row.dataset.slot);
     const scanned = observed.find((candidate) => candidate.slot === slot);
-    const member = observed.length
-      ? members.find((candidate) => observedPartySlot(observed, candidate.name) === slot)
-      : members.find((candidate) => candidate.slot === slot);
+    const member = members.find((candidate) => candidate.slot === slot);
     const displayName = scanned?.name || (scanned?.occupied ? `Player ${slot}` : "") || member?.name;
     row.style.setProperty("--player-color", partyColor(slot, "#6d6a62"));
     row.dataset.occupied = String(Boolean(displayName));
-    row.dataset.self = String(observedSelfSlot ? observedSelfSlot === slot : member?.id === teamSync.clientId);
+    row.dataset.self = String(rosterActive ? member?.id === teamSync.clientId : observedSelfSlot === slot);
+    row.dataset.memberId = member?.id ?? "";
+    row.dataset.source = member ? "room" : scanned ? "scan" : "empty";
     row.querySelector(".party-name").textContent = displayName || "Empty slot";
     row.title = displayName ? `Player ${slot}: ${displayName}` : `Player ${slot}: empty`;
   }
+}
+
+function hidePartyContextMenu() {
+  if (!elements.partyContextMenu) return;
+  elements.partyContextMenu.hidden = true;
+  state.partyMenuTarget = null;
+}
+
+function showPartyContextMenu(event, row) {
+  if (!elements.partyContextMenu) return;
+  event.preventDefault();
+  state.partyMenuTarget = partyRowDisplay(row);
+  elements.partyContextMenu.hidden = false;
+  elements.partyContextMenu.style.visibility = "hidden";
+  elements.partyContextMenu.style.left = "0px";
+  elements.partyContextMenu.style.top = "0px";
+  const position = clampContextMenuPosition(
+    event.clientX,
+    event.clientY,
+    elements.partyContextMenu.offsetWidth,
+    elements.partyContextMenu.offsetHeight,
+    window.innerWidth,
+    window.innerHeight,
+  );
+  elements.partyContextMenu.style.left = `${position.x}px`;
+  elements.partyContextMenu.style.top = `${position.y}px`;
+  elements.partyContextMenu.style.visibility = "visible";
+}
+
+function inspectPartyTarget(target) {
+  if (!target?.name) {
+    elements.teamStatus.textContent = `Player ${target?.slot ?? "?"}: empty slot`;
+    return;
+  }
+  const status = target.member
+    ? target.member.id === teamSync.clientId ? "you" : "connected"
+    : "scan helper only";
+  elements.teamStatus.textContent = `Player ${target.slot}: ${target.name} (${status})`;
+}
+
+function kickPartyTarget(target) {
+  if (!teamSync.isHost) {
+    elements.teamStatus.textContent = "Only the red host can kick players";
+    return;
+  }
+  if (!target?.member) {
+    elements.teamStatus.textContent = "No connected player in that slot to kick";
+    return;
+  }
+  if (target.member.id === teamSync.clientId) {
+    elements.teamStatus.textContent = "The host cannot kick themselves";
+    return;
+  }
+  const result = teamSync.kickMember(target.member.id);
+  if (!result.ok) {
+    elements.teamStatus.textContent = result.message;
+    return;
+  }
+  clearTeamMemberState(target.member.id);
+  elements.teamStatus.textContent = `${target.member.name} was kicked from the team room`;
+  renderParty();
+  render();
+}
+
+function promotePartyTarget(target) {
+  if (!teamSync.isHost) {
+    elements.teamStatus.textContent = "Only the red host can promote players";
+    return;
+  }
+  if (!target?.member) {
+    elements.teamStatus.textContent = "No connected player in that slot to promote";
+    return;
+  }
+  const result = teamSync.promoteMember(target.member.id);
+  elements.teamStatus.textContent = result.message;
+  if (result.ok) {
+    renderParty();
+    render();
+  }
+}
+
+function handlePartyContextAction(action) {
+  if (!PARTY_CONTEXT_OPTIONS.map((option) => option.toLowerCase()).includes(action)) return;
+  const target = state.partyMenuTarget;
+  hidePartyContextMenu();
+  if (action === "inspect") inspectPartyTarget(target);
+  else if (action === "kick") kickPartyTarget(target);
+  else if (action === "promote") promotePartyTarget(target);
 }
 
 function partyOcrRuntime() {
@@ -891,11 +972,10 @@ function formatPartyScanStatus(result) {
     .map((member) => `${member.slot}:${member.name}`);
   const occupied = result.members.filter((member) => member.occupied).length;
   const cachedNames = state.observedParty.filter((member) => member.name);
-  const status = automaticPartyRoomStatus(state.observedParty, elements.teamName.value.trim());
   const namesText = rawNames.length ? `names ${rawNames.join(", ")}` : "OCR missed names";
-  const roomText = status.roomCode ? ` - room ${status.roomCode}` : "";
   const rowEvidence = result.members.map((member) => member.pixelCount).join("/");
-  return `RuneScape party read ${rawNames.length}/${occupied} names (${namesText}); cached ${cachedNames.length}/5${roomText} - ${status.message} - pixels ${rowEvidence}`;
+  const roomText = teamSync.members.length ? "; manual room order unchanged" : "; helper order active until a room roster is available";
+  return `RuneScape party read ${rawNames.length}/${occupied} names (${namesText}); cached ${cachedNames.length}/5${roomText} - pixels ${rowEvidence}`;
 }
 
 async function scanPartyInterface({ manual = false, forceFull = false } = {}) {
@@ -946,13 +1026,9 @@ async function scanPartyInterface({ manual = false, forceFull = false } = {}) {
       const reconciled = reconcileObservedParty(result.members, expectedPartyNames());
       applyObservedParty(reconciled, "scan");
       state.partyAutoScan = true;
-      const named = state.observedParty.filter((member) => member.name).length;
       elements.partyScanStatus.textContent = formatPartyScanStatus(result);
-      if (manual) elements.autoRoom.checked = true;
-      if (named) teamSync.sendPartyOrder(state.observedParty);
       renderParty();
       render();
-      syncAutomaticPartyRoom();
       return true;
     }
     state.partyAutoScan = false;
@@ -980,7 +1056,6 @@ function sendTeamSnapshot() {
   for (const [index, point] of Object.entries(state.localGatestones)) {
     if (teamSync.sendGatestone(index, point)) state.syncedLocalGatestones.add(Number(index));
   }
-  teamSync.sendPartyOrder(state.observedParty);
   updateOverlayStatus();
 }
 
@@ -1025,6 +1100,11 @@ function bindEvents() {
     render();
   });
   document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !elements.partyContextMenu.hidden) {
+      hidePartyContextMenu();
+      event.preventDefault();
+      return;
+    }
     if (!state.selected || /^(INPUT|BUTTON|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName)) return;
     const delta = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] }[event.key];
     if (delta) {
@@ -1035,8 +1115,6 @@ function bindEvents() {
   });
 
   elements.teamCreate.addEventListener("click", () => {
-    elements.autoRoom.checked = false;
-    stopAutomaticRoom();
     clearRemoteTeamState();
     elements.teamRoom.value = createRoomCode();
     elements.teamRoom.value = teamSync.connect(
@@ -1044,28 +1122,20 @@ function bindEvents() {
     );
   });
   elements.teamJoin.addEventListener("click", () => {
-    elements.autoRoom.checked = false;
-    stopAutomaticRoom();
     clearRemoteTeamState();
     elements.teamRoom.value = teamSync.connect(elements.teamRoom.value, elements.teamName.value);
   });
   elements.teamDisconnect.addEventListener("click", () => {
-    elements.autoRoom.checked = false;
     teamSync.disconnect();
     state.syncedLocalGatestones.clear();
     clearRemoteTeamState();
   });
   elements.partyScan.addEventListener("click", () => scanPartyInterface({ manual: true, forceFull: true }));
   elements.partyForget.addEventListener("click", forgetParty);
-  elements.autoRoom.addEventListener("change", () => {
-    if (elements.autoRoom.checked) syncAutomaticPartyRoom();
-    else stopAutomaticRoom("Automatic party room paused; manual rooms remain available");
-  });
   elements.partyInterface.addEventListener("change", () => {
     if (!elements.partyInterface.checked) {
       state.partyAutoScan = false;
       state.partyPanel = null;
-      stopAutomaticRoom("RuneScape party positions disabled; automatic room paused");
       elements.partyScanStatus.textContent = state.observedParty.length
         ? `RuneScape party positions disabled; cached ${state.observedParty.length} names`
         : "RuneScape party positions disabled; using team join order";
@@ -1076,8 +1146,21 @@ function bindEvents() {
     elements.partyScanStatus.textContent = state.observedParty.length
       ? `Using ${state.observedParty.length} cached party names; scanning for updates`
       : "Open the DG party interface to scan its player order";
-    syncAutomaticPartyRoom();
     scanPartyInterface({ manual: true, forceFull: true });
+  });
+  for (const row of elements.partySlots) {
+    row.addEventListener("contextmenu", (event) => showPartyContextMenu(event, row));
+  }
+  elements.partyContextMenu.addEventListener("mouseleave", hidePartyContextMenu);
+  elements.partyContextMenu.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const action = event.target?.dataset?.action;
+    if (action) handlePartyContextAction(action);
+  });
+  document.addEventListener("click", (event) => {
+    if (!elements.partyContextMenu.hidden && !elements.partyContextMenu.contains(event.target)) {
+      hidePartyContextMenu();
+    }
   });
   teamSync.addEventListener("status", (event) => { elements.teamStatus.textContent = event.detail; });
   teamSync.addEventListener("connected", () => {
@@ -1088,17 +1171,14 @@ function bindEvents() {
     clearRemoteTeamState();
   });
   teamSync.addEventListener("hello", (event) => {
-    if (trustedPeerSender(event.detail.senderName)) sendTeamSnapshot();
+    if (trustedTeamSender(event.detail.senderId)) sendTeamSnapshot();
   });
   teamSync.addEventListener("party", (event) => {
-    if (teamSync.mode === "peer"
-      && (!isTrustedPartySnapshot(state.observedParty, event.detail.members, localPartyName())
-        || !observedPartySlot(event.detail.members, event.detail.senderName))) return;
+    if (!trustedTeamSender(event.detail.senderId)) return;
     applyObservedParty(event.detail.members, "remote");
     elements.partyScanStatus.textContent = `RuneScape party order received from ${event.detail.senderName}`;
     renderParty();
     render();
-    syncAutomaticPartyRoom();
   });
   teamSync.addEventListener("roster", () => {
     renderParty();
@@ -1118,8 +1198,8 @@ function bindEvents() {
   teamSync.addEventListener("full", clearTeamGatestones);
   teamSync.addEventListener("annotation", (event) => {
     const { senderId, senderName, point, text, slot } = event.detail;
-    if (!trustedPeerSender(senderName) || !pointInFloor(point)) return;
-    const trustedSlot = observedPartySlot(state.observedParty, senderName) ?? slot;
+    if (!trustedTeamSender(senderId) || !pointInFloor(point)) return;
+    const trustedSlot = teamSync.member(senderId)?.slot ?? validHintedSlot(slot);
     if (text) {
       state.annotations.set(floorPointKey(point), {
         text: String(text).slice(0, 4),
@@ -1132,12 +1212,12 @@ function bindEvents() {
     render();
   });
   teamSync.addEventListener("clear", (event) => {
-    if (trustedPeerSender(event.detail.senderName)) clearAnnotations(false);
+    if (trustedTeamSender(event.detail.senderId)) clearAnnotations(false);
   });
   teamSync.addEventListener("gatestone", (event) => {
     const { senderId, senderName, index, point, slot } = event.detail;
-    if (!trustedPeerSender(senderName)) return;
-    const trustedSlot = observedPartySlot(state.observedParty, senderName) ?? slot;
+    if (!trustedTeamSender(senderId)) return;
+    const trustedSlot = teamSync.member(senderId)?.slot ?? validHintedSlot(slot);
     let owner = state.teamGatestones.get(senderId);
     if (!owner) {
       owner = { id: senderId, name: senderName, slot: trustedSlot, locations: new Map() };
@@ -1152,10 +1232,12 @@ function bindEvents() {
   });
   teamSync.addEventListener("leave", (event) => {
     const { senderId } = event.detail;
-    state.teamGatestones.delete(senderId);
-    for (const [pointKey, annotation] of state.annotations) {
-      if (annotation.ownerId === senderId) state.annotations.delete(pointKey);
-    }
+    clearTeamMemberState(senderId);
+    render();
+  });
+  teamSync.addEventListener("kicked", () => {
+    state.syncedLocalGatestones.clear();
+    clearRemoteTeamState();
     render();
   });
 }
@@ -1196,7 +1278,6 @@ function initialize() {
     storageSet(`${STORAGE_PREFIX}:name`, elements.teamName.value);
     renderParty();
     render();
-    syncAutomaticPartyRoom();
   });
 
   const configUrl = new URL("appconfig.json", window.location.href).href;
