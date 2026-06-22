@@ -86,3 +86,71 @@ test("timed-out members free their slot and the party compacts", () => {
     { id: "staying", slot: 2 },
   ]);
 });
+
+test("automatic party clients share a peer room without electing duplicate hosts", () => {
+  const originalWebSocket = globalThis.WebSocket;
+  const sockets = [];
+  class PeerSocket {
+    static OPEN = 1;
+    static CLOSING = 2;
+
+    constructor(url) {
+      this.url = String(url);
+      this.readyState = 0;
+      this.listeners = new Map();
+      this.sent = [];
+      sockets.push(this);
+    }
+
+    addEventListener(type, listener) {
+      this.listeners.set(type, listener);
+    }
+
+    open() {
+      this.readyState = PeerSocket.OPEN;
+      this.listeners.get("open")?.();
+    }
+
+    send(value) {
+      this.sent.push(value);
+    }
+
+    close() {
+      this.readyState = PeerSocket.CLOSING;
+    }
+  }
+
+  globalThis.WebSocket = PeerSocket;
+  let first;
+  let second;
+  try {
+    first = new TeamSync();
+    second = new TeamSync();
+    first.connect("DGABC12345", "Leader", "https://relay.example/team-sync", { mode: "peer", slot: 1 });
+    second.connect("DGABC12345", "Second", "https://relay.example/team-sync", { mode: "peer", slot: 2 });
+    sockets[0].open();
+    sockets[1].open();
+
+    assert.equal(first.mode, "peer");
+    assert.equal(second.mode, "peer");
+    assert.equal(first.isHost, false);
+    assert.equal(second.isHost, false);
+    assert.deepEqual(first.members, []);
+    assert.deepEqual(second.members, []);
+    assert.equal(first.slot, 1);
+    assert.equal(second.slot, 2);
+    assert.match(sockets[0].url, /room=DGABC12345/);
+    assert.match(sockets[1].url, /room=DGABC12345/);
+    assert.equal(decodeURIComponent(sockets[0].sent[0]).includes("|HELLO|peer"), true);
+
+    first.handleMessage(message("other", "Second", "ROSTER", JSON.stringify([
+      { id: "other", name: "Second", slot: 1 },
+    ])));
+    assert.deepEqual(first.members, []);
+    assert.equal(first.slot, 1);
+  } finally {
+    first?.stopHeartbeat();
+    second?.stopHeartbeat();
+    globalThis.WebSocket = originalWebSocket;
+  }
+});

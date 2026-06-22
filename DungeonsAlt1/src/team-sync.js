@@ -4,7 +4,7 @@ import {
   normalizePartyRoster,
   parsePartyRoster,
   removePartyMember,
-} from "./party-core.js";
+} from "./party-core.js?v=20260622-10";
 
 const DEFAULT_RELAY = "wss://dungeons-master.onrender.com/team-sync";
 const HEARTBEAT_INTERVAL = 5_000;
@@ -64,6 +64,7 @@ export class TeamSync extends EventTarget {
     this.roster = [];
     this.slot = null;
     this.isHost = false;
+    this.mode = "offline";
     this.lastSeen = new Map();
     this.heartbeatTimer = null;
   }
@@ -80,12 +81,20 @@ export class TeamSync extends EventTarget {
     return this.roster.find((candidate) => candidate.id === id) ?? null;
   }
 
-  connect(roomCode, name, relayUrl = DEFAULT_RELAY, { create = false } = {}) {
+  connect(roomCode, name, relayUrl = DEFAULT_RELAY, { create = false, mode = "manual", slot = null } = {}) {
     this.disconnect(false);
     this.roomCode = cleanRoomCode(roomCode) || createRoomCode();
     this.name = cleanName(name);
-    this.isHost = Boolean(create);
-    this.setRoster(create ? [{ id: this.clientId, name: this.name, slot: 1 }] : []);
+    const peerMode = mode === "peer";
+    this.mode = peerMode ? "peer" : create ? "host" : "manual";
+    if (peerMode) {
+      this.roster = [];
+      this.slot = Number.isInteger(Number(slot)) && Number(slot) >= 1 && Number(slot) <= 5 ? Number(slot) : null;
+      this.isHost = false;
+    } else {
+      this.isHost = Boolean(create);
+      this.setRoster(create ? [{ id: this.clientId, name: this.name, slot: 1 }] : []);
+    }
     const url = new URL(relayUrl || DEFAULT_RELAY);
     url.protocol = url.protocol === "http:" ? "ws:" : url.protocol === "https:" ? "wss:" : url.protocol;
     if (!url.pathname || url.pathname === "/") url.pathname = "/team-sync";
@@ -97,10 +106,10 @@ export class TeamSync extends EventTarget {
     socket.addEventListener("open", () => {
       if (this.socket !== socket) return;
       this.setStatus(`Connected to team room ${this.roomCode}`);
-      this.send("HELLO", this.isHost ? "host" : "join");
+      this.send("HELLO", this.mode === "peer" ? "peer" : this.isHost ? "host" : "join");
       if (this.isHost) this.sendRoster();
       this.startHeartbeat();
-      this.dispatchEvent(new CustomEvent("connected"));
+      this.dispatchEvent(new CustomEvent("connected", { detail: { mode: this.mode, roomCode: this.roomCode } }));
     });
     socket.addEventListener("message", (event) => this.handleMessage(String(event.data)));
     socket.addEventListener("close", () => {
@@ -108,6 +117,7 @@ export class TeamSync extends EventTarget {
       this.socket = null;
       this.stopHeartbeat();
       this.isHost = false;
+      this.mode = "offline";
       this.setRoster([]);
       this.setStatus("Team-sync offline");
       this.dispatchEvent(new CustomEvent("disconnected"));
@@ -123,31 +133,40 @@ export class TeamSync extends EventTarget {
     this.stopHeartbeat();
     if (socket && socket.readyState < WebSocket.CLOSING) socket.close();
     this.isHost = false;
+    this.mode = "offline";
+    this.lastSeen.clear();
     this.setRoster([]);
     if (announce) this.setStatus("Team-sync offline");
   }
 
   send(type, ...fields) {
-    if (!this.connected) return;
+    if (!this.connected) return false;
     const message = ["TS1", this.clientId, this.name, type, ...fields].map(escapeField).join("|");
     this.socket.send(message);
+    return true;
   }
 
   sendAnnotation(point, text) {
-    this.send("ANN", point.x, point.y, text ?? "", this.slot ?? 0);
+    return this.send("ANN", point.x, point.y, text ?? "", this.slot ?? 0);
   }
 
   sendClear() {
-    this.send("CLEAR");
+    return this.send("CLEAR");
   }
 
   sendGatestone(index, point) {
-    this.send("GAT", index, point?.x ?? -1, point?.y ?? -1, this.slot ?? 0);
+    return this.send("GAT", index, point?.x ?? -1, point?.y ?? -1, this.slot ?? 0);
   }
 
   sendPartyOrder(members) {
     const party = normalizeObservedParty(members);
-    if (party.length) this.send("PARTY", JSON.stringify(party));
+    return party.length ? this.send("PARTY", JSON.stringify(party)) : false;
+  }
+
+  setPeerSlot(slot) {
+    if (this.mode !== "peer") return;
+    const number = Number(slot);
+    this.slot = Number.isInteger(number) && number >= 1 && number <= 5 ? number : null;
   }
 
   setRoster(value) {
@@ -188,6 +207,18 @@ export class TeamSync extends EventTarget {
   }
 
   removeTimedOutMembers(now = Date.now()) {
+    if (this.mode === "peer") {
+      const stalePeers = [...this.lastSeen.entries()]
+        .filter(([id, seen]) => id !== this.clientId && now - seen > MEMBER_TIMEOUT)
+        .map(([id]) => id);
+      for (const senderId of stalePeers) {
+        this.lastSeen.delete(senderId);
+        this.dispatchEvent(new CustomEvent("leave", {
+          detail: { senderId, senderName: "Team mate", timedOut: true },
+        }));
+      }
+      return;
+    }
     const stale = this.roster
       .filter((member) => member.id !== this.clientId
         && now - (this.lastSeen.get(member.id) ?? now) > MEMBER_TIMEOUT)
@@ -224,15 +255,15 @@ export class TeamSync extends EventTarget {
     const type = fields[3];
     this.lastSeen.set(senderId, Date.now());
     if (type === "HELLO") {
-      if (this.isHost) this.admitMember(senderId, senderName);
+      if (this.mode !== "peer" && this.isHost) this.admitMember(senderId, senderName);
       this.setStatus(`${senderName} joined the team room`);
       this.dispatchEvent(new CustomEvent("hello", { detail: { senderId, senderName } }));
-    } else if (type === "ROSTER" && fields.length >= 5 && !this.isHost) {
+    } else if (type === "ROSTER" && fields.length >= 5 && !this.isHost && this.mode !== "peer") {
       const roster = parsePartyRoster(fields[4]);
       const leader = roster.find((member) => member.slot === 1);
       const currentLeader = this.roster.find((member) => member.slot === 1);
       if (leader?.id === senderId && (!currentLeader || currentLeader.id === senderId)) this.setRoster(roster);
-    } else if (type === "FULL" && fields[4] === this.clientId) {
+    } else if (type === "FULL" && fields[4] === this.clientId && this.mode !== "peer") {
       const socket = this.socket;
       this.socket = null;
       this.stopHeartbeat();
@@ -242,8 +273,9 @@ export class TeamSync extends EventTarget {
       this.setStatus("This team room is full (5/5)");
       this.dispatchEvent(new CustomEvent("full"));
     } else if (type === "LEAVE") {
+      this.lastSeen.delete(senderId);
       const departingWasLeader = this.roster.some((member) => member.id === senderId && member.slot === 1);
-      if (this.roster.some((member) => member.id === senderId)) {
+      if (this.mode !== "peer" && this.roster.some((member) => member.id === senderId)) {
         this.setRoster(removePartyMember(this.roster, senderId));
         if (departingWasLeader && this.isHost) this.sendRoster();
       }

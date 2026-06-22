@@ -3,12 +3,16 @@ import test from "node:test";
 import {
   PARTY_COLORS,
   addPartyMember,
+  automaticPartyRoom,
+  isTrustedPartySnapshot,
+  mergeObservedPartyCache,
   normalizePartyRoster,
   normalizePartyName,
   normalizeObservedParty,
   observedPartySlot,
   parsePartyRoster,
   partyColor,
+  partyRoomCodeFromLeader,
   partyTextColor,
   reconcileObservedParty,
   removePartyMember,
@@ -118,4 +122,98 @@ test("scanned unknown party names are kept when another row matches a known memb
     { slot: 4, occupied: false, name: "", pixelCount: 0 },
     { slot: 5, occupied: false, name: "", pixelCount: 0 },
   ]);
+});
+
+test("leader spelling variants produce one deterministic automatic room", () => {
+  assert.equal(partyRoomCodeFromLeader("A Ninja"), partyRoomCodeFromLeader("a_ninja"));
+  assert.match(partyRoomCodeFromLeader("A Ninja"), /^DG[A-Z0-9]{8}$/);
+  assert.notEqual(partyRoomCodeFromLeader("A Ninja"), partyRoomCodeFromLeader("Other Leader"));
+
+  assert.deepEqual(automaticPartyRoom([
+    { slot: 1, name: "A Ninja", occupied: true },
+    { slot: 2, name: "X R P", occupied: true },
+  ], "x_r_p"), {
+    roomCode: partyRoomCodeFromLeader("A Ninja"),
+    leaderName: "A Ninja",
+    localSlot: 2,
+    members: [
+      { slot: 1, name: "A Ninja", occupied: true },
+      { slot: 2, name: "X R P", occupied: true },
+    ],
+  });
+  assert.equal(automaticPartyRoom([{ slot: 1, name: "A Ninja" }], "A Ninja"), null);
+  assert.equal(automaticPartyRoom([
+    { slot: 1, name: "A Ninja" },
+    { slot: 2, name: "X R P" },
+  ], "Unknown"), null);
+});
+
+test("party cache fills gaps immediately but confirms removals and conflicts twice", () => {
+  const initial = [
+    { slot: 1, name: "Leader", occupied: true },
+    { slot: 2, name: "Second", occupied: true },
+  ];
+  const first = mergeObservedPartyCache(initial, [
+    { slot: 1, name: "Other", occupied: true },
+    { slot: 2, name: "", occupied: true },
+    { slot: 3, name: "Third", occupied: true },
+  ]);
+  assert.deepEqual(first.members, [
+    { slot: 1, name: "Leader", occupied: true },
+    { slot: 2, name: "Second", occupied: true },
+    { slot: 3, name: "Third", occupied: true },
+  ]);
+  assert.equal(first.pending.get(1).count, 1);
+
+  const confirmedConflict = mergeObservedPartyCache(first.members, [
+    { slot: 1, name: "Other", occupied: true },
+    { slot: 2, name: "", occupied: true },
+    { slot: 3, name: "Third", occupied: true },
+  ], first.pending);
+  assert.equal(confirmedConflict.members[0].name, "Other");
+  assert.equal(confirmedConflict.members[1].name, "Second");
+
+  const firstRemoval = mergeObservedPartyCache(confirmedConflict.members, [
+    { slot: 1, name: "Other", occupied: true },
+    { slot: 2, name: "", occupied: false },
+    { slot: 3, name: "Third", occupied: true },
+  ], confirmedConflict.pending);
+  assert.equal(firstRemoval.members.some((member) => member.slot === 2), true);
+  const confirmedRemoval = mergeObservedPartyCache(firstRemoval.members, [
+    { slot: 1, name: "Other", occupied: true },
+    { slot: 2, name: "", occupied: false },
+    { slot: 3, name: "Third", occupied: true },
+  ], firstRemoval.pending);
+  assert.equal(confirmedRemoval.members.some((member) => member.slot === 2), false);
+});
+
+test("remote party snapshots can fill gaps but cannot overwrite cached names", () => {
+  const current = [
+    { slot: 1, name: "Leader", occupied: true },
+    { slot: 2, name: "Local", occupied: true },
+  ];
+  const merged = mergeObservedPartyCache(current, [
+    { slot: 1, name: "Wrong Leader", occupied: true },
+    { slot: 2, name: "Wrong Local", occupied: true },
+    { slot: 3, name: "Remote", occupied: true },
+  ], new Map(), { source: "remote" });
+  assert.deepEqual(merged.members, [
+    { slot: 1, name: "Leader", occupied: true },
+    { slot: 2, name: "Local", occupied: true },
+    { slot: 3, name: "Remote", occupied: true },
+  ]);
+
+  assert.equal(isTrustedPartySnapshot(current, [
+    { slot: 1, name: "Leader" },
+    { slot: 2, name: "Local" },
+    { slot: 3, name: "Remote" },
+  ], "Local"), true);
+  assert.equal(isTrustedPartySnapshot(current, [
+    { slot: 1, name: "Wrong Leader" },
+    { slot: 2, name: "Local" },
+  ], "Local"), false);
+  assert.equal(isTrustedPartySnapshot(current, [
+    { slot: 1, name: "Leader" },
+    { slot: 3, name: "Remote" },
+  ], "Local"), false);
 });

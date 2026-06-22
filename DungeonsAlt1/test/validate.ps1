@@ -115,9 +115,10 @@ $overlay = Get-Content (Join-Path $appRoot 'src\alt1-overlay.js') -Raw
 $partyCore = Get-Content (Join-Path $appRoot 'src\party-core.js') -Raw
 $partyInterface = Get-Content (Join-Path $appRoot 'src\party-interface.js') -Raw
 $teamSync = Get-Content (Join-Path $appRoot 'src\team-sync.js') -Raw
+$teamGates = Get-Content (Join-Path $appRoot 'src\team-gates.js') -Raw
 $mapLocator = Get-Content (Join-Path $appRoot 'src\alt1-map-locator.js') -Raw
 $nativeOverlaySource = $app + "`n" + $overlay
-$runtimeSource = $app + "`n" + $overlay + "`n" + $partyCore + "`n" + $partyInterface + "`n" + $teamSync + "`n" + $mapLocator
+$runtimeSource = $app + "`n" + $overlay + "`n" + $partyCore + "`n" + $partyInterface + "`n" + $teamSync + "`n" + $teamGates + "`n" + $mapLocator
 $domIds = @([regex]::Matches($app, 'querySelector\("#(?<id>[a-z0-9-]+)"\)') | ForEach-Object { $_.Groups['id'].Value })
 $missingDomIds = @($domIds | Where-Object { $html -notmatch ('id="' + [regex]::Escape($_) + '"') })
 if ($missingDomIds.Count -ne 0) {
@@ -164,6 +165,33 @@ if (($partyInterface -notmatch 'function findPartyPanel') -or
     ($teamSync -notmatch 'send\("PARTY"') -or
     ($app -notmatch 'scanPartyInterface')) {
     throw 'RuneScape party-interface detection, OCR and slot matching must remain connected.'
+}
+if (($html -notmatch 'id="auto-room"[^>]*checked') -or
+    ($html -notmatch 'id="party-forget"') -or
+    ($partyCore -notmatch 'function mergeObservedPartyCache') -or
+    ($partyCore -notmatch 'function automaticPartyRoom') -or
+    ($partyCore -notmatch 'function partyRoomCodeFromLeader') -or
+    ($app -notmatch 'partyAutoScan') -or
+    ($app -notmatch 'syncAutomaticPartyRoom')) {
+    throw 'Session party caching and automatic leader-based room sync are incomplete.'
+}
+if (($app -notmatch 'team-sync\.js\?v=20260622-10') -or
+    ($app -notmatch 'party-core\.js\?v=20260622-10') -or
+    ($app -notmatch 'team-gates\.js\?v=20260622-10') -or
+    ($teamSync -notmatch 'party-core\.js\?v=20260622-10')) {
+    throw 'Changed team-sync modules must be cache-busted for existing Alt1 installations.'
+}
+if (($teamSync -notmatch 'mode === "peer"') -or
+    ($teamSync -notmatch 'setPeerSlot') -or
+    ($teamSync -notmatch 'this\.mode !== "peer"')) {
+    throw 'TeamSync peer mode must avoid host and roster election for automatic party rooms.'
+}
+if (($app -notmatch 'buildVisibleRemoteGatestones') -or
+    ($teamGates -notmatch 'source: "team"') -or
+    ($teamGates -match 'source: "local"') -or
+    ($app -notmatch 'local gates detected .*synced') -or
+    ($app -notmatch 'remote gates visible')) {
+    throw 'Local gatestones must sync without being included in either visible map overlay.'
 }
 $alt1OcrScripts = [regex]::Matches(
     $html,

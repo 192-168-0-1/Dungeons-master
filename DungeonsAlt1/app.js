@@ -13,21 +13,24 @@ import {
 import { findMapByAlt1Anchor, scoreMapCandidate } from "./src/alt1-map-locator.js";
 import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js";
 import {
-  assignGatestoneSlots,
   buildMapOverlayCommands,
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260622-9";
-import { TeamSync, createRoomCode } from "./src/team-sync.js";
+} from "./src/alt1-overlay.js?v=20260622-10";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260622-10";
 import {
   PARTY_COLORS,
+  automaticPartyRoom,
+  isTrustedPartySnapshot,
+  mergeObservedPartyCache,
+  normalizePartyName,
   observedPartySlot,
   partyColor,
-  partyTextColor,
   reconcileObservedParty,
-} from "./src/party-core.js";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260622-9";
+} from "./src/party-core.js?v=20260622-10";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260622-10";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260622-10";
 import { WinterfaceReader } from "./src/winterface.js";
 
 const SCAN_INTERVAL = 600;
@@ -63,7 +66,9 @@ const elements = {
   teamStatus: document.querySelector("#team-status"),
   partySlots: [...document.querySelectorAll(".party-slot")],
   partyInterface: document.querySelector("#party-interface"),
+  autoRoom: document.querySelector("#auto-room"),
   partyScan: document.querySelector("#party-scan"),
+  partyForget: document.querySelector("#party-forget"),
   partyScanStatus: document.querySelector("#party-scan-status"),
   installLink: document.querySelector("#install-link"),
   environment: document.querySelector("#environment"),
@@ -94,9 +99,12 @@ const state = {
   lastOverlayReport: null,
   results: [],
   observedParty: [],
+  partyPendingChanges: new Map(),
   partyPanel: null,
   partyScanBusy: false,
+  partyAutoScan: false,
   lastPartyScan: 0,
+  syncedLocalGatestones: new Set(),
 };
 
 function loadCalibration() {
@@ -316,7 +324,10 @@ function updateLocalGatestones(next) {
   for (const index of [1, 2]) {
     const previousPoint = state.localGatestones[index] ?? null;
     const nextPoint = next[index] ?? null;
-    if ((previousPoint || nextPoint) && !samePoint(previousPoint, nextPoint)) teamSync.sendGatestone(index, nextPoint);
+    if ((previousPoint || nextPoint) && !samePoint(previousPoint, nextPoint)) {
+      state.syncedLocalGatestones.delete(index);
+      if (teamSync.sendGatestone(index, nextPoint) && nextPoint) state.syncedLocalGatestones.add(index);
+    }
   }
   state.localGatestones = next;
 }
@@ -324,6 +335,14 @@ function updateLocalGatestones(next) {
 function clearTeamGatestones() {
   if (!state.teamGatestones.size) return;
   state.teamGatestones.clear();
+  render();
+}
+
+function clearRemoteTeamState() {
+  state.teamGatestones.clear();
+  for (const [pointKey, annotation] of state.annotations) {
+    if (annotation.ownerId !== teamSync.clientId) state.annotations.delete(pointKey);
+  }
   render();
 }
 
@@ -513,43 +532,11 @@ function drawGatestoneBadge(point, text, fill, color, floor, slot) {
 }
 
 function collectGatestoneMarkers(floor = state.gameMap?.floor) {
-  if (!floor) return [];
-  const localSlot = participantSlot(teamSync.clientId, teamSync.slot);
-  const markers = Object.entries(state.localGatestones)
-    .sort(([left], [right]) => Number(left) - Number(right))
-    .map(([index, point]) => ({
-      source: "local",
-      ownerId: teamSync.clientId,
-      ownerName: teamSync.name,
-      partySlot: localSlot,
-      point,
-      text: `G${index}`,
-      fill: partyColor(localSlot, "#ffd23f"),
-      textColor: partyTextColor(localSlot, "#111111"),
-    }));
-
-  const owners = [...state.teamGatestones.values()]
-    .sort((left, right) => (participantSlot(left.id, left.slot) ?? 99)
-      - (participantSlot(right.id, right.slot) ?? 99)
-      || String(left.id).localeCompare(String(right.id)));
-  for (const owner of owners) {
-    const slot = participantSlot(owner.id, owner.slot);
-    const locations = [...owner.locations.entries()]
-      .sort(([left], [right]) => Number(left) - Number(right));
-    for (const [index, point] of locations) {
-      markers.push({
-        source: "team",
-        ownerId: owner.id,
-        ownerName: owner.name,
-        partySlot: slot,
-        point,
-        text: String(index),
-        fill: partyColor(slot, "#aaafb2"),
-        textColor: partyTextColor(slot, "#ffffff"),
-      });
-    }
-  }
-  return assignGatestoneSlots(markers, floor);
+  return buildVisibleRemoteGatestones(
+    state.teamGatestones,
+    floor,
+    (ownerId, hintedSlot) => participantSlot(ownerId, hintedSlot),
+  );
 }
 
 function drawSelection(floor) {
@@ -585,8 +572,9 @@ function updateOverlayStatus(text = "") {
   const api = window.alt1;
   const permission = api.permissionOverlay === true ? "yes" : api.permissionOverlay === false ? "no" : "unknown";
   const markers = collectGatestoneMarkers();
-  const localCount = markers.filter((marker) => marker.source === "local").length;
-  const teamCount = markers.filter((marker) => marker.source === "team").length;
+  const localCount = Object.keys(state.localGatestones).length;
+  const localSent = state.syncedLocalGatestones.size;
+  const teamCount = markers.length;
   if (!api.rsLinked) {
     elements.overlayStatus.textContent = `Native overlay waiting for RuneScape | permission ${permission}`;
   } else if (api.permissionOverlay === false) {
@@ -599,7 +587,8 @@ function updateOverlayStatus(text = "") {
       ? ` | rejected ${report.rejected}/${report.sent}`
       : report ? ` | sent ${report.sent}` : "";
     elements.overlayStatus.textContent = `Native overlay permission ${permission} | map ${state.calibration.x},${state.calibration.y}`
-      + ` | labels ${state.annotations.size} | local gates ${localCount} | team gates ${teamCount}${delivery}`;
+      + ` | labels ${state.annotations.size} | local gates detected ${localCount}/synced ${localSent}`
+      + ` | remote gates visible ${teamCount}${delivery}`;
   } else {
     elements.overlayStatus.textContent = `Native overlay permission ${permission} | waiting for map calibration`;
   }
@@ -780,6 +769,71 @@ async function copyResults() {
   setStatus("Results table copied to the clipboard", "ok");
 }
 
+function localPartyName() {
+  return elements.teamName.value.trim() || teamSync.name;
+}
+
+function applyObservedParty(incoming, source = "scan") {
+  const merged = mergeObservedPartyCache(
+    state.observedParty,
+    incoming,
+    state.partyPendingChanges,
+    { source },
+  );
+  state.observedParty = merged.members;
+  state.partyPendingChanges = merged.pending;
+  return merged.changed;
+}
+
+function stopAutomaticRoom(message = "") {
+  if (teamSync.mode === "peer") {
+    teamSync.disconnect(false);
+    state.syncedLocalGatestones.clear();
+    clearRemoteTeamState();
+  }
+  if (message) elements.teamStatus.textContent = message;
+}
+
+function syncAutomaticPartyRoom() {
+  if (!elements.partyInterface.checked || !elements.autoRoom.checked) return false;
+  const descriptor = automaticPartyRoom(state.observedParty, elements.teamName.value.trim());
+  if (!descriptor) {
+    stopAutomaticRoom("Auto-room waiting for a scanned leader, local RSN and at least two players");
+    return false;
+  }
+
+  elements.teamRoom.value = descriptor.roomCode;
+  if (teamSync.mode === "peer" && teamSync.roomCode === descriptor.roomCode
+    && normalizePartyName(teamSync.name) === normalizePartyName(elements.teamName.value)) {
+    teamSync.setPeerSlot(descriptor.localSlot);
+    return true;
+  }
+
+  clearRemoteTeamState();
+  state.syncedLocalGatestones.clear();
+  teamSync.connect(descriptor.roomCode, elements.teamName.value, undefined, {
+    mode: "peer",
+    slot: descriptor.localSlot,
+  });
+  return true;
+}
+
+function forgetParty() {
+  state.observedParty = [];
+  state.partyPendingChanges.clear();
+  state.partyPanel = null;
+  state.partyAutoScan = false;
+  stopAutomaticRoom();
+  clearRemoteTeamState();
+  renderParty();
+  elements.partyScanStatus.textContent = "Party forgotten; open the DG party interface and scan again";
+}
+
+function trustedPeerSender(senderName) {
+  return teamSync.mode !== "peer"
+    || Boolean(observedPartySlot(state.observedParty, senderName));
+}
+
 function renderParty() {
   const members = teamSync.members;
   const observed = elements.partyInterface.checked ? state.observedParty : [];
@@ -821,7 +875,11 @@ function globalPartyPanel(panel, offset) {
 }
 
 function expectedPartyNames() {
-  const names = [elements.teamName.value.trim(), ...teamSync.members.map((member) => member.name)]
+  const names = [
+    elements.teamName.value.trim(),
+    ...state.observedParty.map((member) => member.name),
+    ...teamSync.members.map((member) => member.name),
+  ]
     .filter(Boolean);
   return names.filter((name, index) => names.findIndex((candidate) => candidate.toLowerCase() === name.toLowerCase()) === index);
 }
@@ -829,13 +887,22 @@ function expectedPartyNames() {
 async function scanPartyInterface({ manual = false, forceFull = false } = {}) {
   if (state.partyScanBusy || !elements.partyInterface.checked) return false;
   state.lastPartyScan = Date.now();
+  if (manual) state.partyAutoScan = true;
   if (!hasAlt1() || !window.alt1.rsLinked) {
-    if (manual) elements.partyScanStatus.textContent = "Link Alt1 to RuneScape before scanning the party";
+    state.partyAutoScan = false;
+    if (manual) {
+      elements.partyScanStatus.textContent = state.observedParty.length
+        ? `RuneScape unavailable; cached ${state.observedParty.length} party names retained`
+        : "Link Alt1 to RuneScape before scanning the party";
+    }
     return false;
   }
   const runtime = partyOcrRuntime();
   if (!runtime.capture || !runtime.ocr?.findReadLine || !runtime.font?.chars) {
-    elements.partyScanStatus.textContent = "Alt1 OCR runtime unavailable; using team join order";
+    state.partyAutoScan = false;
+    elements.partyScanStatus.textContent = state.observedParty.length
+      ? `Alt1 OCR unavailable; cached ${state.observedParty.length} party names retained`
+      : "Alt1 OCR runtime unavailable; using team join order";
     return false;
   }
 
@@ -862,21 +929,30 @@ async function scanPartyInterface({ manual = false, forceFull = false } = {}) {
       const result = readPartyInterface(image, { ...runtime, expectedNames: expectedPartyNames() });
       if (!result) continue;
       state.partyPanel = globalPartyPanel(result.panel, area);
-      state.observedParty = reconcileObservedParty(result.members, expectedPartyNames());
+      const reconciled = reconcileObservedParty(result.members, expectedPartyNames());
+      applyObservedParty(reconciled, "scan");
+      state.partyAutoScan = true;
       const named = state.observedParty.filter((member) => member.name).length;
-      const occupied = state.observedParty.filter((member) => member.occupied).length;
+      const occupied = result.members.filter((member) => member.occupied).length;
       const rowEvidence = result.members.map((member) => member.pixelCount).join("/");
       elements.partyScanStatus.textContent = named
-        ? `RuneScape party read: ${named}/${occupied} names · positions active`
+        ? `RuneScape party cached: ${named}/${Math.max(named, occupied)} names · positions active`
         : `Party rows ${occupied}/5, OCR missed names · pixels ${rowEvidence}`;
+      if (manual) elements.autoRoom.checked = true;
       if (named) teamSync.sendPartyOrder(state.observedParty);
       renderParty();
       render();
+      syncAutomaticPartyRoom();
       return true;
     }
-    if (manual) elements.partyScanStatus.textContent = "DG party interface not found; keep it open and try again";
+    state.partyAutoScan = false;
+    state.partyPanel = null;
+    elements.partyScanStatus.textContent = state.observedParty.length
+      ? `DG party interface closed; cached ${state.observedParty.length} names`
+      : "DG party interface not found; open it and try again";
     return false;
   } catch (error) {
+    state.partyAutoScan = false;
     elements.partyScanStatus.textContent = `Party scan failed: ${error.message || error}`;
     return false;
   } finally {
@@ -887,10 +963,15 @@ async function scanPartyInterface({ manual = false, forceFull = false } = {}) {
 
 function sendTeamSnapshot() {
   for (const [pointKey, annotation] of state.annotations) {
+    if (annotation.ownerId !== teamSync.clientId) continue;
     teamSync.sendAnnotation(pointFromKey(pointKey), annotation.text);
   }
-  for (const [index, point] of Object.entries(state.localGatestones)) teamSync.sendGatestone(index, point);
+  state.syncedLocalGatestones.clear();
+  for (const [index, point] of Object.entries(state.localGatestones)) {
+    if (teamSync.sendGatestone(index, point)) state.syncedLocalGatestones.add(Number(index));
+  }
   teamSync.sendPartyOrder(state.observedParty);
+  updateOverlayStatus();
 }
 
 function bindEvents() {
@@ -944,45 +1025,70 @@ function bindEvents() {
   });
 
   elements.teamCreate.addEventListener("click", () => {
-    clearTeamGatestones();
+    elements.autoRoom.checked = false;
+    stopAutomaticRoom();
+    clearRemoteTeamState();
     elements.teamRoom.value = createRoomCode();
     elements.teamRoom.value = teamSync.connect(
       elements.teamRoom.value, elements.teamName.value, undefined, { create: true },
     );
   });
   elements.teamJoin.addEventListener("click", () => {
-    clearTeamGatestones();
+    elements.autoRoom.checked = false;
+    stopAutomaticRoom();
+    clearRemoteTeamState();
     elements.teamRoom.value = teamSync.connect(elements.teamRoom.value, elements.teamName.value);
   });
   elements.teamDisconnect.addEventListener("click", () => {
+    elements.autoRoom.checked = false;
     teamSync.disconnect();
-    clearTeamGatestones();
+    state.syncedLocalGatestones.clear();
+    clearRemoteTeamState();
   });
   elements.partyScan.addEventListener("click", () => scanPartyInterface({ manual: true, forceFull: true }));
+  elements.partyForget.addEventListener("click", forgetParty);
+  elements.autoRoom.addEventListener("change", () => {
+    if (elements.autoRoom.checked) syncAutomaticPartyRoom();
+    else stopAutomaticRoom("Automatic party room paused; manual rooms remain available");
+  });
   elements.partyInterface.addEventListener("change", () => {
     if (!elements.partyInterface.checked) {
-      state.observedParty = [];
+      state.partyAutoScan = false;
       state.partyPanel = null;
-      elements.partyScanStatus.textContent = "RuneScape party positions disabled; using team join order";
+      stopAutomaticRoom("RuneScape party positions disabled; automatic room paused");
+      elements.partyScanStatus.textContent = state.observedParty.length
+        ? `RuneScape party positions disabled; cached ${state.observedParty.length} names`
+        : "RuneScape party positions disabled; using team join order";
       renderParty();
       render();
       return;
     }
-    elements.partyScanStatus.textContent = "Open the DG party interface to scan its player order";
+    elements.partyScanStatus.textContent = state.observedParty.length
+      ? `Using ${state.observedParty.length} cached party names; scanning for updates`
+      : "Open the DG party interface to scan its player order";
+    syncAutomaticPartyRoom();
     scanPartyInterface({ manual: true, forceFull: true });
   });
   teamSync.addEventListener("status", (event) => { elements.teamStatus.textContent = event.detail; });
   teamSync.addEventListener("connected", () => {
     sendTeamSnapshot();
-    scanPartyInterface({ forceFull: !state.partyPanel });
   });
-  teamSync.addEventListener("disconnected", clearTeamGatestones);
-  teamSync.addEventListener("hello", sendTeamSnapshot);
+  teamSync.addEventListener("disconnected", () => {
+    state.syncedLocalGatestones.clear();
+    clearRemoteTeamState();
+  });
+  teamSync.addEventListener("hello", (event) => {
+    if (trustedPeerSender(event.detail.senderName)) sendTeamSnapshot();
+  });
   teamSync.addEventListener("party", (event) => {
-    state.observedParty = event.detail.members;
+    if (teamSync.mode === "peer"
+      && (!isTrustedPartySnapshot(state.observedParty, event.detail.members, localPartyName())
+        || !observedPartySlot(event.detail.members, event.detail.senderName))) return;
+    applyObservedParty(event.detail.members, "remote");
     elements.partyScanStatus.textContent = `RuneScape party order received from ${event.detail.senderName}`;
     renderParty();
     render();
+    syncAutomaticPartyRoom();
   });
   teamSync.addEventListener("roster", () => {
     renderParty();
@@ -1002,31 +1108,44 @@ function bindEvents() {
   teamSync.addEventListener("full", clearTeamGatestones);
   teamSync.addEventListener("annotation", (event) => {
     const { senderId, senderName, point, text, slot } = event.detail;
-    if (!pointInFloor(point)) return;
+    if (!trustedPeerSender(senderName) || !pointInFloor(point)) return;
+    const trustedSlot = observedPartySlot(state.observedParty, senderName) ?? slot;
     if (text) {
       state.annotations.set(floorPointKey(point), {
         text: String(text).slice(0, 4),
         ownerId: senderId,
         ownerName: senderName,
-        slot,
+        slot: trustedSlot,
       });
     }
     else state.annotations.delete(floorPointKey(point));
     render();
   });
-  teamSync.addEventListener("clear", () => clearAnnotations(false));
+  teamSync.addEventListener("clear", (event) => {
+    if (trustedPeerSender(event.detail.senderName)) clearAnnotations(false);
+  });
   teamSync.addEventListener("gatestone", (event) => {
     const { senderId, senderName, index, point, slot } = event.detail;
+    if (!trustedPeerSender(senderName)) return;
+    const trustedSlot = observedPartySlot(state.observedParty, senderName) ?? slot;
     let owner = state.teamGatestones.get(senderId);
     if (!owner) {
-      owner = { id: senderId, name: senderName, slot, locations: new Map() };
+      owner = { id: senderId, name: senderName, slot: trustedSlot, locations: new Map() };
       state.teamGatestones.set(senderId, owner);
     }
     owner.name = senderName;
-    owner.slot = slot ?? owner.slot;
+    owner.slot = trustedSlot ?? owner.slot;
     if (pointInFloor(point)) owner.locations.set(index, point);
     else owner.locations.delete(index);
     if (!owner.locations.size) state.teamGatestones.delete(senderId);
+    render();
+  });
+  teamSync.addEventListener("leave", (event) => {
+    const { senderId } = event.detail;
+    state.teamGatestones.delete(senderId);
+    for (const [pointKey, annotation] of state.annotations) {
+      if (annotation.ownerId === senderId) state.annotations.delete(pointKey);
+    }
     render();
   });
 }
@@ -1037,7 +1156,7 @@ async function scanLoop() {
 }
 
 async function partyScanLoop() {
-  if (elements.partyInterface.checked && (teamSync.connected || state.partyPanel)
+  if (elements.partyInterface.checked && state.partyAutoScan
     && Date.now() - state.lastPartyScan >= PARTY_SCAN_INTERVAL) {
     await scanPartyInterface();
   }
@@ -1067,6 +1186,7 @@ function initialize() {
     storageSet(`${STORAGE_PREFIX}:name`, elements.teamName.value);
     renderParty();
     render();
+    syncAutomaticPartyRoom();
   });
 
   const configUrl = new URL("appconfig.json", window.location.href).href;

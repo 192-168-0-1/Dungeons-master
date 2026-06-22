@@ -11,6 +11,7 @@ import {
   hexToOverlayColor,
   mixColor,
 } from "../src/alt1-overlay.js";
+import { buildVisibleRemoteGatestones } from "../src/team-gates.js";
 
 const floor = FLOOR_SIZES.find((candidate) => candidate.name === "Small");
 
@@ -34,6 +35,29 @@ test("gatestone slots are allocated per room and invalid points are ignored", ()
     { text: "2", slot: 1 },
     { text: "G2", slot: 0 },
   ]);
+});
+
+test("visible gatestone markers contain remote gates only", () => {
+  const teamGatestones = new Map([
+    ["remote", {
+      id: "remote",
+      name: "Second",
+      slot: 2,
+      locations: new Map([
+        [1, { x: 1, y: 1 }],
+        [2, { x: 1, y: 1 }],
+      ]),
+    }],
+  ]);
+  const markers = buildVisibleRemoteGatestones(teamGatestones, floor, (_id, slot) => slot);
+  assert.deepEqual(markers.map(({ source, text, partySlot, slot }) => ({
+    source, text, partySlot, slot,
+  })), [
+    { source: "team", text: "1", partySlot: 2, slot: 0 },
+    { source: "team", text: "2", partySlot: 2, slot: 1 },
+  ]);
+  assert.equal(markers.some((marker) => marker.source === "local"
+    || marker.text.startsWith("G")), false);
 });
 
 test("map stats match the desktop EXE wording and RPM calculation", () => {

@@ -33,6 +33,107 @@ export function normalizePartyName(value) {
   return String(value ?? "").toLowerCase().replace(/[_\s]+/g, "").replace(/[^a-z0-9]/g, "");
 }
 
+function cleanObservedName(value) {
+  return String(value ?? "").replace(/[^a-z0-9 _-]/gi, "")
+    .replace(/\s+/g, " ").trim().slice(0, 24);
+}
+
+export function partyRoomCodeFromLeader(value) {
+  const leader = normalizePartyName(value);
+  if (!leader) return "";
+  let hash = 2166136261;
+  for (let index = 0; index < leader.length; index += 1) {
+    hash ^= leader.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  const encoded = (`00000000${(hash >>> 0).toString(36).toUpperCase()}`).slice(-8);
+  return `DG${encoded}`;
+}
+
+export function automaticPartyRoom(members, localName) {
+  const party = normalizeObservedParty(members);
+  const leader = party.find((member) => member.slot === 1);
+  const localSlot = observedPartySlot(party, localName);
+  if (party.length < 2 || !leader || !localSlot) return null;
+  const roomCode = partyRoomCodeFromLeader(leader.name);
+  return roomCode ? {
+    roomCode,
+    leaderName: leader.name,
+    localSlot,
+    members: party,
+  } : null;
+}
+
+export function isTrustedPartySnapshot(currentMembers, incomingMembers, localName) {
+  const current = normalizeObservedParty(currentMembers);
+  const incoming = normalizeObservedParty(incomingMembers);
+  const currentLeader = current.find((member) => member.slot === 1);
+  const incomingLeader = incoming.find((member) => member.slot === 1);
+  return Boolean(currentLeader && incomingLeader
+    && normalizePartyName(currentLeader.name) === normalizePartyName(incomingLeader.name)
+    && observedPartySlot(incoming, localName));
+}
+
+export function mergeObservedPartyCache(currentMembers, incomingMembers, pendingChanges = new Map(), {
+  source = "scan",
+} = {}) {
+  const current = normalizeObservedParty(currentMembers);
+  const currentBySlot = new Map(current.map((member) => [member.slot, { ...member }]));
+  const incoming = Array.isArray(incomingMembers) ? incomingMembers : [];
+  const incomingBySlot = new Map();
+  for (const candidate of incoming) {
+    const slot = Number(candidate?.slot);
+    if (!Number.isInteger(slot) || slot < 1 || slot > PARTY_SIZE) continue;
+    incomingBySlot.set(slot, candidate);
+  }
+  const pending = new Map(pendingChanges instanceof Map ? pendingChanges : []);
+
+  for (let slot = 1; slot <= PARTY_SIZE; slot += 1) {
+    const existing = currentBySlot.get(slot);
+    const candidate = incomingBySlot.get(slot);
+    if (!candidate) continue;
+    const incomingName = candidate.occupied === false ? "" : cleanObservedName(candidate.name);
+    const existingKey = normalizePartyName(existing?.name);
+    const incomingKey = normalizePartyName(incomingName);
+
+    if (!existing) {
+      if (incomingKey) currentBySlot.set(slot, { slot, name: incomingName, occupied: true });
+      pending.delete(slot);
+      continue;
+    }
+    // Remote snapshots are useful for filling gaps only. They neither count
+    // toward nor reset the two-scan confirmation required for local changes.
+    if (source !== "scan") continue;
+    if (incomingKey && incomingKey === existingKey) {
+      pending.delete(slot);
+      continue;
+    }
+    // OCR can see an occupied row without reading its name. That is not
+    // evidence that a known member left or changed position.
+    if (candidate.occupied !== false && !incomingKey) {
+      pending.delete(slot);
+      continue;
+    }
+    const key = candidate.occupied === false ? "__empty__" : incomingKey;
+    const previous = pending.get(slot);
+    const count = previous?.key === key ? previous.count + 1 : 1;
+    if (count < 2) {
+      pending.set(slot, { key, count, name: incomingName });
+      continue;
+    }
+    if (key === "__empty__") currentBySlot.delete(slot);
+    else currentBySlot.set(slot, { slot, name: incomingName, occupied: true });
+    pending.delete(slot);
+  }
+
+  const members = normalizeObservedParty([...currentBySlot.values()]);
+  return {
+    members,
+    pending,
+    changed: JSON.stringify(members) !== JSON.stringify(current),
+  };
+}
+
 function editDistance(left, right) {
   const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
   for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
