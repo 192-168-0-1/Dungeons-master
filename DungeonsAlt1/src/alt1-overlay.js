@@ -81,6 +81,48 @@ function text(value, color, size, x, y, duration, centered = true, shadow = true
   };
 }
 
+function estimateOverlayTextWidth(value, size = 12) {
+  return Math.ceil(String(value).length * size * 0.52);
+}
+
+export function buildStatsOverlayCommands({ stats, mapX, mapY, floor, duration = 30_000 }) {
+  if (!stats || !floor) return [];
+  const originX = Math.round(mapX);
+  const barTop = Math.round(mapY + floor.imageHeight);
+  const barHeight = 24;
+  const fontSize = 12;
+  const segments = [];
+  const parts = String(stats).split(" | ");
+  if (parts.length === 3) {
+    segments.push(
+      { value: parts[0], color: mixColor(232, 242, 243) },
+      { value: " | ", color: mixColor(116, 135, 139) },
+      { value: parts[1], color: mixColor(85, 217, 232) },
+      { value: " | ", color: mixColor(116, 135, 139) },
+      { value: parts[2], color: mixColor(232, 242, 243) },
+    );
+  } else {
+    segments.push({ value: String(stats), color: mixColor(232, 242, 243) });
+  }
+
+  const contentWidth = segments.reduce((total, segment) => total
+    + estimateOverlayTextWidth(segment.value, fontSize), 0);
+  const barWidth = Math.max(floor.imageWidth, contentWidth + 20);
+  const commands = [
+    rect(mixColor(3, 6, 7, 248), originX, barTop, barWidth, barHeight, duration, barHeight),
+    rect(mixColor(92, 111, 115, 225), originX, barTop, barWidth, barHeight, duration, 1),
+    rect(mixColor(85, 217, 232), originX + 2, barTop + 3, 3, barHeight - 6, duration, 3),
+  ];
+
+  let cursorX = originX + 10;
+  for (const segment of segments) {
+    commands.push(text(segment.value, segment.color, fontSize,
+      cursorX, barTop + 4, duration, false, false));
+    cursorX += estimateOverlayTextWidth(segment.value, fontSize);
+  }
+  return commands;
+}
+
 export function buildMapOverlayCommands({
   mapX,
   mapY,
@@ -128,18 +170,13 @@ export function buildMapOverlayCommands({
   }
 
   if (stats) {
-    const fontSize = 12;
-    const paddingX = 3;
-    const barTop = Math.round(originY + floor.imageHeight);
-    const barHeight = 21;
-    const estimatedTextWidth = Math.ceil(String(stats).length * 6.25);
-    const barWidth = Math.max(floor.imageWidth, estimatedTextWidth + paddingX * 2);
-    // Alt1 rectangles are outlines. Using the full bar height as line width
-    // produces the same solid black strip shown beneath the desktop EXE map.
-    commands.push(rect(mixColor(0, 0, 0), originX, barTop,
-      barWidth, barHeight, duration, barHeight));
-    commands.push(text(stats, mixColor(255, 255, 255), fontSize, originX + paddingX,
-      barTop + 3, duration, false, false));
+    commands.push(...buildStatsOverlayCommands({
+      stats,
+      mapX: originX,
+      mapY: originY,
+      floor,
+      duration,
+    }));
   }
 
   return commands;

@@ -27,7 +27,7 @@ import {
   partyColor,
   partyTextColor,
 } from "./src/party-core.js";
-import { readPartyInterface } from "./src/party-interface.js";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js";
 import { WinterfaceReader } from "./src/winterface.js";
 
 const SCAN_INTERVAL = 600;
@@ -766,11 +766,11 @@ function renderParty() {
 }
 
 function partyOcrRuntime() {
-  const fontModule = window.Alt1Fonts;
   return {
-    capture: window.A1lib?.capture,
-    ocr: window.OCR,
-    font: fontModule?.default ?? fontModule,
+    ...resolvePartyOcrRuntime(window),
+    // Reuse the app's striped capture path so a full-client party scan never
+    // exceeds Alt1's maximum transfer size.
+    capture: captureRegion,
   };
 }
 

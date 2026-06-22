@@ -4,6 +4,7 @@ import { FLOOR_SIZES } from "../src/map-core.js";
 import {
   assignGatestoneSlots,
   buildMapOverlayCommands,
+  buildStatsOverlayCommands,
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
@@ -42,6 +43,29 @@ test("map stats match the desktop EXE wording and RPM calculation", () => {
     "12 rooms (16) | 5.6 rpm | 5 dead ends");
 });
 
+test("stats panel uses an EXE-style dark panel with an accented RPM value", () => {
+  const commands = buildStatsOverlayCommands({
+    stats: "12 rooms (16) | 5.6 rpm | 5 dead ends",
+    mapX: 100,
+    mapY: 50,
+    floor,
+  });
+  const textCommands = commands.filter((command) => command.type === "text");
+  assert.equal(textCommands.map((command) => command.text).join(""),
+    "12 rooms (16) | 5.6 rpm | 5 dead ends");
+  assert.equal(textCommands.find((command) => command.text === "5.6 rpm").color,
+    mixColor(85, 217, 232));
+  assert.deepEqual({ x: textCommands[0].x, y: textCommands[0].y }, { x: 110, y: 206 });
+  assert.deepEqual(
+    commands.slice(0, 3).map(({ type, y, height, lineWidth }) => ({ type, y, height, lineWidth })),
+    [
+      { type: "rect", y: 202, height: 24, lineWidth: 24 },
+      { type: "rect", y: 202, height: 24, lineWidth: 1 },
+      { type: "rect", y: 205, height: 18, lineWidth: 3 },
+    ],
+  );
+});
+
 test("map commands use client-relative coordinates and include every marker type", () => {
   const gatestones = assignGatestoneSlots([
     { source: "local", point: { x: 1, y: 1 }, text: "G1", fill: "#ffd23f", textColor: "#111111" },
@@ -72,14 +96,13 @@ test("map commands use client-relative coordinates and include every marker type
   assert.deepEqual({ x: local.x, y: local.y }, { x: 151, y: 152 });
   assert.notDeepEqual({ x: team.x, y: team.y }, { x: local.x, y: local.y });
   assert.equal(commands.some((command) => command.text === "invalid"), false);
-  const stats = commands.find((command) => command.text === "4 rooms (7) | 3.2 rpm | 1 dead ends");
+  const stats = commands.filter((command) => command.type === "text" && command.y === 206);
   const statsBackground = commands.find((command) => command.type === "rect"
-    && command.y === 202 && command.height === 21);
-  assert.deepEqual({ x: stats.x, y: stats.y, centered: stats.centered, shadow: stats.shadow },
-    { x: 103, y: 205, centered: false, shadow: false });
-  assert.equal(stats.color, mixColor(255, 255, 255));
+    && command.y === 202 && command.height === 24 && command.lineWidth === 24);
+  assert.equal(stats.map((command) => command.text).join(""), "4 rooms (7) | 3.2 rpm | 1 dead ends");
+  assert.equal(stats.every((command) => command.centered === false && command.shadow === false), true);
   assert.ok(statsBackground);
-  assert.equal(statsBackground.color, mixColor(0, 0, 0));
+  assert.equal(statsBackground.color, mixColor(3, 6, 7, 248));
   assert.ok(statsBackground.width >= floor.imageWidth);
 });
 

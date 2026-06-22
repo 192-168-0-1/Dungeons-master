@@ -4,6 +4,7 @@ import {
   findPartyPanel,
   isPartySlotPixel,
   readPartyInterface,
+  resolvePartyOcrRuntime,
 } from "../src/party-interface.js";
 
 function image(width, height) {
@@ -32,6 +33,22 @@ test("party row color classification follows the five RuneScape slots", () => {
   assert.equal(isPartySlotPixel([238, 211, 64, 255], 4), true);
   assert.equal(isPartySlotPixel([170, 174, 178, 255], 5), true);
   assert.equal(isPartySlotPixel([53, 183, 232, 255], 1), false);
+});
+
+test("OCR runtime resolves the globals exported by the Alt1 browser bundles", () => {
+  const imageData = image(2, 2);
+  const capture = (...args) => ({ args, toData: () => imageData });
+  const findReadLine = () => ({ text: "" });
+  const font = { chars: [{ chr: "A" }] };
+  const runtime = resolvePartyOcrRuntime({
+    A1lib: { capture },
+    OCR: { findReadLine },
+    Alt1Fonts: { aa_8px: font },
+  });
+
+  assert.equal(runtime.capture(1, 2, 3, 4), imageData);
+  assert.equal(runtime.ocr.findReadLine, findReadLine);
+  assert.equal(runtime.font, font);
 });
 
 test("four evenly spaced dividers locate a five-row DG party panel", () => {

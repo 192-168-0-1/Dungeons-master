@@ -10,6 +10,26 @@ const SLOT_RGB = Object.freeze([
   [170, 174, 178],
 ]);
 
+export function resolvePartyOcrRuntime(root = globalThis) {
+  const base = root?.A1lib ?? root?.a1lib;
+  const ocr = root?.OCR ?? root?.ocr;
+  const fontModule = root?.Alt1Fonts ?? root?.alt1fonts;
+  const font = fontModule?.aa_8px
+    ?? fontModule?.default
+    ?? (fontModule?.chars ? fontModule : null)
+    ?? root?.aa_8px;
+  return {
+    capture: typeof base?.capture === "function"
+      ? (...args) => {
+        const captured = base.capture(...args);
+        return typeof captured?.toData === "function" ? captured.toData() : captured;
+      }
+      : null,
+    ocr,
+    font,
+  };
+}
+
 function pixelOffset(image, x, y) {
   return (y * image.width + x) * 4;
 }
