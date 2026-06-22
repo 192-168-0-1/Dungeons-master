@@ -71,7 +71,7 @@ test("Alt1 bootstrap starts the cached app when version.json hangs", async () =>
 
   assert.equal(runtime.appendedToBody.length, 1);
   assert.equal(runtime.appendedToBody[0].type, "module");
-  assert.match(runtime.appendedToBody[0].src, /^\.\/app\.js\?v=20260622-4$/);
+  assert.match(runtime.appendedToBody[0].src, /^\.\/app\.js\?v=20260622-7$/);
 });
 
 test("failed OCR loading does not block the core Alt1 app", async () => {
@@ -80,7 +80,7 @@ test("failed OCR loading does not block the core Alt1 app", async () => {
 
   assert.equal(runtime.appendedToBody.length, 1);
   assert.equal(runtime.appendedToHead.length, 1);
-  assert.match(runtime.appendedToBody[0].src, /^\.\/app\.js\?v=20260622-4$/);
+  assert.match(runtime.appendedToBody[0].src, /^\.\/app\.js\?v=20260622-7$/);
 
   runtime.appendedToHead[0].onerror();
   await runtime.window.__dungeonsOcrReady;
@@ -100,4 +100,35 @@ test("core module failures replace the indefinite loading message", async () => 
   assert.equal(runtime.elements.environment.textContent, "Load failed");
   assert.match(runtime.elements.status.textContent, /could not load/i);
   assert.equal(runtime.elements.status.dataset.tone, "error");
+});
+
+test("startup watchdog replaces a module that never finishes initializing", async () => {
+  const runtime = createBootstrapRuntime(() => Promise.resolve({
+    ok: true,
+    json: () => Promise.resolve({ version: "test-version" }),
+  }));
+  await flushAsyncWork();
+
+  const watchdog = runtime.timers.find((timer) => timer.delay === 12000);
+  assert.ok(watchdog, "startup watchdog should be scheduled");
+  watchdog.callback();
+
+  assert.equal(runtime.elements.environment.textContent, "Load failed");
+  assert.match(runtime.elements.status.textContent, /did not finish starting/i);
+  assert.equal(runtime.elements.status.dataset.tone, "error");
+});
+
+test("startup watchdog leaves a ready app untouched", async () => {
+  const runtime = createBootstrapRuntime(() => Promise.resolve({
+    ok: true,
+    json: () => Promise.resolve({ version: "test-version" }),
+  }));
+  await flushAsyncWork();
+
+  runtime.window.__dungeonsAppReady = true;
+  const watchdog = runtime.timers.find((timer) => timer.delay === 12000);
+  watchdog.callback();
+
+  assert.equal(runtime.elements.environment.textContent, "Starting…");
+  assert.equal(runtime.elements.status.textContent, "Starting Dungeons…");
 });

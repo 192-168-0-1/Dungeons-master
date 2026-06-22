@@ -186,10 +186,18 @@ if ($html -notmatch 'fetch\("\./version\.json\?ts=" \+ Date\.now\(\), \{ cache: 
     -not (Test-Path (Join-Path $appRoot 'version.json'))) {
     throw 'The Alt1 bootstrap must fetch version.json without cache so installed apps update without reinstalling.'
 }
+if ($html -notmatch '<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">') {
+    throw 'index.html must disable document caching for existing Alt1 installations.'
+}
 if (($html -notmatch 'var fallbackVersion = "[0-9-]+"') -or
     ($html -notmatch 'setTimeout\(function \(\) \{\s*startApp\(fallbackVersion\);\s*\}, 2500\)') -or
     ($html -notmatch 'appScript\.onerror')) {
     throw 'The Alt1 bootstrap must start from a bounded local fallback and expose core module load failures.'
+}
+if (($html -notmatch 'window\.__dungeonsAppReady') -or
+    ($html -notmatch '\}, 12000\)') -or
+    ($app -notmatch 'window\.__dungeonsAppReady = true;')) {
+    throw 'The Alt1 bootstrap must detect modules that never finish initializing.'
 }
 
 $ocrAssets = @('WinterfaceMarker.png')

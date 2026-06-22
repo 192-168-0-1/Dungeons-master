@@ -19,7 +19,7 @@ import {
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260622-4";
+} from "./src/alt1-overlay.js?v=20260622-7";
 import { TeamSync, createRoomCode } from "./src/team-sync.js";
 import {
   PARTY_COLORS,
@@ -28,7 +28,7 @@ import {
   partyTextColor,
   reconcileObservedParty,
 } from "./src/party-core.js";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260622-6";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260622-7";
 import { WinterfaceReader } from "./src/winterface.js";
 
 const SCAN_INTERVAL = 600;
@@ -1048,6 +1048,7 @@ function initialize() {
   updateOverlayStatus();
   scanLoop();
   partyScanLoop();
+  window.__dungeonsAppReady = true;
 }
 
 initialize();

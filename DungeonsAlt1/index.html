@@ -4,8 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#101619">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <title>Dungeons Alt1</title>
-  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./styles.css?v=20260622-7">
 </head>
 <body>
   <header class="titlebar">
@@ -115,7 +118,7 @@
     (function bootstrapDungeons() {
       "use strict";
 
-      var fallbackVersion = "20260622-4";
+      var fallbackVersion = "20260622-7";
       var appStarted = false;
       var environment = document.getElementById("environment");
       var status = document.getElementById("status");
@@ -131,6 +134,8 @@
       function startApp(version) {
         if (appStarted) return;
         appStarted = true;
+        environment.textContent = "Starting…";
+        status.textContent = "Starting Dungeons…";
 
         var appScript = document.createElement("script");
         appScript.type = "module";
@@ -141,6 +146,13 @@
           status.dataset.tone = "error";
         };
         document.body.appendChild(appScript);
+
+        window.setTimeout(function () {
+          if (window.__dungeonsAppReady) return;
+          environment.textContent = "Load failed";
+          status.textContent = "Dungeons did not finish starting. Close every Dungeons window in Alt1 and open it again.";
+          status.dataset.tone = "error";
+        }, 12000);
       }
 
       function loadOcrScript(asset) {
