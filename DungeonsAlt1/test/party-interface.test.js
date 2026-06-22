@@ -61,6 +61,23 @@ test("four evenly spaced dividers locate a five-row DG party panel", () => {
   assert.deepEqual(panel.rows.map((row) => row.pixelCount > 0), [true, true, false, false, false]);
 });
 
+test("the wider three-divider party layout from RuneScape is detected", () => {
+  const target = image(320, 230);
+  for (const y of [70, 104, 138]) {
+    for (let x = 40; x <= 220; x += 1) setPixel(target, x, y, [80, 70, 55, 255]);
+  }
+  for (let y = 49; y <= 58; y += 1) {
+    for (let x = 118; x <= 132; x += 1) setPixel(target, x, y, [231, 80, 43, 255]);
+  }
+
+  const panel = findPartyPanel(target);
+  assert.ok(panel);
+  assert.equal(panel.firstDividerY, 70);
+  assert.equal(panel.rowGap, 34);
+  assert.equal(panel.rows[0].centerY, 54);
+  assert.equal(panel.rows[0].pixelCount > 0, true);
+});
+
 test("OCR results are attached to their detected RuneScape row", () => {
   const target = image(320, 220);
   paintPartyPanel(target);

@@ -66,6 +66,10 @@ function rect(color, x, y, width, height, duration, lineWidth) {
   return { type: "rect", color, x, y, width, height, duration, lineWidth };
 }
 
+function line(color, width, x1, y1, x2, y2, duration) {
+  return { type: "line", color, width, x1, y1, x2, y2, duration };
+}
+
 function text(value, color, size, x, y, duration, centered = true, shadow = true) {
   return {
     type: "text",
@@ -109,7 +113,8 @@ export function buildStatsOverlayCommands({ stats, mapX, mapY, floor, duration =
     + estimateOverlayTextWidth(segment.value, fontSize), 0);
   const barWidth = Math.max(floor.imageWidth, contentWidth + 20);
   const commands = [
-    rect(mixColor(3, 6, 7, 248), originX, barTop, barWidth, barHeight, duration, barHeight),
+    line(mixColor(0, 0, 0), barHeight,
+      originX, barTop + barHeight / 2, originX + barWidth, barTop + barHeight / 2, duration),
     rect(mixColor(92, 111, 115, 225), originX, barTop, barWidth, barHeight, duration, 1),
     rect(mixColor(85, 217, 232), originX + 2, barTop + 3, 3, barHeight - 6, duration, 3),
   ];
@@ -202,6 +207,10 @@ export function executeOverlayCommands(api, commands) {
     if (command.type === "rect" && typeof api.overLayRect === "function") {
       accepted = api.overLayRect(command.color, command.x, command.y, command.width,
         command.height, command.duration, command.lineWidth);
+      sent += 1;
+    } else if (command.type === "line" && typeof api.overLayLine === "function") {
+      accepted = api.overLayLine(command.color, command.width, command.x1, command.y1,
+        command.x2, command.y2, command.duration);
       sent += 1;
     } else if (command.type === "text" && typeof api.overLayTextEx === "function") {
       accepted = api.overLayTextEx(command.text, command.color, command.size, command.x,

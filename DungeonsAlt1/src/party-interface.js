@@ -1,6 +1,6 @@
 const MIN_DIVIDER_WIDTH = 100;
 const MIN_ROW_GAP = 18;
-const MAX_ROW_GAP = 30;
+const MAX_ROW_GAP = 42;
 
 const SLOT_RGB = Object.freeze([
   [231, 80, 43],
@@ -87,14 +87,21 @@ function compatibleRun(runsByY, y, previous) {
 }
 
 function rowColorData(image, panel, slot) {
-  const centerY = Math.round(panel.firstDividerY - panel.rowGap / 2 + (slot - 1) * panel.rowGap);
+  const nominalCenterY = Math.round(panel.firstDividerY - panel.rowGap / 2 + (slot - 1) * panel.rowGap);
+  const bandTop = Math.max(0, slot === 1
+    ? panel.firstDividerY - panel.rowGap - 10
+    : panel.firstDividerY + (slot - 2) * panel.rowGap + 2);
+  const bandBottom = Math.min(image.height - 1,
+    panel.firstDividerY + (slot - 1) * panel.rowGap - 2);
   const counts = new Map();
   let pixelCount = 0;
-  for (let y = centerY - 7; y <= centerY + 7; y += 1) {
+  let totalY = 0;
+  for (let y = bandTop; y <= bandBottom; y += 1) {
     for (let x = panel.lineLeft + 4; x <= panel.lineRight - 4; x += 1) {
       const color = pixel(image, x, y);
       if (!isPartySlotPixel(color, slot)) continue;
       pixelCount += 1;
+      totalY += y;
       const key = `${color[0]},${color[1]},${color[2]}`;
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
@@ -104,6 +111,7 @@ function rowColorData(image, panel, slot) {
     .slice(0, 8)
     .map(([key]) => key.split(",").map(Number));
   if (!colors.length) colors.push(SLOT_RGB[slot - 1]);
+  const centerY = pixelCount ? Math.round(totalY / pixelCount) : nominalCenterY;
   return { centerY, pixelCount, colors };
 }
 
@@ -127,7 +135,9 @@ export function findPartyPanel(image) {
         group.push(match);
         previous = match;
       }
-      if (group.length !== 4) continue;
+      // Some interface layouts only expose three strong internal dividers;
+      // player-color evidence below prevents generic panels from matching.
+      if (group.length < 3) continue;
       const lineLeft = Math.max(...group.map((run) => run.left));
       const lineRight = Math.min(...group.map((run) => run.right));
       if (lineRight - lineLeft + 1 < MIN_DIVIDER_WIDTH) continue;
@@ -135,7 +145,7 @@ export function findPartyPanel(image) {
       const rows = Array.from({ length: 5 }, (_, index) => rowColorData(image, panel, index + 1));
       const colorScore = rows.reduce((total, row) => total + Math.min(40, row.pixelCount), 0);
       if (colorScore < 3) continue;
-      const score = colorScore + (lineRight - lineLeft) / 20;
+      const score = colorScore + group.length * 20 + (lineRight - lineLeft) / 20;
       if (!best || score > best.score) {
         best = {
           ...panel,
