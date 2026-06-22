@@ -4,7 +4,7 @@ import {
   normalizePartyRoster,
   parsePartyRoster,
   removePartyMember,
-} from "./party-core.js?v=20260622-13";
+} from "./party-core.js?v=20260622-14";
 
 const DEFAULT_RELAY = "wss://dungeons-master.onrender.com/team-sync";
 const HEARTBEAT_INTERVAL = 5_000;
@@ -229,11 +229,11 @@ export class TeamSync extends EventTarget {
   }
 
   promoteMember(id) {
-    if (!this.isHost) return { ok: false, message: "Only the red host can promote players" };
+    if (!this.isHost) return { ok: false, message: "Only the party leader can promote players" };
     const target = this.rosterMember(id);
     if (!target) return { ok: false, message: "Player is not in this team room" };
     if (target.id === this.clientId || target.slot <= 2) {
-      return { ok: false, message: "Slot 1 is host-locked; host transfer is not available yet" };
+      return { ok: false, message: "Slot 1 is locked to the party leader; leader transfer is not available yet" };
     }
     const previousSlot = target.slot - 1;
     const previous = this.roster.find((member) => member.slot === previousSlot);
@@ -248,11 +248,11 @@ export class TeamSync extends EventTarget {
   }
 
   kickMember(id) {
-    if (!this.isHost) return { ok: false, message: "Only the red host can kick players" };
+    if (!this.isHost) return { ok: false, message: "Only the party leader can kick players" };
     const target = this.rosterMember(id);
     if (!target) return { ok: false, message: "Player is not in this team room" };
     if (target.id === this.clientId || target.slot === 1) {
-      return { ok: false, message: "The host cannot kick themselves" };
+      return { ok: false, message: "The party leader cannot kick themselves" };
     }
     this.send("KICK", target.id);
     this.setRoster(removePartyMember(this.roster, target.id));
@@ -316,13 +316,18 @@ export class TeamSync extends EventTarget {
 
   admitMember(senderId, senderName) {
     const result = addPartyMember(this.roster, { id: senderId, name: senderName });
+    if (result.duplicate) {
+      this.send("NAME_TAKEN", senderId, senderName);
+      return { ok: false, reason: "duplicate" };
+    }
     if (result.full) {
       this.send("FULL", senderId);
-      return;
+      return { ok: false, reason: "full" };
     }
     this.setRoster(result.roster);
     this.send("WELCOME", senderId, JSON.stringify(this.roster));
     this.sendRoster();
+    return { ok: true };
   }
 
   handleMessage(line) {
@@ -333,8 +338,11 @@ export class TeamSync extends EventTarget {
     const type = fields[3];
     this.lastSeen.set(senderId, Date.now());
     if (type === "HELLO") {
-      if (this.mode !== "peer" && this.isHost) this.admitMember(senderId, senderName);
-      this.setStatus(`${senderName} joined the team room`);
+      const admitted = this.mode !== "peer" && this.isHost
+        ? this.admitMember(senderId, senderName)
+        : null;
+      if (admitted?.reason === "duplicate") this.setStatus(`${senderName} could not join: duplicate RSN`);
+      else this.setStatus(`${senderName} joined the team room`);
       this.dispatchEvent(new CustomEvent("hello", { detail: { senderId, senderName } }));
     } else if (type === "ROSTER" && fields.length >= 5 && !this.isHost && this.mode !== "peer") {
       const roster = parsePartyRoster(fields[4]);
@@ -345,6 +353,8 @@ export class TeamSync extends EventTarget {
       this.acceptLeaderRoster(senderId, roster);
     } else if (type === "FULL" && fields[4] === this.clientId && this.mode !== "peer") {
       this.dropFromRoom("This team room is full (5/5)", "full");
+    } else if (type === "NAME_TAKEN" && fields[4] === this.clientId && this.mode !== "peer") {
+      this.dropFromRoom(`RSN "${fields[5] || this.name}" is already in this team room`, "duplicate");
     } else if (type === "KICK" && fields[4] === this.clientId && this.mode !== "offline") {
       const leader = this.roster.find((member) => member.slot === 1);
       if (!leader || leader.id !== senderId) return;

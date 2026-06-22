@@ -275,14 +275,18 @@ export function normalizePartyRoster(value) {
   const members = [];
   const ids = new Set();
   const slots = new Set();
+  const names = new Set();
   for (const candidate of value) {
     const id = cleanId(candidate?.id);
+    const name = cleanMemberName(candidate?.name);
+    const nameKey = normalizePartyName(name);
     const slot = Number(candidate?.slot);
     if (!id || !Number.isInteger(slot) || slot < 1 || slot > PARTY_SIZE
-      || ids.has(id) || slots.has(slot)) continue;
+      || ids.has(id) || slots.has(slot) || names.has(nameKey)) continue;
     ids.add(id);
     slots.add(slot);
-    members.push({ id, name: cleanMemberName(candidate?.name), slot });
+    names.add(nameKey);
+    members.push({ id, name, slot });
   }
   return members.sort((left, right) => left.slot - right.slot);
 }
@@ -294,8 +298,22 @@ export function addPartyMember(roster, candidate) {
 
   const existing = members.find((member) => member.id === id);
   if (existing) {
-    existing.name = cleanMemberName(candidate?.name);
+    const nextName = cleanMemberName(candidate?.name);
+    const nextKey = normalizePartyName(nextName);
+    const duplicate = members.find((member) => member.id !== id
+      && normalizePartyName(member.name) === nextKey);
+    if (duplicate) {
+      return { roster: members, member: null, full: false, duplicate: true, duplicateName: duplicate.name };
+    }
+    existing.name = nextName;
     return { roster: members, member: { ...existing }, full: false };
+  }
+
+  const name = cleanMemberName(candidate?.name);
+  const nameKey = normalizePartyName(name);
+  const duplicate = members.find((member) => normalizePartyName(member.name) === nameKey);
+  if (duplicate) {
+    return { roster: members, member: null, full: false, duplicate: true, duplicateName: duplicate.name };
   }
 
   const used = new Set(members.map((member) => member.slot));
@@ -303,7 +321,7 @@ export function addPartyMember(roster, candidate) {
     .find((number) => !used.has(number));
   if (!slot) return { roster: members, member: null, full: true };
 
-  const member = { id, name: cleanMemberName(candidate?.name), slot };
+  const member = { id, name, slot };
   return {
     roster: normalizePartyRoster([...members, member]),
     member,

@@ -190,19 +190,35 @@ if (($html -notmatch 'id="party-context-menu"') -or
     throw 'The RuneScape-style party context menu and viewport clamping are incomplete.'
 }
 if (($teamSync -notmatch 'send\("KICK"') -or
+    ($teamSync -notmatch 'NAME_TAKEN') -or
     ($teamSync -notmatch 'promoteMember') -or
     ($teamSync -notmatch 'kickMember') -or
     ($teamSync -notmatch 'senderInRoster') -or
-    ($app -notmatch 'Only the red host can kick players') -or
-    ($app -notmatch 'Only the red host can promote players')) {
+    ($app -notmatch 'Only the party leader can kick players') -or
+    ($app -notmatch 'Only the party leader can promote players')) {
     throw 'Manual host roster controls must support promote, kick and sender filtering.'
 }
-if (($app -notmatch 'team-sync\.js\?v=20260622-13') -or
-    ($app -notmatch 'party-core\.js\?v=20260622-13') -or
-    ($app -notmatch 'party-menu\.js\?v=20260622-13') -or
-    ($app -notmatch 'team-gates\.js\?v=20260622-13') -or
-    ($teamSync -notmatch 'party-core\.js\?v=20260622-13') -or
-    ($teamGates -notmatch 'party-core\.js\?v=20260622-13')) {
+if (($partyCore -notmatch 'duplicate: true') -or
+    ($teamSync -notmatch 'duplicate RSN') -or
+    ($teamSync -notmatch 'already in this team room')) {
+    throw 'Manual room rosters must reject duplicate RuneScape names.'
+}
+if (($html -notmatch 'id="party-interface" type="checkbox" checked') -or
+    ($html -notmatch 'party-scan-option" hidden') -or
+    ($app -notmatch 'partyInterface\.checked')) {
+    throw 'RuneScape party-position helper code must remain available while the checkbox stays hidden.'
+}
+if (($app -notmatch 'function installedInAlt1') -or
+    ($app -notmatch 'installLink\.hidden') -or
+    ($app -notmatch 'permissionchanged')) {
+    throw 'The install link must hide when the Alt1 app is already installed/permissioned.'
+}
+if (($app -notmatch 'team-sync\.js\?v=20260622-14') -or
+    ($app -notmatch 'party-core\.js\?v=20260622-14') -or
+    ($app -notmatch 'party-menu\.js\?v=20260622-14') -or
+    ($app -notmatch 'team-gates\.js\?v=20260622-14') -or
+    ($teamSync -notmatch 'party-core\.js\?v=20260622-14') -or
+    ($teamGates -notmatch 'party-core\.js\?v=20260622-14')) {
     throw 'Changed team-sync modules must be cache-busted for existing Alt1 installations.'
 }
 if (($app -notmatch 'buildVisibleRemoteGatestones') -or

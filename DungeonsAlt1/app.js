@@ -17,18 +17,18 @@ import {
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260622-13";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260622-13";
+} from "./src/alt1-overlay.js?v=20260622-14";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260622-14";
 import {
   PARTY_COLORS,
   mergeObservedPartyCache,
   observedPartySlot,
   partyColor,
   reconcileObservedParty,
-} from "./src/party-core.js?v=20260622-13";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260622-13";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260622-13";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260622-13";
+} from "./src/party-core.js?v=20260622-14";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260622-14";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260622-14";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260622-14";
 import { WinterfaceReader } from "./src/winterface.js";
 
 const SCAN_INTERVAL = 600;
@@ -798,6 +798,18 @@ function trustedTeamSender(senderId) {
   return teamSync.members.some((member) => member.id === senderId);
 }
 
+function installedInAlt1() {
+  if (!hasAlt1()) return false;
+  if (window.alt1.permissionInstalled === true) return true;
+  return ["permissionPixel", "permissionGameState", "permissionOverlay"]
+    .some((key) => window.alt1[key] === true || window.alt1[key] === 1 || window.alt1[key] === "true");
+}
+
+function updateInstallLink() {
+  if (!elements.installLink) return;
+  elements.installLink.hidden = installedInAlt1();
+}
+
 function clearTeamMemberState(memberId) {
   state.teamGatestones.delete(memberId);
   for (const [pointKey, annotation] of state.annotations) {
@@ -888,7 +900,7 @@ function inspectPartyTarget(target) {
 
 function kickPartyTarget(target) {
   if (!teamSync.isHost) {
-    elements.teamStatus.textContent = "Only the red host can kick players";
+    elements.teamStatus.textContent = "Only the party leader can kick players";
     return;
   }
   if (!target?.member) {
@@ -912,7 +924,7 @@ function kickPartyTarget(target) {
 
 function promotePartyTarget(target) {
   if (!teamSync.isHost) {
-    elements.teamStatus.textContent = "Only the red host can promote players";
+    elements.teamStatus.textContent = "Only the party leader can promote players";
     return;
   }
   if (!target?.member) {
@@ -1080,6 +1092,7 @@ function bindEvents() {
     clearGameOverlay();
     teamSync.disconnect(false);
   });
+  window.addEventListener("permissionchanged", updateInstallLink);
   elements.applyAnnotation.addEventListener("click", () => setSelectedAnnotation(elements.annotation.value));
   elements.annotation.addEventListener("keydown", (event) => {
     if (event.key === "Enter") { setSelectedAnnotation(elements.annotation.value); elements.canvas.focus(); }
@@ -1282,9 +1295,11 @@ function initialize() {
 
   const configUrl = new URL("appconfig.json", window.location.href).href;
   elements.installLink.href = `alt1://addapp/${configUrl}`;
+  updateInstallLink();
   if (hasAlt1()) {
     try {
       identifyApp();
+      updateInstallLink();
     } catch {
       // Alt1 identification is useful for permissions, but it must not block the UI.
     }

@@ -8,7 +8,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>Dungeons Alt1</title>
-  <link rel="stylesheet" href="./styles.css?v=20260622-13">
+  <link rel="stylesheet" href="./styles.css?v=20260622-14">
 </head>
 <body>
   <header class="titlebar">
@@ -104,7 +104,7 @@
             <button id="team-disconnect" type="button">Disconnect</button>
           </div>
           <small id="team-status">Team-sync offline</small>
-          <label class="party-scan-option"><input id="party-interface" type="checkbox" checked> Use RuneScape party positions helper</label>
+          <label class="party-scan-option" hidden><input id="party-interface" type="checkbox" checked> Use RuneScape party positions helper</label>
           <div class="party-scan-tools">
             <button id="party-scan" type="button">Scan DG party</button>
             <button id="party-forget" type="button">Forget party</button>
@@ -127,7 +127,7 @@
     (function bootstrapDungeons() {
       "use strict";
 
-      var fallbackVersion = "20260622-13";
+      var fallbackVersion = "20260622-14";
       var appStarted = false;
       var environment = document.getElementById("environment");
       var status = document.getElementById("status");

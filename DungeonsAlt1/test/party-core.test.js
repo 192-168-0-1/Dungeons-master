@@ -44,6 +44,27 @@ test("members are assigned by join order and a sixth member is rejected", () => 
   assert.equal(full.roster.length, 5);
 });
 
+test("manual party rosters reject duplicate RuneScape names", () => {
+  const roster = [
+    { id: "leader", name: "A Ninja", slot: 1 },
+    { id: "second", name: "Elwin", slot: 2 },
+  ];
+
+  const duplicateJoin = addPartyMember(roster, { id: "third", name: " el_win " });
+  assert.equal(duplicateJoin.duplicate, true);
+  assert.equal(duplicateJoin.member, null);
+  assert.deepEqual(duplicateJoin.roster, normalizePartyRoster(roster));
+
+  const normalized = normalizePartyRoster([
+    ...roster,
+    { id: "third", name: "EL WIN", slot: 3 },
+  ]);
+  assert.deepEqual(normalized.map(({ id, slot }) => ({ id, slot })), [
+    { id: "leader", slot: 1 },
+    { id: "second", slot: 2 },
+  ]);
+});
+
 test("leaving compacts the visible party positions and their colors", () => {
   const roster = [
     { id: "leader", name: "Leader", slot: 1 },

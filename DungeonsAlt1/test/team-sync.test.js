@@ -86,6 +86,37 @@ test("host sends a targeted welcome when a kicked client rejoins", () => {
   assert.equal(decoded.some((fields) => fields[3] === "ROSTER"), true);
 });
 
+test("host rejects duplicate RuneScape names in one manual party", () => {
+  const { client: host, sent } = connectedClient("Leader");
+  host.setRoster([
+    { id: host.clientId, name: host.name, slot: 1 },
+    { id: "existing", name: "Elwin", slot: 2 },
+  ]);
+
+  host.handleMessage(message("duplicate", " el_win ", "HELLO", "join"));
+  const decoded = sent.map((line) => line.split("|").map(decodeURIComponent));
+  assert.equal(decoded.some((fields) => fields[3] === "NAME_TAKEN" && fields[4] === "duplicate"), true);
+  assert.deepEqual(host.members.map(({ id, slot }) => ({ id, slot })), [
+    { id: host.clientId, slot: 1 },
+    { id: "existing", slot: 2 },
+  ]);
+});
+
+test("a duplicate-name client disconnects with a clear status", () => {
+  const { client } = connectedClient("Elwin");
+  let closed = false;
+  let status = "";
+  client.mode = "manual";
+  client.socket.close = () => { closed = true; };
+  client.addEventListener("status", (event) => { status = event.detail; });
+
+  client.handleMessage(message("leader", "Leader", "NAME_TAKEN", client.clientId, "Elwin"));
+
+  assert.equal(closed, true);
+  assert.match(status, /already in this team room/);
+  assert.equal(client.mode, "offline");
+});
+
 test("annotation and gatestone packets carry the sender party slot", () => {
   const { client, sent } = connectedClient("Player");
   client.setRoster([{ id: client.clientId, name: client.name, slot: 3 }]);
@@ -150,7 +181,7 @@ test("host can promote manual roster members within non-host slots", () => {
 
   const hostLocked = host.promoteMember("second");
   assert.equal(hostLocked.ok, false);
-  assert.match(hostLocked.message, /host-locked/);
+  assert.match(hostLocked.message, /party leader/);
 });
 
 test("non-host clients cannot promote or kick manual roster members", () => {
