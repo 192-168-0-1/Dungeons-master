@@ -115,3 +115,63 @@ test("occupied party rows must be contiguous from player one", () => {
   const result = readPartyInterface(target);
   assert.deepEqual(result.members.map((member) => member.occupied), [true, true, false, false, false]);
 });
+
+
+test("party OCR prefers a known team member over longer garbage", () => {
+  const target = image(320, 220);
+  paintPartyPanel(target);
+  const ocr = {
+    calls: 0,
+    findReadLine() {
+      this.calls += 1;
+      return { text: this.calls === 1 ? "A Nlnja" : "divider garbage" };
+    },
+  };
+
+  const result = readPartyInterface(target, {
+    ocr,
+    font: { chars: [{}] },
+    expectedNames: ["A Ninja", "s If"],
+  });
+
+  assert.equal(result.members[0].name, "A Ninja");
+});
+
+
+test("occupied DG rows can appear above the first visible empty-row divider", () => {
+  const target = image(360, 220);
+  for (const y of [92, 116, 140]) {
+    for (let x = 50; x <= 250; x += 1) setPixel(target, x, y, [80, 70, 55, 255]);
+  }
+  for (let x = 130; x <= 150; x += 1) setPixel(target, x, 58, [231, 80, 43, 255]);
+  for (let x = 130; x <= 150; x += 1) setPixel(target, x, 82, [53, 183, 232, 255]);
+
+  const panel = findPartyPanel(target);
+  assert.ok(panel);
+  assert.equal(panel.firstDividerY, 68);
+  assert.deepEqual(panel.rows.map((row) => row.pixelCount > 0), [true, true, false, false, false]);
+
+  const result = readPartyInterface(target);
+  assert.deepEqual(result.members.map((member) => member.occupied), [true, true, false, false, false]);
+});
+
+
+test("OCR text can mark a low-color party row as occupied", () => {
+  const target = image(320, 220);
+  paintPartyPanel(target);
+  for (let x = 115; x <= 135; x += 1) setPixel(target, x, 61, [0, 0, 0, 255]);
+  const ocr = {
+    findReadLine(_image, _font, _colors, _x, y) {
+      if (y < 50) return { text: "A Ninja" };
+      if (y < 75) return { text: "X R P" };
+      return { text: "" };
+    },
+  };
+
+  const result = readPartyInterface(target, { ocr, font: { chars: [{}] }, expectedNames: ["XRP"] });
+
+  assert.deepEqual(result.members.slice(0, 2).map(({ slot, name, occupied }) => ({ slot, name, occupied })), [
+    { slot: 1, name: "A Ninja", occupied: true },
+    { slot: 2, name: "XRP", occupied: true },
+  ]);
+});

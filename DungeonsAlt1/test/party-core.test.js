@@ -103,3 +103,19 @@ test("scanned rows are constrained to known team members and canonical names", (
     { slot: 5, occupied: false, name: "", pixelCount: 20 },
   ]);
 });
+
+
+test("scanned unknown party names are kept when another row matches a known member", () => {
+  const scanned = [
+    { slot: 1, name: "A Ninja", occupied: true, pixelCount: 20 },
+    { slot: 2, name: "X R P", occupied: true, pixelCount: 20 },
+  ];
+
+  assert.deepEqual(reconcileObservedParty(scanned, ["X R P"]), [
+    { slot: 1, occupied: true, name: "A Ninja", pixelCount: 20 },
+    { slot: 2, occupied: true, name: "X R P", pixelCount: 20 },
+    { slot: 3, occupied: false, name: "", pixelCount: 0 },
+    { slot: 4, occupied: false, name: "", pixelCount: 0 },
+    { slot: 5, occupied: false, name: "", pixelCount: 0 },
+  ]);
+});
