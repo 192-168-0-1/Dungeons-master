@@ -3,6 +3,7 @@ const MIN_ROW_GAP = 18;
 const MAX_ROW_GAP = 42;
 const MAX_DIVIDER_PIXEL_GAP = 6;
 const MIN_DIVIDER_DENSITY = 0.32;
+const MIN_OCCUPIED_PIXELS = 6;
 
 const SLOT_RGB = Object.freeze([
   [231, 80, 43],
@@ -16,10 +17,14 @@ export function resolvePartyOcrRuntime(root = globalThis) {
   const base = root?.A1lib ?? root?.a1lib;
   const ocr = root?.OCR ?? root?.ocr;
   const fontModule = root?.Alt1Fonts ?? root?.alt1fonts;
-  const font = fontModule?.aa_8px
-    ?? fontModule?.default
-    ?? (fontModule?.chars ? fontModule : null)
-    ?? root?.aa_8px;
+  const fonts = [
+    fontModule?.aa_8px,
+    fontModule?.aa_10px_mono,
+    fontModule?.aa_12px_mono,
+    fontModule?.default,
+    fontModule?.chars ? fontModule : null,
+    root?.aa_8px,
+  ].filter((candidate, index, values) => candidate?.chars && values.indexOf(candidate) === index);
   return {
     capture: typeof base?.capture === "function"
       ? (...args) => {
@@ -28,7 +33,8 @@ export function resolvePartyOcrRuntime(root = globalThis) {
       }
       : null,
     ocr,
-    font,
+    font: fonts[0] ?? null,
+    fonts,
   };
 }
 
@@ -185,32 +191,40 @@ function cleanOcrName(value) {
   return String(value ?? "").replace(/[^a-z0-9 _-]/gi, "").replace(/\s+/g, " ").trim().slice(0, 24);
 }
 
-function readRowName(image, panel, row, ocr, font) {
-  if (!ocr?.findReadLine || !font || row.pixelCount < 3) return "";
+function readRowName(image, panel, row, ocr, fonts) {
+  if (!ocr?.findReadLine || !fonts?.length || row.pixelCount < MIN_OCCUPIED_PIXELS) return "";
   const centerX = Math.round((panel.lineLeft + panel.lineRight) / 2);
   let best = "";
-  for (let yOffset = -3; yOffset <= 3; yOffset += 2) {
-    for (let xOffset = -30; xOffset <= 30; xOffset += 10) {
-      try {
-        const result = ocr.findReadLine(image, font, row.colors, centerX + xOffset, row.centerY + yOffset);
-        const name = cleanOcrName(result?.text);
-        if (name.length > best.length) best = name;
-      } catch {
-        // An OCR miss at one probe point is expected; try the next point.
+  for (const font of fonts) {
+    for (let yOffset = -5; yOffset <= 5; yOffset += 2) {
+      for (let xOffset = -40; xOffset <= 40; xOffset += 10) {
+        try {
+          const result = ocr.findReadLine(image, font, row.colors, centerX + xOffset, row.centerY + yOffset);
+          const name = cleanOcrName(result?.text);
+          if (name.length > best.length) best = name;
+        } catch {
+          // An OCR miss at one probe point is expected; try the next point/font.
+        }
       }
     }
   }
   return best;
 }
 
-export function readPartyInterface(image, { ocr, font } = {}) {
+export function readPartyInterface(image, { ocr, font, fonts } = {}) {
   const panel = findPartyPanel(image);
   if (!panel) return null;
-  const members = panel.rows.map((row, index) => ({
-    slot: index + 1,
-    occupied: row.pixelCount >= 3,
-    name: readRowName(image, panel, row, ocr, font),
-    pixelCount: row.pixelCount,
-  }));
+  const fontCandidates = fonts?.length ? fonts : font ? [font] : [];
+  let foundEmptyRow = false;
+  const members = panel.rows.map((row, index) => {
+    const occupied = !foundEmptyRow && row.pixelCount >= MIN_OCCUPIED_PIXELS;
+    if (!occupied) foundEmptyRow = true;
+    return {
+      slot: index + 1,
+      occupied,
+      name: occupied ? readRowName(image, panel, row, ocr, fontCandidates) : "",
+      pixelCount: row.pixelCount,
+    };
+  });
   return { panel, members };
 }

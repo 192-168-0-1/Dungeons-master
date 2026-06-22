@@ -98,10 +98,10 @@ export function buildStatsOverlayCommands({ stats, mapX, mapY, floor, duration =
   // Alt1 rectangles are outlines rather than fills. Nested opaque-black
   // outlines cover every row of the panel reliably on all supported versions.
   for (let inset = 0; inset <= Math.floor(barHeight / 2); inset += 1) {
-    commands.push(rect(mixColor(0, 0, 0), originX + inset, barTop + inset,
+    commands.push(rect(mixColor(1, 1, 1), originX + inset, barTop + inset,
       Math.max(1, barWidth - inset * 2), Math.max(1, barHeight - inset * 2), duration, 1));
   }
-  commands.push(text(value, mixColor(255, 255, 255), fontSize,
+  commands.push(text(value, mixColor(220, 225, 226), fontSize,
     originX + 3, barTop + 3, duration, false, false));
   return commands;
 }

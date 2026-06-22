@@ -40,15 +40,17 @@ test("OCR runtime resolves the globals exported by the Alt1 browser bundles", ()
   const capture = (...args) => ({ args, toData: () => imageData });
   const findReadLine = () => ({ text: "" });
   const font = { chars: [{ chr: "A" }] };
+  const largerFont = { chars: [{ chr: "B" }] };
   const runtime = resolvePartyOcrRuntime({
     A1lib: { capture },
     OCR: { findReadLine },
-    Alt1Fonts: { aa_8px: font },
+    Alt1Fonts: { aa_8px: font, aa_10px_mono: largerFont },
   });
 
   assert.equal(runtime.capture(1, 2, 3, 4), imageData);
   assert.equal(runtime.ocr.findReadLine, findReadLine);
   assert.equal(runtime.font, font);
+  assert.deepEqual(runtime.fonts, [font, largerFont]);
 });
 
 test("four evenly spaced dividers locate a five-row DG party panel", () => {
@@ -93,4 +95,14 @@ test("OCR results are attached to their detected RuneScape row", () => {
     { slot: 1, name: "A Ninja", occupied: true },
     { slot: 2, name: "s If", occupied: true },
   ]);
+});
+
+test("occupied party rows must be contiguous from player one", () => {
+  const target = image(320, 230);
+  paintPartyPanel(target);
+  for (let x = 118; x <= 132; x += 1) setPixel(target, x, 105, [238, 211, 64, 255]);
+  for (let x = 118; x <= 132; x += 1) setPixel(target, x, 127, [170, 174, 178, 255]);
+
+  const result = readPartyInterface(target);
+  assert.deepEqual(result.members.map((member) => member.occupied), [true, true, false, false, false]);
 });

@@ -53,11 +53,11 @@ test("stats panel is fully filled black with one clean EXE-style text line", () 
   const textCommands = commands.filter((command) => command.type === "text");
   assert.equal(textCommands.length, 1);
   assert.equal(textCommands[0].text, "12 rooms (16) | 5.6 rpm | 5 dead ends");
-  assert.equal(textCommands[0].color, mixColor(255, 255, 255));
+  assert.equal(textCommands[0].color, mixColor(220, 225, 226));
   assert.deepEqual({ x: textCommands[0].x, y: textCommands[0].y }, { x: 103, y: 205 });
   const fill = commands.filter((command) => command.type === "rect");
   assert.equal(fill.length, 11);
-  assert.equal(fill.every((command) => command.color === mixColor(0, 0, 0)
+  assert.equal(fill.every((command) => command.color === mixColor(1, 1, 1)
     && command.lineWidth === 1), true);
   assert.deepEqual({ y: fill[0].y, height: fill[0].height }, { y: 202, height: 21 });
   assert.deepEqual({ y: fill.at(-1).y, height: fill.at(-1).height }, { y: 212, height: 1 });
@@ -96,7 +96,7 @@ test("map commands use client-relative coordinates and include every marker type
   const stats = commands.find((command) => command.type === "text"
     && command.text === "4 rooms (7) | 3.2 rpm | 1 dead ends");
   const statsBackground = commands.filter((command) => command.type === "rect"
-    && command.color === mixColor(0, 0, 0));
+    && command.color === mixColor(1, 1, 1));
   assert.equal(stats.centered, false);
   assert.equal(stats.shadow, false);
   assert.equal(statsBackground.length, 11);
