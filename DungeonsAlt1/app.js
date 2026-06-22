@@ -17,25 +17,25 @@ import {
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260622-16";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260622-16";
+} from "./src/alt1-overlay.js?v=20260622-17";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260622-17";
 import {
   PARTY_COLORS,
   mergeObservedPartyCache,
   observedPartySlot,
   partyColor,
   reconcileObservedParty,
-} from "./src/party-core.js?v=20260622-16";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260622-16";
+} from "./src/party-core.js?v=20260622-17";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260622-17";
 import {
   RESULT_COLUMNS,
   nextAutoResultState,
   plannedResultExports,
   safeFilePart,
   safeTimestampForFilename,
-} from "./src/results-core.js?v=20260622-16";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260622-16";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260622-16";
+} from "./src/results-core.js?v=20260622-17";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260622-17";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260622-17";
 import { WinterfaceReader } from "./src/winterface.js";
 
 const SCAN_INTERVAL = 600;
