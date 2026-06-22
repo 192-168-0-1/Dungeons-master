@@ -212,7 +212,8 @@ summary {
 .options label { display: flex; gap: 7px; align-items: center; }
 .options input { min-height: auto; }
 
-.overlay-tools {
+.overlay-tools,
+.save-folder-tools {
   display: flex;
   gap: 7px;
   align-items: center;
@@ -220,7 +221,8 @@ summary {
   padding-top: 2px;
 }
 
-.overlay-tools small {
+.overlay-tools small,
+.save-folder-tools small {
   flex: 1 1 160px;
   color: var(--muted);
 }

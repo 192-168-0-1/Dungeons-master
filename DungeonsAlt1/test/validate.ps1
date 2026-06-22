@@ -119,10 +119,11 @@ $teamSync = Get-Content (Join-Path $appRoot 'src\team-sync.js') -Raw
 $teamGates = Get-Content (Join-Path $appRoot 'src\team-gates.js') -Raw
 $partyMenu = Get-Content (Join-Path $appRoot 'src\party-menu.js') -Raw
 $resultsCore = Get-Content (Join-Path $appRoot 'src\results-core.js') -Raw
+$fileSaver = Get-Content (Join-Path $appRoot 'src\file-saver.js') -Raw
 $winterface = Get-Content (Join-Path $appRoot 'src\winterface.js') -Raw
 $mapLocator = Get-Content (Join-Path $appRoot 'src\alt1-map-locator.js') -Raw
 $nativeOverlaySource = $app + "`n" + $overlay
-$runtimeSource = $app + "`n" + $overlay + "`n" + $partyCore + "`n" + $partyInterface + "`n" + $teamSync + "`n" + $teamGates + "`n" + $partyMenu + "`n" + $resultsCore + "`n" + $winterface + "`n" + $mapLocator
+$runtimeSource = $app + "`n" + $overlay + "`n" + $partyCore + "`n" + $partyInterface + "`n" + $teamSync + "`n" + $teamGates + "`n" + $partyMenu + "`n" + $resultsCore + "`n" + $fileSaver + "`n" + $winterface + "`n" + $mapLocator
 $domIds = @([regex]::Matches($app, 'querySelector\("#(?<id>[a-z0-9-]+)"\)') | ForEach-Object { $_.Groups['id'].Value })
 $missingDomIds = @($domIds | Where-Object { $html -notmatch ('id="' + [regex]::Escape($_) + '"') })
 if ($missingDomIds.Count -ne 0) {
@@ -223,6 +224,9 @@ if (($app -notmatch 'function installedInAlt1') -or
 if (($html -notmatch 'id="auto-track-results" type="checkbox"') -or
     ($html -notmatch 'id="auto-save-map-png" type="checkbox"') -or
     ($html -notmatch 'id="auto-save-results-png" type="checkbox"') -or
+    ($html -notmatch 'id="choose-save-folder"') -or
+    ($html -notmatch 'id="clear-save-folder"') -or
+    ($html -notmatch 'id="save-folder-status"') -or
     ($html -match 'id="auto-track-results"[^>]*checked') -or
     ($html -match 'id="auto-save-map-png"[^>]*checked') -or
     ($html -match 'id="auto-save-results-png"[^>]*checked')) {
@@ -232,11 +236,18 @@ if (($app -notmatch 'autoCaptureDungeonResults') -or
     ($app -notmatch 'readDungeonResultsCapture') -or
     ($app -notmatch 'saveResultArtifacts') -or
     ($app -notmatch 'cropImageData') -or
+    ($app -notmatch 'writePngToSaveFolder') -or
+    ($app -match 'downloadDataUrl') -or
+    ($app -match '\.download\s*=') -or
+    ($app -match '\.click\(\)') -or
+    ($fileSaver -notmatch 'showDirectoryPicker') -or
+    ($fileSaver -notmatch 'indexedDB') -or
+    ($fileSaver -notmatch 'writeDataUrlToFolder') -or
     ($app -notmatch 'resultsBusy') -or
     ($app -notmatch 'autoResultKeys') -or
     ($resultsCore -notmatch 'nextAutoResultState') -or
     ($resultsCore -notmatch 'plannedResultExports')) {
-    throw 'Automatic dungeon-results capture, dedupe and optional PNG export are incomplete.'
+    throw 'Automatic dungeon-results capture, dedupe and folder-based PNG export are incomplete.'
 }
 if (($winterface -notmatch 'readWithOffset') -or
     ($winterface -notmatch 'WINTERFACE_WIDTH = 512') -or
@@ -244,13 +255,14 @@ if (($winterface -notmatch 'readWithOffset') -or
     ($app -notmatch 'offset\.x, offset\.y, width, height')) {
     throw 'Winterface reads must expose their offset so the cropped results PNG matches the detected interface.'
 }
-if (($app -notmatch 'team-sync\.js\?v=20260622-17') -or
-    ($app -notmatch 'party-core\.js\?v=20260622-17') -or
-    ($app -notmatch 'results-core\.js\?v=20260622-17') -or
-    ($app -notmatch 'party-menu\.js\?v=20260622-17') -or
-    ($app -notmatch 'team-gates\.js\?v=20260622-17') -or
-    ($teamSync -notmatch 'party-core\.js\?v=20260622-17') -or
-    ($teamGates -notmatch 'party-core\.js\?v=20260622-17')) {
+if (($app -notmatch 'team-sync\.js\?v=20260622-18') -or
+    ($app -notmatch 'party-core\.js\?v=20260622-18') -or
+    ($app -notmatch 'results-core\.js\?v=20260622-18') -or
+    ($app -notmatch 'party-menu\.js\?v=20260622-18') -or
+    ($app -notmatch 'team-gates\.js\?v=20260622-18') -or
+    ($app -notmatch 'file-saver\.js\?v=20260622-18') -or
+    ($teamSync -notmatch 'party-core\.js\?v=20260622-18') -or
+    ($teamGates -notmatch 'party-core\.js\?v=20260622-18')) {
     throw 'Changed team-sync modules must be cache-busted for existing Alt1 installations.'
 }
 if (($app -notmatch 'buildVisibleRemoteGatestones') -or

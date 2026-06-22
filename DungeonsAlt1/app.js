@@ -17,25 +17,33 @@ import {
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260622-17";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260622-17";
+} from "./src/alt1-overlay.js?v=20260622-18";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260622-18";
 import {
   PARTY_COLORS,
   mergeObservedPartyCache,
   observedPartySlot,
   partyColor,
   reconcileObservedParty,
-} from "./src/party-core.js?v=20260622-17";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260622-17";
+} from "./src/party-core.js?v=20260622-18";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260622-18";
 import {
   RESULT_COLUMNS,
   nextAutoResultState,
   plannedResultExports,
   safeFilePart,
   safeTimestampForFilename,
-} from "./src/results-core.js?v=20260622-17";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260622-17";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260622-17";
+} from "./src/results-core.js?v=20260622-18";
+import {
+  chooseSaveFolder,
+  clearStoredSaveFolder,
+  loadStoredSaveFolder,
+  querySaveFolderPermission,
+  supportsFolderSaving,
+  writeDataUrlToFolder,
+} from "./src/file-saver.js?v=20260622-18";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260622-18";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260622-18";
 import { WinterfaceReader } from "./src/winterface.js";
 
 const SCAN_INTERVAL = 600;
@@ -64,6 +72,9 @@ const elements = {
   autoTrackResults: document.querySelector("#auto-track-results"),
   autoSaveMapPng: document.querySelector("#auto-save-map-png"),
   autoSaveResultsPng: document.querySelector("#auto-save-results-png"),
+  chooseSaveFolder: document.querySelector("#choose-save-folder"),
+  clearSaveFolder: document.querySelector("#clear-save-folder"),
+  saveFolderStatus: document.querySelector("#save-folder-status"),
   selection: document.querySelector("#selection"),
   annotation: document.querySelector("#annotation"),
   applyAnnotation: document.querySelector("#apply-annotation"),
@@ -111,6 +122,13 @@ const state = {
   autoResultState: { visible: false, key: "" },
   autoResultKeys: new Set(),
   lastAutoResultScan: 0,
+  saveFolder: {
+    supported: false,
+    handle: null,
+    name: "",
+    permission: "unknown",
+    loading: true,
+  },
   observedParty: [],
   partyPendingChanges: new Map(),
   partyPanel: null,
@@ -711,11 +729,111 @@ function canvasPoint(event) {
   };
 }
 
-function downloadDataUrl(filename, dataUrl) {
-  const link = document.createElement("a");
-  link.download = filename;
-  link.href = dataUrl;
-  link.click();
+function updateSaveFolderStatus() {
+  elements.chooseSaveFolder.disabled = state.saveFolder.loading || !state.saveFolder.supported;
+  elements.clearSaveFolder.disabled = state.saveFolder.loading || !state.saveFolder.handle;
+  if (state.saveFolder.loading) {
+    elements.saveFolderStatus.textContent = "Checking save folder...";
+    return;
+  }
+  if (!state.saveFolder.supported) {
+    elements.saveFolderStatus.textContent = "Folder saving is not supported in this Alt1 browser";
+    return;
+  }
+  if (state.saveFolder.handle && state.saveFolder.permission === "granted") {
+    elements.saveFolderStatus.textContent = `Saving PNGs to: ${state.saveFolder.name || "selected folder"}`;
+    return;
+  }
+  if (state.saveFolder.handle) {
+    elements.saveFolderStatus.textContent = "Save folder permission needed; choose the folder again";
+    return;
+  }
+  elements.saveFolderStatus.textContent = "Choose a save folder before PNG auto-save";
+}
+
+async function refreshStoredSaveFolder() {
+  state.saveFolder.loading = true;
+  state.saveFolder.supported = supportsFolderSaving(window);
+  updateSaveFolderStatus();
+  if (!state.saveFolder.supported) {
+    state.saveFolder.loading = false;
+    updateSaveFolderStatus();
+    return;
+  }
+  try {
+    const handle = await loadStoredSaveFolder(window);
+    state.saveFolder.handle = handle;
+    state.saveFolder.name = handle?.name || "";
+    state.saveFolder.permission = handle ? await querySaveFolderPermission(handle) : "unknown";
+  } catch {
+    state.saveFolder.handle = null;
+    state.saveFolder.name = "";
+    state.saveFolder.permission = "unknown";
+  } finally {
+    state.saveFolder.loading = false;
+    updateSaveFolderStatus();
+  }
+}
+
+async function selectSaveFolder() {
+  if (!state.saveFolder.supported) {
+    setStatus("Folder saving is not supported in this Alt1 browser", "error");
+    updateSaveFolderStatus();
+    return;
+  }
+  state.saveFolder.loading = true;
+  updateSaveFolderStatus();
+  try {
+    const handle = await chooseSaveFolder(window);
+    state.saveFolder.handle = handle;
+    state.saveFolder.name = handle?.name || "";
+    state.saveFolder.permission = handle ? await querySaveFolderPermission(handle) : "unknown";
+    if (handle) setStatus(`Save folder selected: ${state.saveFolder.name || "selected folder"}`, "ok");
+    else setStatus("Save folder permission was not granted", "error");
+  } catch (error) {
+    const cancelled = error?.name === "AbortError";
+    setStatus(cancelled ? "Save folder unchanged" : `Could not choose save folder: ${error.message || error}`, cancelled ? "warn" : "error");
+  } finally {
+    state.saveFolder.loading = false;
+    updateSaveFolderStatus();
+  }
+}
+
+async function clearSelectedSaveFolder() {
+  await clearStoredSaveFolder(window);
+  state.saveFolder.handle = null;
+  state.saveFolder.name = "";
+  state.saveFolder.permission = "unknown";
+  updateSaveFolderStatus();
+  setStatus("Save folder cleared", "warn");
+}
+
+async function writePngToSaveFolder(filename, dataUrl, label, options = {}) {
+  const quiet = Boolean(options?.quiet);
+  if (!state.saveFolder.supported) {
+    if (!quiet) setStatus("Folder saving is not supported in this Alt1 browser", "error");
+    return { saved: false, reason: "unsupported" };
+  }
+  if (!state.saveFolder.handle) {
+    if (!quiet) setStatus("Choose a save folder before saving PNGs", "warn");
+    updateSaveFolderStatus();
+    return { saved: false, reason: "no-folder" };
+  }
+  const permission = await querySaveFolderPermission(state.saveFolder.handle);
+  state.saveFolder.permission = permission;
+  updateSaveFolderStatus();
+  if (permission !== "granted") {
+    if (!quiet) setStatus("Save folder permission needed; choose the folder again", "warn");
+    return { saved: false, reason: "permission" };
+  }
+  try {
+    await writeDataUrlToFolder(state.saveFolder.handle, filename, dataUrl);
+    if (!quiet) setStatus(`${label} saved to ${state.saveFolder.name || "selected folder"}`, "ok");
+    return { saved: true, filename };
+  } catch (error) {
+    if (!quiet) setStatus(`Could not save ${label}: ${error.message || error}`, "error");
+    return { saved: false, reason: "error" };
+  }
 }
 
 function mapPngFilename(date = new Date()) {
@@ -723,10 +841,15 @@ function mapPngFilename(date = new Date()) {
   return `dungeon-map-${floor}-${safeTimestampForFilename(date)}.png`;
 }
 
-function saveMap(options = {}) {
-  if (!state.image) return;
+async function saveMap(options = {}) {
+  if (!state.image) return { saved: false, reason: "no-map" };
   const date = options?.date instanceof Date ? options.date : new Date();
-  downloadDataUrl(mapPngFilename(date), elements.canvas.toDataURL("image/png"));
+  return writePngToSaveFolder(
+    mapPngFilename(date),
+    elements.canvas.toDataURL("image/png"),
+    "Map PNG",
+    options,
+  );
 }
 
 function resultsPngFilename(result, date = new Date()) {
@@ -754,11 +877,16 @@ function imageDataToDataUrl(image) {
   return canvas.toDataURL("image/png");
 }
 
-function saveResultsInterfacePng(capture, date = new Date()) {
+async function saveResultsInterfacePng(capture, date = new Date(), options = {}) {
   const { image, offset, width, height, result } = capture;
   const cropped = cropImageData(image, offset.x, offset.y, width, height);
-  if (!cropped) return;
-  downloadDataUrl(resultsPngFilename(result, date), imageDataToDataUrl(cropped));
+  if (!cropped) return { saved: false, reason: "no-results-crop" };
+  return writePngToSaveFolder(
+    resultsPngFilename(result, date),
+    imageDataToDataUrl(cropped),
+    "Results interface PNG",
+    options,
+  );
 }
 
 function resultExtraFields() {
@@ -780,15 +908,38 @@ function appendResult(result) {
   renderResults();
 }
 
-function saveResultArtifacts(capture) {
+async function saveResultArtifacts(capture) {
   const exports = plannedResultExports({
     autoSaveMap: elements.autoSaveMapPng.checked,
     autoSaveResults: elements.autoSaveResultsPng.checked,
     hasMap: Boolean(state.image),
     hasResultsOffset: Boolean(capture?.offset),
   });
-  if (exports.includes("map")) saveMap({ date: capture.date });
-  if (exports.includes("results")) saveResultsInterfacePng(capture, capture.date);
+  const results = [];
+  if (exports.includes("map")) results.push(await saveMap({ date: capture.date, quiet: true }));
+  if (exports.includes("results")) results.push(await saveResultsInterfacePng(capture, capture.date, { quiet: true }));
+  return results;
+}
+
+function resultArtifactSuffix(results) {
+  if (!results?.length) return "";
+  const saved = results.filter((result) => result.saved).length;
+  if (saved === results.length) return `; saved ${saved} PNG${saved === 1 ? "" : "s"}`;
+  const firstFailure = results.find((result) => !result.saved);
+  const reason = {
+    unsupported: "folder saving unsupported",
+    "no-folder": "choose a save folder",
+    permission: "folder permission needed",
+    error: "save failed",
+    "no-map": "no map image",
+    "no-results-crop": "results crop failed",
+  }[firstFailure?.reason] || "save skipped";
+  if (saved > 0) return `; saved ${saved}/${results.length} PNGs, ${reason}`;
+  return `; PNG save skipped: ${reason}`;
+}
+
+function resultArtifactTone(results) {
+  return results?.some((result) => !result.saved) ? "warn" : "ok";
 }
 
 async function captureDungeonResults() {
@@ -805,8 +956,11 @@ async function captureDungeonResults() {
     }
     const { result } = capture;
     appendResult(result);
-    saveResultArtifacts(capture);
-    setStatus(`Results read: floor ${result.Floor || "?"}, ${result.FinalXP || "?"} XP`, "ok");
+    const artifacts = await saveResultArtifacts(capture);
+    setStatus(
+      `Results read: floor ${result.Floor || "?"}, ${result.FinalXP || "?"} XP${resultArtifactSuffix(artifacts)}`,
+      resultArtifactTone(artifacts),
+    );
   } catch (error) {
     setStatus(`Could not read the results screen: ${error.message || error}`, "error");
   } finally {
@@ -833,8 +987,11 @@ async function autoCaptureDungeonResults() {
     if (!capture || !next.shouldAdd || state.autoResultKeys.has(next.key)) return;
     state.autoResultKeys.add(next.key);
     appendResult(capture.result);
-    saveResultArtifacts(capture);
-    setStatus(`Results auto-tracked: floor ${capture.result.Floor || "?"}, ${capture.result.FinalXP || "?"} XP`, "ok");
+    const artifacts = await saveResultArtifacts(capture);
+    setStatus(
+      `Results auto-tracked: floor ${capture.result.Floor || "?"}, ${capture.result.FinalXP || "?"} XP${resultArtifactSuffix(artifacts)}`,
+      resultArtifactTone(artifacts),
+    );
   } catch {
     state.autoResultState = nextAutoResultState(state.autoResultState, null);
   } finally {
@@ -1186,10 +1343,12 @@ function bindEvents() {
     setStatus(state.autoScan ? "Automatic scanning resumed" : "Automatic scanning paused", "warn");
     if (state.autoScan) scanOnce();
   });
-  elements.save.addEventListener("click", saveMap);
+  elements.save.addEventListener("click", () => { saveMap(); });
   elements.clear.addEventListener("click", () => clearAnnotations(true));
   elements.captureResults.addEventListener("click", captureDungeonResults);
   elements.copyResults.addEventListener("click", copyResults);
+  elements.chooseSaveFolder.addEventListener("click", selectSaveFolder);
+  elements.clearSaveFolder.addEventListener("click", clearSelectedSaveFolder);
   elements.autoTrackResults.addEventListener("change", () => {
     if (!elements.autoTrackResults.checked) {
       state.autoResultState = nextAutoResultState(state.autoResultState, null);
@@ -1393,6 +1552,8 @@ async function scanOnce() {
 
 function initialize() {
   bindEvents();
+  updateSaveFolderStatus();
+  refreshStoredSaveFolder();
   renderParty();
   drawEmptyState();
   updateStats();
