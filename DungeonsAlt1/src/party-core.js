@@ -51,17 +51,62 @@ export function partyRoomCodeFromLeader(value) {
 }
 
 export function automaticPartyRoom(members, localName) {
+  const status = automaticPartyRoomStatus(members, localName);
+  return status.ready ? {
+    roomCode: status.roomCode,
+    leaderName: status.leaderName,
+    localSlot: status.localSlot,
+    members: status.members,
+  } : null;
+}
+
+export function automaticPartyRoomStatus(members, localName) {
   const party = normalizeObservedParty(members);
   const leader = party.find((member) => member.slot === 1);
+  const localKey = normalizePartyName(localName);
   const localSlot = observedPartySlot(party, localName);
-  if (party.length < 2 || !leader || !localSlot) return null;
-  const roomCode = partyRoomCodeFromLeader(leader.name);
-  return roomCode ? {
+  const roomCode = leader ? partyRoomCodeFromLeader(leader.name) : "";
+  if (!leader) {
+    return { ready: false, reason: "missing-leader", message: "Auto-room waiting for a scanned party leader", members: party };
+  }
+  if (party.length < 2) {
+    return {
+      ready: false,
+      reason: "not-enough-names",
+      message: `Auto-room waiting for at least two scanned party names · leader ${leader.name} · room ${roomCode}`,
+      leaderName: leader.name,
+      roomCode,
+      members: party,
+    };
+  }
+  if (!localKey) {
+    return {
+      ready: false,
+      reason: "missing-local-rsn",
+      message: `Auto-room waiting for your RSN · leader ${leader.name} · room ${roomCode}`,
+      leaderName: leader.name,
+      roomCode,
+      members: party,
+    };
+  }
+  if (!localSlot) {
+    return {
+      ready: false,
+      reason: "local-rsn-not-found",
+      message: `Auto-room blocked: RSN "${String(localName ?? "").trim()}" not found in scanned party · leader ${leader.name} · room ${roomCode}`,
+      leaderName: leader.name,
+      roomCode,
+      members: party,
+    };
+  }
+  return {
+    ready: true,
     roomCode,
     leaderName: leader.name,
     localSlot,
     members: party,
-  } : null;
+    message: `Auto-room ${roomCode} · leader ${leader.name} · you are slot ${localSlot}`,
+  };
 }
 
 export function isTrustedPartySnapshot(currentMembers, incomingMembers, localName) {
@@ -183,30 +228,24 @@ export function reconcileObservedParty(scannedMembers, expectedNames) {
   for (const candidate of scanned) {
     const slot = Number(candidate?.slot);
     if (!Number.isInteger(slot) || slot < 1 || slot > PARTY_SIZE || candidate?.occupied !== true) continue;
+    const scannedName = cleanObservedName(candidate.name);
     const name = expected.find((expectedName) => !usedNames.has(normalizePartyName(expectedName))
-      && observedPartySlot([{ ...candidate, slot: 1 }], expectedName) === 1) ?? "";
+      && observedPartySlot([{ ...candidate, name: scannedName, slot: 1 }], expectedName) === 1) ?? "";
     if (!name) continue;
     usedNames.add(normalizePartyName(name));
     matchedBySlot.set(slot, name);
   }
 
-  const hasExpectedMatch = matchedBySlot.size > 0;
-  const trustScannedOccupancy = hasExpectedMatch || expected.length === 0;
   let foundEmptyRow = false;
   return Array.from({ length: PARTY_SIZE }, (_, index) => {
     const slot = index + 1;
     const candidate = scanned.find((member) => Number(member?.slot) === slot);
     const contiguousScanned = !foundEmptyRow && candidate?.occupied === true;
     if (!contiguousScanned) foundEmptyRow = true;
-    const constrainedScanned = contiguousScanned && slot <= Math.max(1, expected.length);
-    const scannedOccupied = trustScannedOccupancy ? contiguousScanned : constrainedScanned;
-    const fallbackOccupied = !scanned.length && slot <= Math.max(1, expected.length);
-    const occupied = scannedOccupied || fallbackOccupied;
+    const occupied = contiguousScanned;
     let name = "";
     if (occupied) {
-      name = matchedBySlot.get(slot) ?? "";
-      if (!name && hasExpectedMatch) name = String(candidate?.name ?? "").trim().slice(0, 24);
-      if (!name && !hasExpectedMatch && expected.length === 1 && slot === 1) name = expected[0];
+      name = matchedBySlot.get(slot) ?? cleanObservedName(candidate?.name);
     }
     return { slot, occupied, name, pixelCount: Number(candidate?.pixelCount) || 0 };
   });

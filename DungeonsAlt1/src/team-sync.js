@@ -4,7 +4,7 @@ import {
   normalizePartyRoster,
   parsePartyRoster,
   removePartyMember,
-} from "./party-core.js?v=20260622-10";
+} from "./party-core.js?v=20260622-11";
 
 const DEFAULT_RELAY = "wss://dungeons-master.onrender.com/team-sync";
 const HEARTBEAT_INTERVAL = 5_000;

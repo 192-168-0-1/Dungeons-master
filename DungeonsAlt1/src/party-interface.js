@@ -121,24 +121,40 @@ function rowColorData(image, panel, slot) {
     panel.firstDividerY + (slot - 1) * panel.rowGap - 2);
   const counts = new Map();
   let pixelCount = 0;
+  let totalX = 0;
   let totalY = 0;
+  let minX = image.width;
+  let maxX = -1;
   for (let y = bandTop; y <= bandBottom; y += 1) {
     for (let x = panel.lineLeft + 4; x <= panel.lineRight - 4; x += 1) {
       const color = pixel(image, x, y);
       if (!isPartySlotPixel(color, slot)) continue;
       pixelCount += 1;
+      totalX += x;
       totalY += y;
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
       const key = `${color[0]},${color[1]},${color[2]}`;
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
   }
-  const colors = [...counts.entries()]
+  const colors = uniqueColors([
+    ...[...counts.entries()]
     .sort((left, right) => right[1] - left[1])
     .slice(0, 8)
-    .map(([key]) => key.split(",").map(Number));
-  if (!colors.length) colors.push(SLOT_RGB[slot - 1]);
+      .map(([key]) => key.split(",").map(Number)),
+    SLOT_RGB[slot - 1],
+  ]);
   const centerY = pixelCount ? Math.round(totalY / pixelCount) : nominalCenterY;
-  return { centerY, pixelCount, colors };
+  const centerX = pixelCount ? Math.round(totalX / pixelCount) : Math.round((panel.lineLeft + panel.lineRight) / 2);
+  return {
+    centerX,
+    centerY,
+    minX: pixelCount ? minX : panel.lineLeft,
+    maxX: pixelCount ? maxX : panel.lineRight,
+    pixelCount,
+    colors,
+  };
 }
 
 export function findPartyPanel(image) {
@@ -251,26 +267,68 @@ function matchExpectedPartyName(name, expectedNames) {
   return best && !best.ambiguous ? best.name : "";
 }
 
+function uniqueColors(colors) {
+  const seen = new Set();
+  const result = [];
+  for (const color of colors ?? []) {
+    if (!Array.isArray(color) || color.length < 3) continue;
+    const rgb = color.slice(0, 3).map((value) => Math.max(0, Math.min(255, Number(value) || 0)));
+    const key = rgb.join(",");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(rgb);
+  }
+  return result;
+}
+
 function readRowName(image, panel, row, ocr, fonts, expectedNames = []) {
   if (!ocr?.findReadLine || !fonts?.length) return "";
-  const centerX = Math.round((panel.lineLeft + panel.lineRight) / 2);
+  const panelCenterX = Math.round((panel.lineLeft + panel.lineRight) / 2);
+  const leftTextX = Math.max(panel.lineLeft + 8, row.minX - 8);
+  const rightTextX = Math.min(panel.lineRight - 8, row.maxX + 8);
+  const xCenters = uniqueNumbers([
+    row.centerX,
+    panelCenterX,
+    leftTextX + Math.round((rightTextX - leftTextX) / 2),
+  ]);
+  const xOffsets = [-54, -36, -18, 0, 18, 36, 54];
+  const yOffsets = [-7, -5, -3, -1, 0, 1, 3, 5, 7];
+  const colorSets = [
+    row.colors,
+    ...row.colors.slice(0, 5).map((color) => [color]),
+  ].filter((colors) => colors?.length);
   let best = "";
   for (const font of fonts) {
-    for (let yOffset = -5; yOffset <= 5; yOffset += 2) {
-      for (let xOffset = -40; xOffset <= 40; xOffset += 10) {
-        try {
-          const result = ocr.findReadLine(image, font, row.colors, centerX + xOffset, row.centerY + yOffset);
-          const name = normalizeOcrPartyName(result?.text);
-          const expected = matchExpectedPartyName(name, expectedNames);
-          if (expected) return expected;
-          if (name.length > best.length) best = name;
-        } catch {
-          // An OCR miss at one probe point is expected; try the next point/font.
+    for (const colors of colorSets) {
+      for (const centerX of xCenters) {
+        for (const yOffset of yOffsets) {
+          for (const xOffset of xOffsets) {
+            const x = Math.max(panel.lineLeft + 4, Math.min(panel.lineRight - 4, centerX + xOffset));
+            try {
+              const result = ocr.findReadLine(image, font, colors, x, row.centerY + yOffset);
+              const name = normalizeOcrPartyName(result?.text);
+              const expected = matchExpectedPartyName(name, expectedNames);
+              if (expected) return expected;
+              if (name.length > best.length) best = name;
+            } catch {
+              // An OCR miss at one probe point is expected; try the next point/font.
+            }
+          }
         }
       }
     }
   }
   return best;
+}
+
+function uniqueNumbers(values) {
+  const result = [];
+  for (const value of values ?? []) {
+    const number = Math.round(Number(value));
+    if (!Number.isFinite(number) || result.includes(number)) continue;
+    result.push(number);
+  }
+  return result;
 }
 
 export function readPartyInterface(image, { ocr, font, fonts, expectedNames = [] } = {}) {

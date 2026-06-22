@@ -17,20 +17,20 @@ import {
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260622-10";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260622-10";
+} from "./src/alt1-overlay.js?v=20260622-11";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260622-11";
 import {
   PARTY_COLORS,
-  automaticPartyRoom,
+  automaticPartyRoomStatus,
   isTrustedPartySnapshot,
   mergeObservedPartyCache,
   normalizePartyName,
   observedPartySlot,
   partyColor,
   reconcileObservedParty,
-} from "./src/party-core.js?v=20260622-10";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260622-10";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260622-10";
+} from "./src/party-core.js?v=20260622-11";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260622-11";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260622-11";
 import { WinterfaceReader } from "./src/winterface.js";
 
 const SCAN_INTERVAL = 600;
@@ -796,24 +796,25 @@ function stopAutomaticRoom(message = "") {
 
 function syncAutomaticPartyRoom() {
   if (!elements.partyInterface.checked || !elements.autoRoom.checked) return false;
-  const descriptor = automaticPartyRoom(state.observedParty, elements.teamName.value.trim());
-  if (!descriptor) {
-    stopAutomaticRoom("Auto-room waiting for a scanned leader, local RSN and at least two players");
+  const status = automaticPartyRoomStatus(state.observedParty, elements.teamName.value.trim());
+  if (!status.ready) {
+    stopAutomaticRoom(status.message);
     return false;
   }
 
-  elements.teamRoom.value = descriptor.roomCode;
-  if (teamSync.mode === "peer" && teamSync.roomCode === descriptor.roomCode
+  elements.teamRoom.value = status.roomCode;
+  if (teamSync.mode === "peer" && teamSync.roomCode === status.roomCode
     && normalizePartyName(teamSync.name) === normalizePartyName(elements.teamName.value)) {
-    teamSync.setPeerSlot(descriptor.localSlot);
+    teamSync.setPeerSlot(status.localSlot);
+    elements.teamStatus.textContent = status.message;
     return true;
   }
 
   clearRemoteTeamState();
   state.syncedLocalGatestones.clear();
-  teamSync.connect(descriptor.roomCode, elements.teamName.value, undefined, {
+  teamSync.connect(status.roomCode, elements.teamName.value, undefined, {
     mode: "peer",
-    slot: descriptor.localSlot,
+    slot: status.localSlot,
   });
   return true;
 }
@@ -884,6 +885,19 @@ function expectedPartyNames() {
   return names.filter((name, index) => names.findIndex((candidate) => candidate.toLowerCase() === name.toLowerCase()) === index);
 }
 
+function formatPartyScanStatus(result) {
+  const rawNames = result.members
+    .filter((member) => member.occupied && member.name)
+    .map((member) => `${member.slot}:${member.name}`);
+  const occupied = result.members.filter((member) => member.occupied).length;
+  const cachedNames = state.observedParty.filter((member) => member.name);
+  const status = automaticPartyRoomStatus(state.observedParty, elements.teamName.value.trim());
+  const namesText = rawNames.length ? `names ${rawNames.join(", ")}` : "OCR missed names";
+  const roomText = status.roomCode ? ` - room ${status.roomCode}` : "";
+  const rowEvidence = result.members.map((member) => member.pixelCount).join("/");
+  return `RuneScape party read ${rawNames.length}/${occupied} names (${namesText}); cached ${cachedNames.length}/5${roomText} - ${status.message} - pixels ${rowEvidence}`;
+}
+
 async function scanPartyInterface({ manual = false, forceFull = false } = {}) {
   if (state.partyScanBusy || !elements.partyInterface.checked) return false;
   state.lastPartyScan = Date.now();
@@ -933,11 +947,7 @@ async function scanPartyInterface({ manual = false, forceFull = false } = {}) {
       applyObservedParty(reconciled, "scan");
       state.partyAutoScan = true;
       const named = state.observedParty.filter((member) => member.name).length;
-      const occupied = result.members.filter((member) => member.occupied).length;
-      const rowEvidence = result.members.map((member) => member.pixelCount).join("/");
-      elements.partyScanStatus.textContent = named
-        ? `RuneScape party cached: ${named}/${Math.max(named, occupied)} names · positions active`
-        : `Party rows ${occupied}/5, OCR missed names · pixels ${rowEvidence}`;
+      elements.partyScanStatus.textContent = formatPartyScanStatus(result);
       if (manual) elements.autoRoom.checked = true;
       if (named) teamSync.sendPartyOrder(state.observedParty);
       renderParty();

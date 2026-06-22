@@ -4,6 +4,7 @@ import {
   PARTY_COLORS,
   addPartyMember,
   automaticPartyRoom,
+  automaticPartyRoomStatus,
   isTrustedPartySnapshot,
   mergeObservedPartyCache,
   normalizePartyRoster,
@@ -92,36 +93,58 @@ test("OCR party names override join order with conservative fuzzy matching", () 
   ]);
 });
 
-test("scanned rows are constrained to known team members and canonical names", () => {
-  const scanned = Array.from({ length: 5 }, (_, index) => ({
-    slot: index + 1,
-    occupied: true,
-    name: index === 0 ? "k gpwgggmw-" : `garbage ${index}`,
-    pixelCount: 20,
-  }));
-  assert.deepEqual(reconcileObservedParty(scanned, ["X R P"]), [
-    { slot: 1, occupied: true, name: "X R P", pixelCount: 20 },
-    { slot: 2, occupied: false, name: "", pixelCount: 20 },
-    { slot: 3, occupied: false, name: "", pixelCount: 20 },
-    { slot: 4, occupied: false, name: "", pixelCount: 20 },
-    { slot: 5, occupied: false, name: "", pixelCount: 20 },
-  ]);
-});
-
-
-test("scanned unknown party names are kept when another row matches a known member", () => {
+test("scanned rows never fabricate the local RSN into slot one", () => {
   const scanned = [
-    { slot: 1, name: "A Ninja", occupied: true, pixelCount: 20 },
-    { slot: 2, name: "X R P", occupied: true, pixelCount: 20 },
+    { slot: 1, occupied: true, name: "", pixelCount: 20 },
+    { slot: 2, occupied: true, name: "", pixelCount: 20 },
+    { slot: 3, occupied: false, name: "", pixelCount: 0 },
   ];
-
   assert.deepEqual(reconcileObservedParty(scanned, ["X R P"]), [
-    { slot: 1, occupied: true, name: "A Ninja", pixelCount: 20 },
-    { slot: 2, occupied: true, name: "X R P", pixelCount: 20 },
+    { slot: 1, occupied: true, name: "", pixelCount: 20 },
+    { slot: 2, occupied: true, name: "", pixelCount: 20 },
     { slot: 3, occupied: false, name: "", pixelCount: 0 },
     { slot: 4, occupied: false, name: "", pixelCount: 0 },
     { slot: 5, occupied: false, name: "", pixelCount: 0 },
   ]);
+});
+
+
+test("scanned party names are kept even when the local RSN is not present", () => {
+  const scanned = [
+    { slot: 1, name: "A Ninja", occupied: true, pixelCount: 20 },
+    { slot: 2, name: "Elwin", occupied: true, pixelCount: 20 },
+  ];
+
+  const reconciled = reconcileObservedParty(scanned, ["X R P"]);
+  assert.deepEqual(reconciled, [
+    { slot: 1, occupied: true, name: "A Ninja", pixelCount: 20 },
+    { slot: 2, occupied: true, name: "Elwin", pixelCount: 20 },
+    { slot: 3, occupied: false, name: "", pixelCount: 0 },
+    { slot: 4, occupied: false, name: "", pixelCount: 0 },
+    { slot: 5, occupied: false, name: "", pixelCount: 0 },
+  ]);
+  const status = automaticPartyRoomStatus(reconciled, "X R P");
+  assert.equal(status.ready, false);
+  assert.equal(status.reason, "local-rsn-not-found");
+  assert.match(status.message, /RSN "X R P" not found/);
+});
+
+test("a local member in slot two joins the leader-derived automatic room", () => {
+  const party = reconcileObservedParty([
+    { slot: 1, name: "A Ninja", occupied: true, pixelCount: 20 },
+    { slot: 2, name: "Elwin", occupied: true, pixelCount: 20 },
+  ], ["Elwin"]);
+
+  assert.deepEqual(automaticPartyRoom(party, "elwin"), {
+    roomCode: partyRoomCodeFromLeader("A Ninja"),
+    leaderName: "A Ninja",
+    localSlot: 2,
+    members: [
+      { slot: 1, name: "A Ninja", occupied: true },
+      { slot: 2, name: "Elwin", occupied: true },
+    ],
+  });
+  assert.equal(automaticPartyRoom(party, "ELWIN").roomCode, automaticPartyRoom(party, "Elwin").roomCode);
 });
 
 test("leader spelling variants produce one deterministic automatic room", () => {

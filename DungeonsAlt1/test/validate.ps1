@@ -175,10 +175,10 @@ if (($html -notmatch 'id="auto-room"[^>]*checked') -or
     ($app -notmatch 'syncAutomaticPartyRoom')) {
     throw 'Session party caching and automatic leader-based room sync are incomplete.'
 }
-if (($app -notmatch 'team-sync\.js\?v=20260622-10') -or
-    ($app -notmatch 'party-core\.js\?v=20260622-10') -or
-    ($app -notmatch 'team-gates\.js\?v=20260622-10') -or
-    ($teamSync -notmatch 'party-core\.js\?v=20260622-10')) {
+if (($app -notmatch 'team-sync\.js\?v=20260622-11') -or
+    ($app -notmatch 'party-core\.js\?v=20260622-11') -or
+    ($app -notmatch 'team-gates\.js\?v=20260622-11') -or
+    ($teamSync -notmatch 'party-core\.js\?v=20260622-11')) {
     throw 'Changed team-sync modules must be cache-busted for existing Alt1 installations.'
 }
 if (($teamSync -notmatch 'mode === "peer"') -or
