@@ -154,3 +154,24 @@ test("occupied DG rows can appear above the first visible empty-row divider", ()
   const result = readPartyInterface(target);
   assert.deepEqual(result.members.map((member) => member.occupied), [true, true, false, false, false]);
 });
+
+
+test("OCR text can mark a low-color party row as occupied", () => {
+  const target = image(320, 220);
+  paintPartyPanel(target);
+  for (let x = 115; x <= 135; x += 1) setPixel(target, x, 61, [0, 0, 0, 255]);
+  const ocr = {
+    findReadLine(_image, _font, _colors, _x, y) {
+      if (y < 50) return { text: "A Ninja" };
+      if (y < 75) return { text: "X R P" };
+      return { text: "" };
+    },
+  };
+
+  const result = readPartyInterface(target, { ocr, font: { chars: [{}] }, expectedNames: ["XRP"] });
+
+  assert.deepEqual(result.members.slice(0, 2).map(({ slot, name, occupied }) => ({ slot, name, occupied })), [
+    { slot: 1, name: "A Ninja", occupied: true },
+    { slot: 2, name: "XRP", occupied: true },
+  ]);
+});

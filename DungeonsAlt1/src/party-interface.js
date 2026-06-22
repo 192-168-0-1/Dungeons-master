@@ -252,7 +252,7 @@ function matchExpectedPartyName(name, expectedNames) {
 }
 
 function readRowName(image, panel, row, ocr, fonts, expectedNames = []) {
-  if (!ocr?.findReadLine || !fonts?.length || row.pixelCount < MIN_OCCUPIED_PIXELS) return "";
+  if (!ocr?.findReadLine || !fonts?.length) return "";
   const centerX = Math.round((panel.lineLeft + panel.lineRight) / 2);
   let best = "";
   for (const font of fonts) {
@@ -277,14 +277,16 @@ export function readPartyInterface(image, { ocr, font, fonts, expectedNames = []
   const panel = findPartyPanel(image);
   if (!panel) return null;
   const fontCandidates = fonts?.length ? fonts : font ? [font] : [];
+  const rowNames = panel.rows.map((row) => readRowName(image, panel, row, ocr, fontCandidates, expectedNames));
   let foundEmptyRow = false;
   const members = panel.rows.map((row, index) => {
-    const occupied = !foundEmptyRow && row.pixelCount >= MIN_OCCUPIED_PIXELS;
+    const rowHasEvidence = row.pixelCount >= MIN_OCCUPIED_PIXELS || Boolean(rowNames[index]);
+    const occupied = !foundEmptyRow && rowHasEvidence;
     if (!occupied) foundEmptyRow = true;
     return {
       slot: index + 1,
       occupied,
-      name: occupied ? readRowName(image, panel, row, ocr, fontCandidates, expectedNames) : "",
+      name: occupied ? rowNames[index] : "",
       pixelCount: row.pixelCount,
     };
   });
