@@ -1,6 +1,8 @@
 const MIN_DIVIDER_WIDTH = 100;
 const MIN_ROW_GAP = 18;
 const MAX_ROW_GAP = 42;
+const MAX_DIVIDER_PIXEL_GAP = 6;
+const MIN_DIVIDER_DENSITY = 0.32;
 
 const SLOT_RGB = Object.freeze([
   [231, 80, 43],
@@ -42,8 +44,10 @@ function pixel(image, x, y) {
 
 function isDividerPixel(color) {
   const [r, g, b, a] = color;
-  return a > 200 && r >= 55 && r <= 125 && g >= 45 && g <= 115 && b >= 30 && b <= 90
-    && r >= b && g >= b && Math.abs(r - g) <= 35;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  return a > 180 && r >= 42 && r <= 165 && g >= 38 && g <= 155 && b >= 24 && b <= 130
+    && r + 10 >= b && g + 10 >= b && max - min <= 70;
 }
 
 export function isPartySlotPixel(color, slot) {
@@ -62,14 +66,29 @@ function dividerRuns(image) {
   for (let y = 1; y < image.height - 1; y += 1) {
     const row = [];
     let start = -1;
-    for (let x = 0; x <= image.width; x += 1) {
-      const matches = x < image.width && isDividerPixel(pixel(image, x, y));
-      if (matches && start < 0) start = x;
-      if (!matches && start >= 0) {
-        if (x - start >= MIN_DIVIDER_WIDTH) row.push({ y, left: start, right: x - 1 });
-        start = -1;
+    let lastMatch = -1;
+    let matchCount = 0;
+    const finishRun = () => {
+      if (start < 0 || lastMatch < start) return;
+      const width = lastMatch - start + 1;
+      if (width >= MIN_DIVIDER_WIDTH && matchCount / width >= MIN_DIVIDER_DENSITY) {
+        row.push({ y, left: start, right: lastMatch });
       }
+      start = -1;
+      lastMatch = -1;
+      matchCount = 0;
+    };
+
+    for (let x = 0; x < image.width; x += 1) {
+      if (!isDividerPixel(pixel(image, x, y))) continue;
+      if (start < 0 || x - lastMatch > MAX_DIVIDER_PIXEL_GAP) {
+        finishRun();
+        start = x;
+      }
+      lastMatch = x;
+      matchCount += 1;
     }
+    finishRun();
     row.sort((left, right) => (right.right - right.left) - (left.right - left.left));
     runs.push(...row.slice(0, 3));
   }

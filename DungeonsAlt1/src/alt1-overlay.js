@@ -66,10 +66,6 @@ function rect(color, x, y, width, height, duration, lineWidth) {
   return { type: "rect", color, x, y, width, height, duration, lineWidth };
 }
 
-function line(color, width, x1, y1, x2, y2, duration) {
-  return { type: "line", color, width, x1, y1, x2, y2, duration };
-}
-
 function text(value, color, size, x, y, duration, centered = true, shadow = true) {
   return {
     type: "text",
@@ -93,38 +89,20 @@ export function buildStatsOverlayCommands({ stats, mapX, mapY, floor, duration =
   if (!stats || !floor) return [];
   const originX = Math.round(mapX);
   const barTop = Math.round(mapY + floor.imageHeight);
-  const barHeight = 24;
-  const fontSize = 12;
-  const segments = [];
-  const parts = String(stats).split(" | ");
-  if (parts.length === 3) {
-    segments.push(
-      { value: parts[0], color: mixColor(232, 242, 243) },
-      { value: " | ", color: mixColor(116, 135, 139) },
-      { value: parts[1], color: mixColor(85, 217, 232) },
-      { value: " | ", color: mixColor(116, 135, 139) },
-      { value: parts[2], color: mixColor(232, 242, 243) },
-    );
-  } else {
-    segments.push({ value: String(stats), color: mixColor(232, 242, 243) });
-  }
+  const barHeight = 21;
+  const fontSize = 11;
+  const value = String(stats);
+  const barWidth = Math.max(floor.imageWidth, estimateOverlayTextWidth(value, fontSize) + 8);
+  const commands = [];
 
-  const contentWidth = segments.reduce((total, segment) => total
-    + estimateOverlayTextWidth(segment.value, fontSize), 0);
-  const barWidth = Math.max(floor.imageWidth, contentWidth + 20);
-  const commands = [
-    line(mixColor(0, 0, 0), barHeight,
-      originX, barTop + barHeight / 2, originX + barWidth, barTop + barHeight / 2, duration),
-    rect(mixColor(92, 111, 115, 225), originX, barTop, barWidth, barHeight, duration, 1),
-    rect(mixColor(85, 217, 232), originX + 2, barTop + 3, 3, barHeight - 6, duration, 3),
-  ];
-
-  let cursorX = originX + 10;
-  for (const segment of segments) {
-    commands.push(text(segment.value, segment.color, fontSize,
-      cursorX, barTop + 4, duration, false, false));
-    cursorX += estimateOverlayTextWidth(segment.value, fontSize);
+  // Alt1 rectangles are outlines rather than fills. Nested opaque-black
+  // outlines cover every row of the panel reliably on all supported versions.
+  for (let inset = 0; inset <= Math.floor(barHeight / 2); inset += 1) {
+    commands.push(rect(mixColor(0, 0, 0), originX + inset, barTop + inset,
+      Math.max(1, barWidth - inset * 2), Math.max(1, barHeight - inset * 2), duration, 1));
   }
+  commands.push(text(value, mixColor(255, 255, 255), fontSize,
+    originX + 3, barTop + 3, duration, false, false));
   return commands;
 }
 
@@ -207,10 +185,6 @@ export function executeOverlayCommands(api, commands) {
     if (command.type === "rect" && typeof api.overLayRect === "function") {
       accepted = api.overLayRect(command.color, command.x, command.y, command.width,
         command.height, command.duration, command.lineWidth);
-      sent += 1;
-    } else if (command.type === "line" && typeof api.overLayLine === "function") {
-      accepted = api.overLayLine(command.color, command.width, command.x1, command.y1,
-        command.x2, command.y2, command.duration);
       sent += 1;
     } else if (command.type === "text" && typeof api.overLayTextEx === "function") {
       accepted = api.overLayTextEx(command.text, command.color, command.size, command.x,

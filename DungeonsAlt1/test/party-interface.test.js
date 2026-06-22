@@ -64,7 +64,9 @@ test("four evenly spaced dividers locate a five-row DG party panel", () => {
 test("the wider three-divider party layout from RuneScape is detected", () => {
   const target = image(320, 230);
   for (const y of [70, 104, 138]) {
-    for (let x = 40; x <= 220; x += 1) setPixel(target, x, y, [80, 70, 55, 255]);
+    for (let x = 40; x <= 220; x += 1) {
+      if (x % 5 !== 0) setPixel(target, x, y, x % 2 ? [80, 70, 55, 255] : [115, 98, 78, 230]);
+    }
   }
   for (let y = 49; y <= 58; y += 1) {
     for (let x = 118; x <= 132; x += 1) setPixel(target, x, y, [231, 80, 43, 255]);

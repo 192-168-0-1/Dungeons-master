@@ -43,7 +43,7 @@ test("map stats match the desktop EXE wording and RPM calculation", () => {
     "12 rooms (16) | 5.6 rpm | 5 dead ends");
 });
 
-test("stats panel uses an EXE-style dark panel with an accented RPM value", () => {
+test("stats panel is fully filled black with one clean EXE-style text line", () => {
   const commands = buildStatsOverlayCommands({
     stats: "12 rooms (16) | 5.6 rpm | 5 dead ends",
     mapX: 100,
@@ -51,17 +51,16 @@ test("stats panel uses an EXE-style dark panel with an accented RPM value", () =
     floor,
   });
   const textCommands = commands.filter((command) => command.type === "text");
-  assert.equal(textCommands.map((command) => command.text).join(""),
-    "12 rooms (16) | 5.6 rpm | 5 dead ends");
-  assert.equal(textCommands.find((command) => command.text === "5.6 rpm").color,
-    mixColor(85, 217, 232));
-  assert.deepEqual({ x: textCommands[0].x, y: textCommands[0].y }, { x: 110, y: 206 });
-  assert.deepEqual({ type: commands[0].type, y1: commands[0].y1, width: commands[0].width },
-    { type: "line", y1: 214, width: 24 });
-  assert.deepEqual({ type: commands[1].type, y: commands[1].y, height: commands[1].height, lineWidth: commands[1].lineWidth },
-    { type: "rect", y: 202, height: 24, lineWidth: 1 });
-  assert.deepEqual({ type: commands[2].type, y: commands[2].y, height: commands[2].height, lineWidth: commands[2].lineWidth },
-    { type: "rect", y: 205, height: 18, lineWidth: 3 });
+  assert.equal(textCommands.length, 1);
+  assert.equal(textCommands[0].text, "12 rooms (16) | 5.6 rpm | 5 dead ends");
+  assert.equal(textCommands[0].color, mixColor(255, 255, 255));
+  assert.deepEqual({ x: textCommands[0].x, y: textCommands[0].y }, { x: 103, y: 205 });
+  const fill = commands.filter((command) => command.type === "rect");
+  assert.equal(fill.length, 11);
+  assert.equal(fill.every((command) => command.color === mixColor(0, 0, 0)
+    && command.lineWidth === 1), true);
+  assert.deepEqual({ y: fill[0].y, height: fill[0].height }, { y: 202, height: 21 });
+  assert.deepEqual({ y: fill.at(-1).y, height: fill.at(-1).height }, { y: 212, height: 1 });
 });
 
 test("map commands use client-relative coordinates and include every marker type", () => {
@@ -94,14 +93,14 @@ test("map commands use client-relative coordinates and include every marker type
   assert.deepEqual({ x: local.x, y: local.y }, { x: 151, y: 152 });
   assert.notDeepEqual({ x: team.x, y: team.y }, { x: local.x, y: local.y });
   assert.equal(commands.some((command) => command.text === "invalid"), false);
-  const stats = commands.filter((command) => command.type === "text" && command.y === 206);
-  const statsBackground = commands.find((command) => command.type === "line"
-    && command.y1 === 214 && command.width === 24);
-  assert.equal(stats.map((command) => command.text).join(""), "4 rooms (7) | 3.2 rpm | 1 dead ends");
-  assert.equal(stats.every((command) => command.centered === false && command.shadow === false), true);
-  assert.ok(statsBackground);
-  assert.equal(statsBackground.color, mixColor(0, 0, 0));
-  assert.ok(statsBackground.x2 - statsBackground.x1 >= floor.imageWidth);
+  const stats = commands.find((command) => command.type === "text"
+    && command.text === "4 rooms (7) | 3.2 rpm | 1 dead ends");
+  const statsBackground = commands.filter((command) => command.type === "rect"
+    && command.color === mixColor(0, 0, 0));
+  assert.equal(stats.centered, false);
+  assert.equal(stats.shadow, false);
+  assert.equal(statsBackground.length, 11);
+  assert.ok(statsBackground[0].width >= floor.imageWidth);
 });
 
 test("test overlay stays in RuneScape-client coordinates", () => {
