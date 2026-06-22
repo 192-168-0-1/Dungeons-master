@@ -76,19 +76,36 @@ export function reconcileObservedParty(scannedMembers, expectedNames) {
     .filter((name, index, values) => normalizePartyName(name)
       && values.findIndex((candidate) => normalizePartyName(candidate) === normalizePartyName(name)) === index)
     .slice(0, PARTY_SIZE);
-  const maximumOccupied = Math.max(1, expected.length);
   const usedNames = new Set();
+  const matchedBySlot = new Map();
 
+  for (const candidate of scanned) {
+    const slot = Number(candidate?.slot);
+    if (!Number.isInteger(slot) || slot < 1 || slot > PARTY_SIZE || candidate?.occupied !== true) continue;
+    const name = expected.find((expectedName) => !usedNames.has(normalizePartyName(expectedName))
+      && observedPartySlot([{ ...candidate, slot: 1 }], expectedName) === 1) ?? "";
+    if (!name) continue;
+    usedNames.add(normalizePartyName(name));
+    matchedBySlot.set(slot, name);
+  }
+
+  const hasExpectedMatch = matchedBySlot.size > 0;
+  const trustScannedOccupancy = hasExpectedMatch || expected.length === 0;
+  let foundEmptyRow = false;
   return Array.from({ length: PARTY_SIZE }, (_, index) => {
     const slot = index + 1;
     const candidate = scanned.find((member) => Number(member?.slot) === slot);
-    const occupied = slot <= maximumOccupied && candidate?.occupied === true;
+    const contiguousScanned = !foundEmptyRow && candidate?.occupied === true;
+    if (!contiguousScanned) foundEmptyRow = true;
+    const constrainedScanned = contiguousScanned && slot <= Math.max(1, expected.length);
+    const scannedOccupied = trustScannedOccupancy ? contiguousScanned : constrainedScanned;
+    const fallbackOccupied = !scanned.length && slot <= Math.max(1, expected.length);
+    const occupied = scannedOccupied || fallbackOccupied;
     let name = "";
     if (occupied) {
-      name = expected.find((expectedName) => !usedNames.has(normalizePartyName(expectedName))
-        && observedPartySlot([{ ...candidate, slot: 1 }], expectedName) === 1) ?? "";
-      if (!name && expected.length === 1 && slot === 1) name = expected[0];
-      if (name) usedNames.add(normalizePartyName(name));
+      name = matchedBySlot.get(slot) ?? "";
+      if (!name && hasExpectedMatch) name = String(candidate?.name ?? "").trim().slice(0, 24);
+      if (!name && !hasExpectedMatch && expected.length === 1 && slot === 1) name = expected[0];
     }
     return { slot, occupied, name, pixelCount: Number(candidate?.pixelCount) || 0 };
   });

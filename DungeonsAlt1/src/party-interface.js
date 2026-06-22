@@ -167,21 +167,28 @@ export function findPartyPanel(image) {
       const lineLeft = Math.max(...group.map((run) => run.left));
       const lineRight = Math.min(...group.map((run) => run.right));
       if (lineRight - lineLeft + 1 < MIN_DIVIDER_WIDTH) continue;
-      const panel = { firstDividerY: first.y, rowGap: gap, lineLeft, lineRight };
-      const rows = Array.from({ length: 5 }, (_, index) => rowColorData(image, panel, index + 1));
-      const colorScore = rows.reduce((total, row) => total + Math.min(40, row.pixelCount), 0);
-      if (colorScore < 3) continue;
-      const score = colorScore + group.length * 20 + (lineRight - lineLeft) / 20;
-      if (!best || score > best.score) {
-        best = {
-          ...panel,
-          x: Math.max(0, lineLeft - 15),
-          y: Math.max(0, first.y - gap - 5),
-          width: Math.min(image.width - Math.max(0, lineLeft - 15), lineRight - lineLeft + 31),
-          height: Math.min(image.height - Math.max(0, first.y - gap - 5), gap * 5 + 10),
-          rows,
-          score,
-        };
+      for (let hiddenDividersBefore = 0; hiddenDividersBefore <= 2; hiddenDividersBefore += 1) {
+        const virtualFirstDividerY = first.y - hiddenDividersBefore * gap;
+        if (virtualFirstDividerY <= 0) continue;
+        const panel = { firstDividerY: virtualFirstDividerY, rowGap: gap, lineLeft, lineRight };
+        const rows = Array.from({ length: 5 }, (_, index) => rowColorData(image, panel, index + 1));
+        const colorScore = rows.reduce((total, row) => total + Math.min(40, row.pixelCount), 0);
+        if (colorScore < 3) continue;
+        const occupiedPrefix = rows.findIndex((row) => row.pixelCount < MIN_OCCUPIED_PIXELS);
+        const occupiedRows = occupiedPrefix < 0 ? rows.length : occupiedPrefix;
+        const score = colorScore + group.length * 20 + (lineRight - lineLeft) / 20 + occupiedRows * 8 - hiddenDividersBefore * 2;
+        if (!best || score > best.score) {
+          const panelTop = Math.max(0, virtualFirstDividerY - gap - 5);
+          best = {
+            ...panel,
+            x: Math.max(0, lineLeft - 15),
+            y: panelTop,
+            width: Math.min(image.width - Math.max(0, lineLeft - 15), lineRight - lineLeft + 31),
+            height: Math.min(image.height - panelTop, gap * 5 + 10),
+            rows,
+            score,
+          };
+        }
       }
     }
   }
@@ -204,7 +211,47 @@ export function normalizeOcrPartyName(value) {
   return name;
 }
 
-function readRowName(image, panel, row, ocr, fonts) {
+function normalizePartyKey(value) {
+  return String(value ?? "").toLowerCase().replace(/[_\s]+/g, "").replace(/[^a-z0-9]/g, "");
+}
+
+function editDistance(left, right) {
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    const current = [leftIndex];
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      current[rightIndex] = Math.min(
+        current[rightIndex - 1] + 1,
+        previous[rightIndex] + 1,
+        previous[rightIndex - 1] + (left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1),
+      );
+    }
+    previous.splice(0, previous.length, ...current);
+  }
+  return previous[right.length];
+}
+
+function matchExpectedPartyName(name, expectedNames) {
+  const key = normalizePartyKey(name);
+  if (!key) return "";
+  let best = null;
+  for (const expected of expectedNames ?? []) {
+    const expectedName = String(expected ?? "").trim().slice(0, 24);
+    const expectedKey = normalizePartyKey(expectedName);
+    if (!expectedKey) continue;
+    const distance = editDistance(key, expectedKey);
+    const limit = expectedKey.length >= 10 ? 2 : expectedKey.length >= 4 ? 1 : 0;
+    if (distance > limit) continue;
+    if (!best || distance < best.distance || (distance === best.distance && expectedKey.length > best.key.length)) {
+      best = { name: expectedName, key: expectedKey, distance };
+    } else if (best && distance === best.distance) {
+      best.ambiguous = true;
+    }
+  }
+  return best && !best.ambiguous ? best.name : "";
+}
+
+function readRowName(image, panel, row, ocr, fonts, expectedNames = []) {
   if (!ocr?.findReadLine || !fonts?.length || row.pixelCount < MIN_OCCUPIED_PIXELS) return "";
   const centerX = Math.round((panel.lineLeft + panel.lineRight) / 2);
   let best = "";
@@ -214,6 +261,8 @@ function readRowName(image, panel, row, ocr, fonts) {
         try {
           const result = ocr.findReadLine(image, font, row.colors, centerX + xOffset, row.centerY + yOffset);
           const name = normalizeOcrPartyName(result?.text);
+          const expected = matchExpectedPartyName(name, expectedNames);
+          if (expected) return expected;
           if (name.length > best.length) best = name;
         } catch {
           // An OCR miss at one probe point is expected; try the next point/font.
@@ -224,7 +273,7 @@ function readRowName(image, panel, row, ocr, fonts) {
   return best;
 }
 
-export function readPartyInterface(image, { ocr, font, fonts } = {}) {
+export function readPartyInterface(image, { ocr, font, fonts, expectedNames = [] } = {}) {
   const panel = findPartyPanel(image);
   if (!panel) return null;
   const fontCandidates = fonts?.length ? fonts : font ? [font] : [];
@@ -235,7 +284,7 @@ export function readPartyInterface(image, { ocr, font, fonts } = {}) {
     return {
       slot: index + 1,
       occupied,
-      name: occupied ? readRowName(image, panel, row, ocr, fontCandidates) : "",
+      name: occupied ? readRowName(image, panel, row, ocr, fontCandidates, expectedNames) : "",
       pixelCount: row.pixelCount,
     };
   });
