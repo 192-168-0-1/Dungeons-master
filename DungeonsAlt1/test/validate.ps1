@@ -115,7 +115,9 @@ $overlay = Get-Content (Join-Path $appRoot 'src\alt1-overlay.js') -Raw
 $partyCore = Get-Content (Join-Path $appRoot 'src\party-core.js') -Raw
 $partyInterface = Get-Content (Join-Path $appRoot 'src\party-interface.js') -Raw
 $teamSync = Get-Content (Join-Path $appRoot 'src\team-sync.js') -Raw
+$mapLocator = Get-Content (Join-Path $appRoot 'src\alt1-map-locator.js') -Raw
 $nativeOverlaySource = $app + "`n" + $overlay
+$runtimeSource = $app + "`n" + $overlay + "`n" + $partyCore + "`n" + $partyInterface + "`n" + $teamSync + "`n" + $mapLocator
 $domIds = @([regex]::Matches($app, 'querySelector\("#(?<id>[a-z0-9-]+)"\)') | ForEach-Object { $_.Groups['id'].Value })
 $missingDomIds = @($domIds | Where-Object { $html -notmatch ('id="' + [regex]::Escape($_) + '"') })
 if ($missingDomIds.Count -ne 0) {
@@ -203,6 +205,22 @@ if (($html -notmatch 'window\.__dungeonsAppReady') -or
 if (($app -notmatch 'function storageGet') -or
     ($app -match '(?<!window\.)localStorage\.')) {
     throw 'Alt1 startup must not depend on direct localStorage access.'
+}
+if ($runtimeSource -match '\.replaceAll\(' -or
+    $runtimeSource -match '\.at\(-1\)') {
+    throw 'Runtime Alt1 modules must avoid replaceAll() and at(-1) for older Alt1 Chromium builds.'
+}
+if (($app -notmatch 'findMapByAlt1Anchor') -or
+    ($app -notmatch 'scoreMapCandidate') -or
+    ($app -notmatch 'function findMapInRuneScapeClient') -or
+    ($mapLocator -notmatch 'MAP_ANCHOR') -or
+    ($mapLocator -notmatch 'bindFindSubImg') -or
+    ($mapLocator -notmatch 'readableRooms')) {
+    throw 'Anchor-first Alt1 map location with readable-room validation is missing.'
+}
+if (-not (Test-Path (Join-Path $appRoot 'THIRD_PARTY_NOTES.md')) -or
+    ((Get-Content (Join-Path $appRoot 'THIRD_PARTY_NOTES.md') -Raw) -notmatch 'Sleepy-meh-alt-1/dg-map')) {
+    throw 'Third-party attribution for the adapted map-anchor locator is missing.'
 }
 
 $ocrAssets = @('WinterfaceMarker.png')

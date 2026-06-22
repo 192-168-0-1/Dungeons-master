@@ -28,14 +28,36 @@ function unescapeField(value) {
 
 export function createRoomCode() {
   const bytes = new Uint8Array(4);
-  crypto.getRandomValues(bytes);
+  randomBytes(bytes);
   return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("").slice(0, 6).toUpperCase();
+}
+
+function randomBytes(bytes) {
+  const cryptoApi = typeof crypto !== "undefined" ? crypto : null;
+  if (cryptoApi && typeof cryptoApi.getRandomValues === "function") {
+    cryptoApi.getRandomValues(bytes);
+    return bytes;
+  }
+  for (let index = 0; index < bytes.length; index += 1) {
+    bytes[index] = Math.floor(Math.random() * 256);
+  }
+  return bytes;
+}
+
+function createClientId() {
+  const cryptoApi = typeof crypto !== "undefined" ? crypto : null;
+  if (cryptoApi && typeof cryptoApi.randomUUID === "function") {
+    return String(cryptoApi.randomUUID()).replace(/-/g, "");
+  }
+  const bytes = new Uint8Array(16);
+  randomBytes(bytes);
+  return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
 }
 
 export class TeamSync extends EventTarget {
   constructor() {
     super();
-    this.clientId = crypto.randomUUID?.().replaceAll("-", "") ?? `${Date.now()}${Math.random()}`.replaceAll(".", "");
+    this.clientId = createClientId();
     this.socket = null;
     this.name = "Team mate";
     this.roomCode = "";

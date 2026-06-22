@@ -7,11 +7,10 @@ import {
   gridOffset,
   imageToMap,
   isOpened,
-  isValidMap,
   mapToImage,
-  readGameMap,
   toChess,
 } from "./src/map-core.js";
+import { findMapByAlt1Anchor, scoreMapCandidate } from "./src/alt1-map-locator.js";
 import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js";
 import {
   assignGatestoneSlots,
@@ -19,7 +18,7 @@ import {
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260622-8";
+} from "./src/alt1-overlay.js?v=20260622-9";
 import { TeamSync, createRoomCode } from "./src/team-sync.js";
 import {
   PARTY_COLORS,
@@ -28,7 +27,7 @@ import {
   partyTextColor,
   reconcileObservedParty,
 } from "./src/party-core.js";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260622-8";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260622-9";
 import { WinterfaceReader } from "./src/winterface.js";
 
 const SCAN_INTERVAL = 600;
@@ -211,6 +210,14 @@ function clearCalibration() {
   storageRemove(`${STORAGE_PREFIX}:calibration`);
 }
 
+function findMapInRuneScapeClient() {
+  const anchored = findMapByAlt1Anchor(window.alt1, captureRegion);
+  if (anchored) return anchored;
+  const fullClient = captureFullRuneScape();
+  const cornerMatch = findMapByCorners(fullClient);
+  return cornerMatch ? { ...cornerMatch, method: "corners" } : null;
+}
+
 async function calibrate({ silent = false } = {}) {
   if (state.busy) return false;
   state.busy = true;
@@ -221,8 +228,7 @@ async function calibrate({ silent = false } = {}) {
     assertAlt1Ready();
     if (!silent) setStatus("Searching for the Dungeoneering map…");
     await nextPaint();
-    const fullClient = captureFullRuneScape();
-    const match = findMapByCorners(fullClient);
+    const match = findMapInRuneScapeClient();
     if (!match) {
       clearCalibration();
       setStatus("Waiting for a Dungeoneering map to appear…", "warn");
@@ -231,7 +237,7 @@ async function calibrate({ silent = false } = {}) {
       state.invalidCaptures = 0;
       saveCalibration();
       found = true;
-      setStatus(`Calibrated: ${match.floor.name} at ${match.x},${match.y}`, "ok");
+      setStatus(`Calibrated by ${match.method || "corners"}: ${match.floor.name} at ${match.x},${match.y}`, "ok");
     }
   } catch (error) {
     setStatus(error.message || String(error), silent ? "warn" : "error");
@@ -261,18 +267,20 @@ async function updateMap() {
     assertAlt1Ready();
     let { x, y, floor } = state.calibration;
     let image = captureRegion(x, y, floor.imageWidth, floor.imageHeight);
-    if (!isValidMap(image)) {
+    let scoredMap = scoreMapCandidate(image, floor);
+    if (!scoredMap) {
       // Reacquire a moved map immediately so native labels, gatestones and the
       // stats strip remain magnetically attached to its client coordinates.
-      const relocated = findMapByCorners(captureFullRuneScape());
+      const relocated = findMapInRuneScapeClient();
       if (relocated) {
         state.calibration = relocated;
         ({ x, y, floor } = relocated);
         saveCalibration();
         image = captureRegion(x, y, floor.imageWidth, floor.imageHeight);
+        scoredMap = scoreMapCandidate(image, floor);
       }
     }
-    if (!isValidMap(image)) {
+    if (!scoredMap) {
       state.invalidCaptures += 1;
       setStatus(`Map image lost (${state.invalidCaptures}/${INVALID_CAPTURES_BEFORE_RECALIBRATION})`, "warn");
       shouldRecalibrate = state.invalidCaptures >= INVALID_CAPTURES_BEFORE_RECALIBRATION;
@@ -280,7 +288,7 @@ async function updateMap() {
     }
 
     state.invalidCaptures = 0;
-    const gameMap = readGameMap(image, floor);
+    const gameMap = scoredMap.gameMap;
     const newFloor = !state.floorStart
       || (state.lastBase && gameMap.base && !samePoint(state.lastBase, gameMap.base))
       || (state.lastRoomCount > 1 && gameMap.openedRoomCount === 1);
@@ -704,7 +712,7 @@ function canvasPoint(event) {
 function saveMap() {
   if (!state.image) return;
   const link = document.createElement("a");
-  link.download = `dungeon-map-${new Date().toISOString().replaceAll(":", "-").slice(0, 19)}.png`;
+  link.download = `dungeon-map-${new Date().toISOString().replace(/:/g, "-").slice(0, 19)}.png`;
   link.href = elements.canvas.toDataURL("image/png");
   link.click();
 }
@@ -843,7 +851,7 @@ async function scanPartyInterface({ manual = false, forceFull = false } = {}) {
         width: 0,
         height: 0,
       });
-      const cached = attempts.at(-1);
+      const cached = attempts[attempts.length - 1];
       cached.width = Math.min(window.alt1.rsWidth - cached.x, state.partyPanel.width + margin * 2);
       cached.height = Math.min(window.alt1.rsHeight - cached.y, state.partyPanel.height + margin * 2);
     }
