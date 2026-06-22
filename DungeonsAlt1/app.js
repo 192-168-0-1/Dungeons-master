@@ -19,7 +19,7 @@ import {
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260622-7";
+} from "./src/alt1-overlay.js?v=20260622-8";
 import { TeamSync, createRoomCode } from "./src/team-sync.js";
 import {
   PARTY_COLORS,
@@ -28,7 +28,7 @@ import {
   partyTextColor,
   reconcileObservedParty,
 } from "./src/party-core.js";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260622-7";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260622-8";
 import { WinterfaceReader } from "./src/winterface.js";
 
 const SCAN_INTERVAL = 600;
@@ -102,7 +102,7 @@ const state = {
 
 function loadCalibration() {
   try {
-    const saved = JSON.parse(localStorage.getItem(`${STORAGE_PREFIX}:calibration`));
+    const saved = JSON.parse(storageGet(`${STORAGE_PREFIX}:calibration`));
     const floor = FLOOR_SIZES.find((candidate) => candidate.name === saved?.floor);
     if (floor && Number.isInteger(saved.x) && Number.isInteger(saved.y)) return { x: saved.x, y: saved.y, floor };
   } catch {
@@ -113,11 +113,37 @@ function loadCalibration() {
 
 function saveCalibration() {
   if (!state.calibration) return;
-  localStorage.setItem(`${STORAGE_PREFIX}:calibration`, JSON.stringify({
+  storageSet(`${STORAGE_PREFIX}:calibration`, JSON.stringify({
     x: state.calibration.x,
     y: state.calibration.y,
     floor: state.calibration.floor.name,
   }));
+}
+
+function storageGet(key) {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function storageSet(key, value) {
+  try {
+    window.localStorage.setItem(key, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function storageRemove(key) {
+  try {
+    window.localStorage.removeItem(key);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function setStatus(text, tone = "neutral") {
@@ -182,7 +208,7 @@ function resetFloor() {
 
 function clearCalibration() {
   state.calibration = null;
-  localStorage.removeItem(`${STORAGE_PREFIX}:calibration`);
+  storageRemove(`${STORAGE_PREFIX}:calibration`);
 }
 
 async function calibrate({ silent = false } = {}) {
@@ -1026,10 +1052,11 @@ function initialize() {
   renderParty();
   drawEmptyState();
   updateStats();
+  window.__dungeonsAppReady = true;
   elements.teamRoom.value = createRoomCode();
-  elements.teamName.value = localStorage.getItem(`${STORAGE_PREFIX}:name`) || "";
+  elements.teamName.value = storageGet(`${STORAGE_PREFIX}:name`) || "";
   elements.teamName.addEventListener("change", () => {
-    localStorage.setItem(`${STORAGE_PREFIX}:name`, elements.teamName.value);
+    storageSet(`${STORAGE_PREFIX}:name`, elements.teamName.value);
     renderParty();
     render();
   });
@@ -1037,7 +1064,11 @@ function initialize() {
   const configUrl = new URL("appconfig.json", window.location.href).href;
   elements.installLink.href = `alt1://addapp/${configUrl}`;
   if (hasAlt1()) {
-    identifyApp();
+    try {
+      identifyApp();
+    } catch {
+      // Alt1 identification is useful for permissions, but it must not block the UI.
+    }
     elements.environment.textContent = `Alt1 ${window.alt1.version || ""}`.trim();
     if (state.calibration) setStatus(`Loading saved ${state.calibration.floor.name} calibration…`);
     else setStatus("Waiting for a Dungeoneering map to appear…", "warn");
@@ -1048,7 +1079,13 @@ function initialize() {
   updateOverlayStatus();
   scanLoop();
   partyScanLoop();
-  window.__dungeonsAppReady = true;
 }
 
-initialize();
+try {
+  initialize();
+} catch (error) {
+  window.__dungeonsAppReady = true;
+  const message = error && error.message ? error.message : String(error);
+  elements.environment.textContent = "Startup error";
+  setStatus(`Startup error: ${message}`, "error");
+}

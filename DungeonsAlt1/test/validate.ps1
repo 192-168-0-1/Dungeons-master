@@ -195,9 +195,14 @@ if (($html -notmatch 'var fallbackVersion = "[0-9-]+"') -or
     throw 'The Alt1 bootstrap must start from a bounded local fallback and expose core module load failures.'
 }
 if (($html -notmatch 'window\.__dungeonsAppReady') -or
+    ($html -notmatch 'Dungeons startup error:') -or
     ($html -notmatch '\}, 12000\)') -or
     ($app -notmatch 'window\.__dungeonsAppReady = true;')) {
     throw 'The Alt1 bootstrap must detect modules that never finish initializing.'
+}
+if (($app -notmatch 'function storageGet') -or
+    ($app -match '(?<!window\.)localStorage\.')) {
+    throw 'Alt1 startup must not depend on direct localStorage access.'
 }
 
 $ocrAssets = @('WinterfaceMarker.png')

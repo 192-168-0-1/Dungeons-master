@@ -8,7 +8,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>Dungeons Alt1</title>
-  <link rel="stylesheet" href="./styles.css?v=20260622-7">
+  <link rel="stylesheet" href="./styles.css?v=20260622-8">
 </head>
 <body>
   <header class="titlebar">
@@ -118,7 +118,7 @@
     (function bootstrapDungeons() {
       "use strict";
 
-      var fallbackVersion = "20260622-7";
+      var fallbackVersion = "20260622-8";
       var appStarted = false;
       var environment = document.getElementById("environment");
       var status = document.getElementById("status");
@@ -131,6 +131,32 @@
         ["https://unpkg.com/alt1@0.1.3/dist/fonts/aa_12px_mono.js", "sha256-v/dXa9A3WvoMKc9gtyLQdnl+WLSV3hPizonFH/HQZJY="]
       ];
 
+      function showLoadFailure(message) {
+        window.__dungeonsAppReady = true;
+        environment.textContent = "Load failed";
+        status.textContent = message;
+        status.dataset.tone = "error";
+      }
+
+      function startupErrorMessage(event) {
+        var error = event && (event.error || event.reason);
+        if (error && error.message) return error.message;
+        if (event && event.message) return event.message;
+        if (event && event.reason) return String(event.reason);
+        return "unknown error";
+      }
+
+      if (typeof window.addEventListener === "function") {
+        window.addEventListener("error", function (event) {
+          if (!appStarted || window.__dungeonsAppReady) return;
+          showLoadFailure("Dungeons startup error: " + startupErrorMessage(event));
+        });
+        window.addEventListener("unhandledrejection", function (event) {
+          if (!appStarted || window.__dungeonsAppReady) return;
+          showLoadFailure("Dungeons startup error: " + startupErrorMessage(event));
+        });
+      }
+
       function startApp(version) {
         if (appStarted) return;
         appStarted = true;
@@ -141,17 +167,13 @@
         appScript.type = "module";
         appScript.src = "./app.js?v=" + encodeURIComponent(version || fallbackVersion);
         appScript.onerror = function () {
-          environment.textContent = "Load failed";
-          status.textContent = "Dungeons could not load. Close and reopen the Alt1 app.";
-          status.dataset.tone = "error";
+          showLoadFailure("Dungeons could not load. Close and reopen the Alt1 app.");
         };
         document.body.appendChild(appScript);
 
         window.setTimeout(function () {
           if (window.__dungeonsAppReady) return;
-          environment.textContent = "Load failed";
-          status.textContent = "Dungeons did not finish starting. Close every Dungeons window in Alt1 and open it again.";
-          status.dataset.tone = "error";
+          showLoadFailure("Dungeons did not finish starting. Close every Dungeons window in Alt1 and open it again.");
         }, 12000);
       }
 

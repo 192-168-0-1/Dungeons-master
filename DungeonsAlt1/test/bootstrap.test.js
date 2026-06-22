@@ -9,6 +9,7 @@ const flushAsyncWork = () => new Promise((resolve) => setImmediate(resolve));
 
 function createBootstrapRuntime(fetchImpl) {
   const timers = [];
+  const listeners = {};
   const appendedToHead = [];
   const appendedToBody = [];
   const elements = {
@@ -23,6 +24,9 @@ function createBootstrapRuntime(fetchImpl) {
     },
     clearTimeout(timer) {
       timer.cleared = true;
+    },
+    addEventListener(type, listener) {
+      listeners[type] = listener;
     },
   };
   const document = {
@@ -57,7 +61,7 @@ function createBootstrapRuntime(fetchImpl) {
     window,
   });
 
-  return { appendedToBody, appendedToHead, elements, timers, window };
+  return { appendedToBody, appendedToHead, elements, listeners, timers, window };
 }
 
 test("Alt1 bootstrap starts the cached app when version.json hangs", async () => {
@@ -71,7 +75,7 @@ test("Alt1 bootstrap starts the cached app when version.json hangs", async () =>
 
   assert.equal(runtime.appendedToBody.length, 1);
   assert.equal(runtime.appendedToBody[0].type, "module");
-  assert.match(runtime.appendedToBody[0].src, /^\.\/app\.js\?v=20260622-7$/);
+  assert.match(runtime.appendedToBody[0].src, /^\.\/app\.js\?v=20260622-8$/);
 });
 
 test("failed OCR loading does not block the core Alt1 app", async () => {
@@ -80,7 +84,7 @@ test("failed OCR loading does not block the core Alt1 app", async () => {
 
   assert.equal(runtime.appendedToBody.length, 1);
   assert.equal(runtime.appendedToHead.length, 1);
-  assert.match(runtime.appendedToBody[0].src, /^\.\/app\.js\?v=20260622-7$/);
+  assert.match(runtime.appendedToBody[0].src, /^\.\/app\.js\?v=20260622-8$/);
 
   runtime.appendedToHead[0].onerror();
   await runtime.window.__dungeonsOcrReady;
@@ -115,6 +119,21 @@ test("startup watchdog replaces a module that never finishes initializing", asyn
 
   assert.equal(runtime.elements.environment.textContent, "Load failed");
   assert.match(runtime.elements.status.textContent, /did not finish starting/i);
+  assert.equal(runtime.elements.status.dataset.tone, "error");
+});
+
+test("startup runtime errors surface the actual module error", async () => {
+  const runtime = createBootstrapRuntime(() => Promise.resolve({
+    ok: true,
+    json: () => Promise.resolve({ version: "test-version" }),
+  }));
+  await flushAsyncWork();
+
+  runtime.listeners.error({ error: new Error("storage denied") });
+
+  assert.equal(runtime.window.__dungeonsAppReady, true);
+  assert.equal(runtime.elements.environment.textContent, "Load failed");
+  assert.match(runtime.elements.status.textContent, /storage denied/);
   assert.equal(runtime.elements.status.dataset.tone, "error");
 });
 
