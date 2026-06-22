@@ -1,5 +1,5 @@
-const WINTERFACE_WIDTH = 512;
-const WINTERFACE_HEIGHT = 334;
+export const WINTERFACE_WIDTH = 512;
+export const WINTERFACE_HEIGHT = 334;
 const DEFAULT_OFFSET = { x: 710, y: 330 };
 const ASSET_ROOT = new URL("../assets/winterface/", import.meta.url);
 
@@ -174,7 +174,7 @@ export class WinterfaceReader {
     return new WinterfaceReader(marker, fonts);
   }
 
-  read(image, extra = {}) {
+  readWithOffset(image, extra = {}) {
     const offset = findTemplate(image, this.marker);
     if (!offset) return null;
     const result = Object.fromEntries(FIELDS.map((field) => [field.name, readField(image, offset, field, this.fonts)]));
@@ -182,7 +182,11 @@ export class WinterfaceReader {
     result.BonusMod = `${(readBonus(image, offset) * 100).toFixed(1)}%`;
     result.Roomcount = String(extra.roomcount ?? "");
     result.DeadEnds = String(extra.deadEnds ?? "");
-    result.Timestamp = new Date().toLocaleString();
-    return result;
+    result.Timestamp = (extra.timestamp instanceof Date ? extra.timestamp : new Date()).toLocaleString();
+    return { result, offset, width: WINTERFACE_WIDTH, height: WINTERFACE_HEIGHT };
+  }
+
+  read(image, extra = {}) {
+    return this.readWithOffset(image, extra)?.result ?? null;
   }
 }

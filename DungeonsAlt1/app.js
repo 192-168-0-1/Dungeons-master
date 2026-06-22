@@ -17,18 +17,25 @@ import {
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260622-14";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260622-14";
+} from "./src/alt1-overlay.js?v=20260622-15";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260622-15";
 import {
   PARTY_COLORS,
   mergeObservedPartyCache,
   observedPartySlot,
   partyColor,
   reconcileObservedParty,
-} from "./src/party-core.js?v=20260622-14";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260622-14";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260622-14";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260622-14";
+} from "./src/party-core.js?v=20260622-15";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260622-15";
+import {
+  RESULT_COLUMNS,
+  nextAutoResultState,
+  plannedResultExports,
+  safeFilePart,
+  safeTimestampForFilename,
+} from "./src/results-core.js?v=20260622-15";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260622-15";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260622-15";
 import { WinterfaceReader } from "./src/winterface.js";
 
 const SCAN_INTERVAL = 600;
@@ -37,6 +44,7 @@ const STORAGE_PREFIX = "dungeons-alt1";
 const INVALID_CAPTURES_BEFORE_RECALIBRATION = 3;
 const OVERLAY_DURATION = 30000;
 const PARTY_SCAN_INTERVAL = 5000;
+const RESULTS_AUTO_INTERVAL = 1500;
 
 const elements = {
   titlebar: document.querySelector(".titlebar"),
@@ -53,6 +61,9 @@ const elements = {
   gameOverlay: document.querySelector("#game-overlay"),
   testOverlay: document.querySelector("#test-overlay"),
   overlayStatus: document.querySelector("#overlay-status"),
+  autoTrackResults: document.querySelector("#auto-track-results"),
+  autoSaveMapPng: document.querySelector("#auto-save-map-png"),
+  autoSaveResultsPng: document.querySelector("#auto-save-results-png"),
   selection: document.querySelector("#selection"),
   annotation: document.querySelector("#annotation"),
   applyAnnotation: document.querySelector("#apply-annotation"),
@@ -96,6 +107,10 @@ const state = {
   lastCalibrationAttempt: 0,
   lastOverlayReport: null,
   results: [],
+  resultsBusy: false,
+  autoResultState: { visible: false, key: "" },
+  autoResultKeys: new Set(),
+  lastAutoResultScan: 0,
   observedParty: [],
   partyPendingChanges: new Map(),
   partyPanel: null,
@@ -696,43 +711,134 @@ function canvasPoint(event) {
   };
 }
 
-function saveMap() {
-  if (!state.image) return;
+function downloadDataUrl(filename, dataUrl) {
   const link = document.createElement("a");
-  link.download = `dungeon-map-${new Date().toISOString().replace(/:/g, "-").slice(0, 19)}.png`;
-  link.href = elements.canvas.toDataURL("image/png");
+  link.download = filename;
+  link.href = dataUrl;
   link.click();
 }
 
-const RESULT_COLUMNS = [
-  "Timestamp", "Time", "Floor", "FloorXP", "PrestigeXP", "BaseXP", "FloorSize", "SizeMod",
-  "BonusMod", "DifficultyMod", "LevelMod", "FloorXPBoost", "TotalMod", "FinalXP", "Roomcount", "DeadEnds",
-];
+function mapPngFilename(date = new Date()) {
+  const floor = safeFilePart(state.gameMap?.floor?.name, "unknown");
+  return `dungeon-map-${floor}-${safeTimestampForFilename(date)}.png`;
+}
+
+function saveMap(options = {}) {
+  if (!state.image) return;
+  const date = options?.date instanceof Date ? options.date : new Date();
+  downloadDataUrl(mapPngFilename(date), elements.canvas.toDataURL("image/png"));
+}
+
+function resultsPngFilename(result, date = new Date()) {
+  const floor = safeFilePart(result?.Floor || result?.FloorSize, "unknown");
+  return `dungeon-results-${floor}-${safeTimestampForFilename(date)}.png`;
+}
+
+function cropImageData(image, x, y, width, height) {
+  if (!image || x < 0 || y < 0 || x + width > image.width || y + height > image.height) return null;
+  const data = new Uint8ClampedArray(width * height * 4);
+  for (let row = 0; row < height; row += 1) {
+    const source = ((y + row) * image.width + x) * 4;
+    const target = row * width * 4;
+    data.set(image.data.subarray(source, source + width * 4), target);
+  }
+  return new ImageData(data, width, height);
+}
+
+function imageDataToDataUrl(image) {
+  const canvas = document.createElement("canvas");
+  canvas.width = image.width;
+  canvas.height = image.height;
+  const output = canvas.getContext("2d", { willReadFrequently: true });
+  output.putImageData(image, 0, 0);
+  return canvas.toDataURL("image/png");
+}
+
+function saveResultsInterfacePng(capture, date = new Date()) {
+  const { image, offset, width, height, result } = capture;
+  const cropped = cropImageData(image, offset.x, offset.y, width, height);
+  if (!cropped) return;
+  downloadDataUrl(resultsPngFilename(result, date), imageDataToDataUrl(cropped));
+}
+
+function resultExtraFields() {
+  return {
+    roomcount: state.gameMap?.openedRoomCount,
+    deadEnds: state.gameMap?.deadEndCount,
+  };
+}
+
+async function readDungeonResultsCapture(date = new Date()) {
+  const image = captureFullRuneScape();
+  const reader = await winterfaceReader;
+  const capture = reader.readWithOffset(image, { ...resultExtraFields(), timestamp: date });
+  return capture ? { ...capture, image, date } : null;
+}
+
+function appendResult(result) {
+  state.results.unshift(result);
+  renderResults();
+}
+
+function saveResultArtifacts(capture) {
+  const exports = plannedResultExports({
+    autoSaveMap: elements.autoSaveMapPng.checked,
+    autoSaveResults: elements.autoSaveResultsPng.checked,
+    hasMap: Boolean(state.image),
+    hasResultsOffset: Boolean(capture?.offset),
+  });
+  if (exports.includes("map")) saveMap({ date: capture.date });
+  if (exports.includes("results")) saveResultsInterfacePng(capture, capture.date);
+}
 
 async function captureDungeonResults() {
-  if (state.busy) return;
-  state.busy = true;
+  if (state.resultsBusy) return;
+  state.resultsBusy = true;
   elements.captureResults.disabled = true;
   try {
     assertAlt1Ready();
     setStatus("Reading the Dungeoneering results screen…");
-    const reader = await winterfaceReader;
-    const result = reader.read(captureFullRuneScape(), {
-      roomcount: state.gameMap?.openedRoomCount,
-      deadEnds: state.gameMap?.deadEndCount,
-    });
-    if (!result) {
+    const capture = await readDungeonResultsCapture(new Date());
+    if (!capture) {
       setStatus("Results screen not found — keep the XP overview visible", "error");
       return;
     }
-    state.results.unshift(result);
-    renderResults();
+    const { result } = capture;
+    appendResult(result);
+    saveResultArtifacts(capture);
     setStatus(`Results read: floor ${result.Floor || "?"}, ${result.FinalXP || "?"} XP`, "ok");
   } catch (error) {
     setStatus(`Could not read the results screen: ${error.message || error}`, "error");
   } finally {
-    state.busy = false;
+    state.resultsBusy = false;
     elements.captureResults.disabled = false;
+  }
+}
+
+async function autoCaptureDungeonResults() {
+  if (!elements.autoTrackResults.checked) {
+    state.autoResultState = nextAutoResultState(state.autoResultState, null);
+    return;
+  }
+  if (state.resultsBusy || !hasAlt1() || !window.alt1.rsLinked) return;
+  const now = Date.now();
+  if (now - state.lastAutoResultScan < RESULTS_AUTO_INTERVAL) return;
+  state.lastAutoResultScan = now;
+
+  state.resultsBusy = true;
+  try {
+    const capture = await readDungeonResultsCapture(new Date());
+    const next = nextAutoResultState(state.autoResultState, capture?.result ?? null);
+    state.autoResultState = { visible: next.visible, key: next.key };
+    if (!capture || !next.shouldAdd || state.autoResultKeys.has(next.key)) return;
+    state.autoResultKeys.add(next.key);
+    appendResult(capture.result);
+    saveResultArtifacts(capture);
+    setStatus(`Results auto-tracked: floor ${capture.result.Floor || "?"}, ${capture.result.FinalXP || "?"} XP`, "ok");
+  } catch {
+    state.autoResultState = nextAutoResultState(state.autoResultState, null);
+  } finally {
+    state.resultsBusy = false;
   }
 }
 
@@ -1084,6 +1190,11 @@ function bindEvents() {
   elements.clear.addEventListener("click", () => clearAnnotations(true));
   elements.captureResults.addEventListener("click", captureDungeonResults);
   elements.copyResults.addEventListener("click", copyResults);
+  elements.autoTrackResults.addEventListener("change", () => {
+    if (!elements.autoTrackResults.checked) {
+      state.autoResultState = nextAutoResultState(state.autoResultState, null);
+    }
+  });
   elements.showCapture.addEventListener("change", render);
   elements.showGrid.addEventListener("change", render);
   elements.gameOverlay.addEventListener("change", renderGameOverlay);
@@ -1257,6 +1368,7 @@ function bindEvents() {
 
 async function scanLoop() {
   await scanOnce();
+  await autoCaptureDungeonResults();
   setTimeout(scanLoop, SCAN_INTERVAL);
 }
 

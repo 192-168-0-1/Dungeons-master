@@ -8,7 +8,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>Dungeons Alt1</title>
-  <link rel="stylesheet" href="./styles.css?v=20260622-14">
+  <link rel="stylesheet" href="./styles.css?v=20260622-15">
 </head>
 <body>
   <header class="titlebar">
@@ -64,6 +64,11 @@
     <details>
       <summary>Dungeon results</summary>
       <div class="results-panel">
+        <div class="options result-options">
+          <label><input id="auto-track-results" type="checkbox"> Auto track results screen</label>
+          <label><input id="auto-save-map-png" type="checkbox"> Auto-save map PNG</label>
+          <label><input id="auto-save-results-png" type="checkbox"> Auto-save results interface PNG</label>
+        </div>
         <div class="table-scroll">
           <table>
             <thead>
@@ -127,7 +132,7 @@
     (function bootstrapDungeons() {
       "use strict";
 
-      var fallbackVersion = "20260622-14";
+      var fallbackVersion = "20260622-15";
       var appStarted = false;
       var environment = document.getElementById("environment");
       var status = document.getElementById("status");

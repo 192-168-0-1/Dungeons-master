@@ -117,9 +117,11 @@ $partyInterface = Get-Content (Join-Path $appRoot 'src\party-interface.js') -Raw
 $teamSync = Get-Content (Join-Path $appRoot 'src\team-sync.js') -Raw
 $teamGates = Get-Content (Join-Path $appRoot 'src\team-gates.js') -Raw
 $partyMenu = Get-Content (Join-Path $appRoot 'src\party-menu.js') -Raw
+$resultsCore = Get-Content (Join-Path $appRoot 'src\results-core.js') -Raw
+$winterface = Get-Content (Join-Path $appRoot 'src\winterface.js') -Raw
 $mapLocator = Get-Content (Join-Path $appRoot 'src\alt1-map-locator.js') -Raw
 $nativeOverlaySource = $app + "`n" + $overlay
-$runtimeSource = $app + "`n" + $overlay + "`n" + $partyCore + "`n" + $partyInterface + "`n" + $teamSync + "`n" + $teamGates + "`n" + $partyMenu + "`n" + $mapLocator
+$runtimeSource = $app + "`n" + $overlay + "`n" + $partyCore + "`n" + $partyInterface + "`n" + $teamSync + "`n" + $teamGates + "`n" + $partyMenu + "`n" + $resultsCore + "`n" + $winterface + "`n" + $mapLocator
 $domIds = @([regex]::Matches($app, 'querySelector\("#(?<id>[a-z0-9-]+)"\)') | ForEach-Object { $_.Groups['id'].Value })
 $missingDomIds = @($domIds | Where-Object { $html -notmatch ('id="' + [regex]::Escape($_) + '"') })
 if ($missingDomIds.Count -ne 0) {
@@ -213,12 +215,37 @@ if (($app -notmatch 'function installedInAlt1') -or
     ($app -notmatch 'permissionchanged')) {
     throw 'The install link must hide when the Alt1 app is already installed/permissioned.'
 }
-if (($app -notmatch 'team-sync\.js\?v=20260622-14') -or
-    ($app -notmatch 'party-core\.js\?v=20260622-14') -or
-    ($app -notmatch 'party-menu\.js\?v=20260622-14') -or
-    ($app -notmatch 'team-gates\.js\?v=20260622-14') -or
-    ($teamSync -notmatch 'party-core\.js\?v=20260622-14') -or
-    ($teamGates -notmatch 'party-core\.js\?v=20260622-14')) {
+if (($html -notmatch 'id="auto-track-results" type="checkbox"') -or
+    ($html -notmatch 'id="auto-save-map-png" type="checkbox"') -or
+    ($html -notmatch 'id="auto-save-results-png" type="checkbox"') -or
+    ($html -match 'id="auto-track-results"[^>]*checked') -or
+    ($html -match 'id="auto-save-map-png"[^>]*checked') -or
+    ($html -match 'id="auto-save-results-png"[^>]*checked')) {
+    throw 'Dungeon results auto tracking and PNG export options must exist and default off.'
+}
+if (($app -notmatch 'autoCaptureDungeonResults') -or
+    ($app -notmatch 'readDungeonResultsCapture') -or
+    ($app -notmatch 'saveResultArtifacts') -or
+    ($app -notmatch 'cropImageData') -or
+    ($app -notmatch 'resultsBusy') -or
+    ($app -notmatch 'autoResultKeys') -or
+    ($resultsCore -notmatch 'nextAutoResultState') -or
+    ($resultsCore -notmatch 'plannedResultExports')) {
+    throw 'Automatic dungeon-results capture, dedupe and optional PNG export are incomplete.'
+}
+if (($winterface -notmatch 'readWithOffset') -or
+    ($winterface -notmatch 'WINTERFACE_WIDTH = 512') -or
+    ($winterface -notmatch 'WINTERFACE_HEIGHT = 334') -or
+    ($app -notmatch 'offset\.x, offset\.y, width, height')) {
+    throw 'Winterface reads must expose their offset so the cropped results PNG matches the detected interface.'
+}
+if (($app -notmatch 'team-sync\.js\?v=20260622-15') -or
+    ($app -notmatch 'party-core\.js\?v=20260622-15') -or
+    ($app -notmatch 'results-core\.js\?v=20260622-15') -or
+    ($app -notmatch 'party-menu\.js\?v=20260622-15') -or
+    ($app -notmatch 'team-gates\.js\?v=20260622-15') -or
+    ($teamSync -notmatch 'party-core\.js\?v=20260622-15') -or
+    ($teamGates -notmatch 'party-core\.js\?v=20260622-15')) {
     throw 'Changed team-sync modules must be cache-busted for existing Alt1 installations.'
 }
 if (($app -notmatch 'buildVisibleRemoteGatestones') -or
