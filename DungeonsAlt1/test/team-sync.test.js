@@ -44,6 +44,48 @@ test("a joining client accepts a roster only from its slot-one leader", () => {
   assert.equal(client.members[0].name, "Leader");
 });
 
+test("a joining client ignores rosters that do not include itself", () => {
+  const { client } = connectedClient("Joiner");
+  const preAdmitRoster = [
+    { id: "leader", name: "Leader", slot: 1 },
+    { id: "other", name: "Other", slot: 2 },
+  ];
+  const admittedRoster = [
+    ...preAdmitRoster,
+    { id: client.clientId, name: "Joiner", slot: 3 },
+  ];
+
+  client.handleMessage(message("leader", "Leader", "ROSTER", JSON.stringify(preAdmitRoster)));
+  assert.deepEqual(client.members, []);
+
+  client.handleMessage(message("leader", "Leader", "WELCOME", client.clientId, JSON.stringify(admittedRoster)));
+  assert.equal(client.slot, 3);
+  assert.deepEqual(client.members.map(({ id, slot }) => ({ id, slot })), [
+    { id: "leader", slot: 1 },
+    { id: "other", slot: 2 },
+    { id: client.clientId, slot: 3 },
+  ]);
+});
+
+test("host sends a targeted welcome when a kicked client rejoins", () => {
+  const { client: host, sent } = connectedClient("Leader");
+  host.setRoster([
+    { id: host.clientId, name: host.name, slot: 1 },
+    { id: "third", name: "Third", slot: 2 },
+  ]);
+
+  host.handleMessage(message("second", "Second", "HELLO", "join"));
+  const decoded = sent.map((line) => line.split("|").map(decodeURIComponent));
+  const welcome = decoded.find((fields) => fields[3] === "WELCOME" && fields[4] === "second");
+  assert.ok(welcome);
+  assert.deepEqual(JSON.parse(welcome[5]).map(({ id, slot }) => ({ id, slot })), [
+    { id: host.clientId, slot: 1 },
+    { id: "third", slot: 2 },
+    { id: "second", slot: 3 },
+  ]);
+  assert.equal(decoded.some((fields) => fields[3] === "ROSTER"), true);
+});
+
 test("annotation and gatestone packets carry the sender party slot", () => {
   const { client, sent } = connectedClient("Player");
   client.setRoster([{ id: client.clientId, name: client.name, slot: 3 }]);
@@ -157,6 +199,30 @@ test("a kicked client disconnects locally when targeted by KICK", () => {
 
   assert.equal(kicked, true);
   assert.equal(closed, true);
+  assert.equal(client.mode, "offline");
+  assert.deepEqual(client.members, []);
+});
+
+test("a client disconnects if the leader roster removes them after a missed kick", () => {
+  const { client } = connectedClient("Second");
+  let closed = false;
+  client.socket.close = () => { closed = true; };
+  client.mode = "manual";
+  client.setRoster([
+    { id: "leader", name: "Leader", slot: 1 },
+    { id: client.clientId, name: client.name, slot: 2 },
+    { id: "third", name: "Third", slot: 3 },
+  ]);
+
+  let disconnected = false;
+  client.addEventListener("disconnected", () => { disconnected = true; });
+  client.handleMessage(message("leader", "Leader", "ROSTER", JSON.stringify([
+    { id: "leader", name: "Leader", slot: 1 },
+    { id: "third", name: "Third", slot: 2 },
+  ])));
+
+  assert.equal(closed, true);
+  assert.equal(disconnected, true);
   assert.equal(client.mode, "offline");
   assert.deepEqual(client.members, []);
 });

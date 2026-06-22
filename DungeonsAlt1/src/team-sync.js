@@ -4,7 +4,7 @@ import {
   normalizePartyRoster,
   parsePartyRoster,
   removePartyMember,
-} from "./party-core.js?v=20260622-12";
+} from "./party-core.js?v=20260622-13";
 
 const DEFAULT_RELAY = "wss://dungeons-master.onrender.com/team-sync";
 const HEARTBEAT_INTERVAL = 5_000;
@@ -194,6 +194,36 @@ export class TeamSync extends EventTarget {
     if (this.isHost) this.send("ROSTER", JSON.stringify(this.roster));
   }
 
+  acceptLeaderRoster(senderId, roster) {
+    const leader = roster.find((member) => member.slot === 1);
+    if (leader?.id !== senderId) return false;
+    const currentLeader = this.roster.find((member) => member.slot === 1);
+    if (currentLeader && currentLeader.id !== senderId) return false;
+    const includesSelf = roster.some((member) => member.id === this.clientId);
+    if (!includesSelf) {
+      if (currentLeader?.id === senderId) {
+        this.dropFromRoom("You were removed from the team room", "removed", { senderId });
+      }
+      return false;
+    }
+    this.setRoster(roster);
+    return true;
+  }
+
+  dropFromRoom(status, eventName = "disconnected", detail = {}) {
+    const socket = this.socket;
+    this.socket = null;
+    this.stopHeartbeat();
+    if (socket && socket.readyState < WebSocket.CLOSING) socket.close();
+    this.isHost = false;
+    this.mode = "offline";
+    this.lastSeen.clear();
+    this.setRoster([]);
+    this.setStatus(status);
+    this.dispatchEvent(new CustomEvent(eventName, { detail }));
+    if (eventName !== "disconnected") this.dispatchEvent(new CustomEvent("disconnected", { detail }));
+  }
+
   rosterMember(id) {
     return this.roster.find((member) => member.id === cleanClientId(id)) ?? null;
   }
@@ -291,6 +321,7 @@ export class TeamSync extends EventTarget {
       return;
     }
     this.setRoster(result.roster);
+    this.send("WELCOME", senderId, JSON.stringify(this.roster));
     this.sendRoster();
   }
 
@@ -307,32 +338,17 @@ export class TeamSync extends EventTarget {
       this.dispatchEvent(new CustomEvent("hello", { detail: { senderId, senderName } }));
     } else if (type === "ROSTER" && fields.length >= 5 && !this.isHost && this.mode !== "peer") {
       const roster = parsePartyRoster(fields[4]);
-      const leader = roster.find((member) => member.slot === 1);
-      const currentLeader = this.roster.find((member) => member.slot === 1);
-      if (leader?.id === senderId && (!currentLeader || currentLeader.id === senderId)) this.setRoster(roster);
+      this.acceptLeaderRoster(senderId, roster);
+    } else if (type === "WELCOME" && fields.length >= 6
+      && fields[4] === this.clientId && !this.isHost && this.mode !== "peer") {
+      const roster = parsePartyRoster(fields[5]);
+      this.acceptLeaderRoster(senderId, roster);
     } else if (type === "FULL" && fields[4] === this.clientId && this.mode !== "peer") {
-      const socket = this.socket;
-      this.socket = null;
-      this.stopHeartbeat();
-      if (socket && socket.readyState < WebSocket.CLOSING) socket.close();
-      this.isHost = false;
-      this.setRoster([]);
-      this.setStatus("This team room is full (5/5)");
-      this.dispatchEvent(new CustomEvent("full"));
+      this.dropFromRoom("This team room is full (5/5)", "full");
     } else if (type === "KICK" && fields[4] === this.clientId && this.mode !== "offline") {
       const leader = this.roster.find((member) => member.slot === 1);
       if (!leader || leader.id !== senderId) return;
-      const socket = this.socket;
-      this.socket = null;
-      this.stopHeartbeat();
-      if (socket && socket.readyState < WebSocket.CLOSING) socket.close();
-      this.isHost = false;
-      this.mode = "offline";
-      this.lastSeen.clear();
-      this.setRoster([]);
-      this.setStatus("You were kicked from the team room");
-      this.dispatchEvent(new CustomEvent("kicked", { detail: { senderId, senderName } }));
-      this.dispatchEvent(new CustomEvent("disconnected"));
+      this.dropFromRoom("You were kicked from the team room", "kicked", { senderId, senderName });
     } else if (type === "LEAVE") {
       this.lastSeen.delete(senderId);
       const departingWasLeader = this.roster.some((member) => member.id === senderId && member.slot === 1);

@@ -197,12 +197,12 @@ if (($teamSync -notmatch 'send\("KICK"') -or
     ($app -notmatch 'Only the red host can promote players')) {
     throw 'Manual host roster controls must support promote, kick and sender filtering.'
 }
-if (($app -notmatch 'team-sync\.js\?v=20260622-12') -or
-    ($app -notmatch 'party-core\.js\?v=20260622-12') -or
-    ($app -notmatch 'party-menu\.js\?v=20260622-12') -or
-    ($app -notmatch 'team-gates\.js\?v=20260622-12') -or
-    ($teamSync -notmatch 'party-core\.js\?v=20260622-12') -or
-    ($teamGates -notmatch 'party-core\.js\?v=20260622-12')) {
+if (($app -notmatch 'team-sync\.js\?v=20260622-13') -or
+    ($app -notmatch 'party-core\.js\?v=20260622-13') -or
+    ($app -notmatch 'party-menu\.js\?v=20260622-13') -or
+    ($app -notmatch 'team-gates\.js\?v=20260622-13') -or
+    ($teamSync -notmatch 'party-core\.js\?v=20260622-13') -or
+    ($teamGates -notmatch 'party-core\.js\?v=20260622-13')) {
     throw 'Changed team-sync modules must be cache-busted for existing Alt1 installations.'
 }
 if (($app -notmatch 'buildVisibleRemoteGatestones') -or
