@@ -136,3 +136,21 @@ test("party OCR prefers a known team member over longer garbage", () => {
 
   assert.equal(result.members[0].name, "A Ninja");
 });
+
+
+test("occupied DG rows can appear above the first visible empty-row divider", () => {
+  const target = image(360, 220);
+  for (const y of [92, 116, 140]) {
+    for (let x = 50; x <= 250; x += 1) setPixel(target, x, y, [80, 70, 55, 255]);
+  }
+  for (let x = 130; x <= 150; x += 1) setPixel(target, x, 58, [231, 80, 43, 255]);
+  for (let x = 130; x <= 150; x += 1) setPixel(target, x, 82, [53, 183, 232, 255]);
+
+  const panel = findPartyPanel(target);
+  assert.ok(panel);
+  assert.equal(panel.firstDividerY, 68);
+  assert.deepEqual(panel.rows.map((row) => row.pixelCount > 0), [true, true, false, false, false]);
+
+  const result = readPartyInterface(target);
+  assert.deepEqual(result.members.map((member) => member.occupied), [true, true, false, false, false]);
+});

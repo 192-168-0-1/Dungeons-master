@@ -167,21 +167,28 @@ export function findPartyPanel(image) {
       const lineLeft = Math.max(...group.map((run) => run.left));
       const lineRight = Math.min(...group.map((run) => run.right));
       if (lineRight - lineLeft + 1 < MIN_DIVIDER_WIDTH) continue;
-      const panel = { firstDividerY: first.y, rowGap: gap, lineLeft, lineRight };
-      const rows = Array.from({ length: 5 }, (_, index) => rowColorData(image, panel, index + 1));
-      const colorScore = rows.reduce((total, row) => total + Math.min(40, row.pixelCount), 0);
-      if (colorScore < 3) continue;
-      const score = colorScore + group.length * 20 + (lineRight - lineLeft) / 20;
-      if (!best || score > best.score) {
-        best = {
-          ...panel,
-          x: Math.max(0, lineLeft - 15),
-          y: Math.max(0, first.y - gap - 5),
-          width: Math.min(image.width - Math.max(0, lineLeft - 15), lineRight - lineLeft + 31),
-          height: Math.min(image.height - Math.max(0, first.y - gap - 5), gap * 5 + 10),
-          rows,
-          score,
-        };
+      for (let hiddenDividersBefore = 0; hiddenDividersBefore <= 2; hiddenDividersBefore += 1) {
+        const virtualFirstDividerY = first.y - hiddenDividersBefore * gap;
+        if (virtualFirstDividerY <= 0) continue;
+        const panel = { firstDividerY: virtualFirstDividerY, rowGap: gap, lineLeft, lineRight };
+        const rows = Array.from({ length: 5 }, (_, index) => rowColorData(image, panel, index + 1));
+        const colorScore = rows.reduce((total, row) => total + Math.min(40, row.pixelCount), 0);
+        if (colorScore < 3) continue;
+        const occupiedPrefix = rows.findIndex((row) => row.pixelCount < MIN_OCCUPIED_PIXELS);
+        const occupiedRows = occupiedPrefix < 0 ? rows.length : occupiedPrefix;
+        const score = colorScore + group.length * 20 + (lineRight - lineLeft) / 20 + occupiedRows * 8 - hiddenDividersBefore * 2;
+        if (!best || score > best.score) {
+          const panelTop = Math.max(0, virtualFirstDividerY - gap - 5);
+          best = {
+            ...panel,
+            x: Math.max(0, lineLeft - 15),
+            y: panelTop,
+            width: Math.min(image.width - Math.max(0, lineLeft - 15), lineRight - lineLeft + 31),
+            height: Math.min(image.height - panelTop, gap * 5 + 10),
+            rows,
+            score,
+          };
+        }
       }
     }
   }
