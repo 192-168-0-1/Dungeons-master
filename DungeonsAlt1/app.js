@@ -28,7 +28,7 @@ import {
   partyTextColor,
   reconcileObservedParty,
 } from "./src/party-core.js";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260622-3";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260622-4";
 import { WinterfaceReader } from "./src/winterface.js";
 
 const SCAN_INTERVAL = 600;
@@ -825,7 +825,7 @@ async function scanPartyInterface({ manual = false, forceFull = false } = {}) {
 
     for (const area of attempts) {
       const image = runtime.capture(area.x, area.y, area.width, area.height);
-      const result = readPartyInterface(image, runtime);
+      const result = readPartyInterface(image, { ...runtime, expectedNames: expectedPartyNames() });
       if (!result) continue;
       state.partyPanel = globalPartyPanel(result.panel, area);
       state.observedParty = reconcileObservedParty(result.members, expectedPartyNames());

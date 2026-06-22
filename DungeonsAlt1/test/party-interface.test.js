@@ -115,3 +115,24 @@ test("occupied party rows must be contiguous from player one", () => {
   const result = readPartyInterface(target);
   assert.deepEqual(result.members.map((member) => member.occupied), [true, true, false, false, false]);
 });
+
+
+test("party OCR prefers a known team member over longer garbage", () => {
+  const target = image(320, 220);
+  paintPartyPanel(target);
+  const ocr = {
+    calls: 0,
+    findReadLine() {
+      this.calls += 1;
+      return { text: this.calls === 1 ? "A Nlnja" : "divider garbage" };
+    },
+  };
+
+  const result = readPartyInterface(target, {
+    ocr,
+    font: { chars: [{}] },
+    expectedNames: ["A Ninja", "s If"],
+  });
+
+  assert.equal(result.members[0].name, "A Ninja");
+});
