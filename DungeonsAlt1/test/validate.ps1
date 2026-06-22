@@ -165,9 +165,14 @@ if (($partyInterface -notmatch 'function findPartyPanel') -or
 }
 $alt1OcrScripts = [regex]::Matches(
     $html,
-    '<script src="https://unpkg\.com/alt1@0\.1\.3/dist/[^\"]+" integrity="sha(256|384)-[A-Za-z0-9+/=]+" crossorigin="anonymous" referrerpolicy="no-referrer"></script>')
+    '\["https://unpkg\.com/alt1@0\.1\.3/dist/[^\"]+", "sha(256|384)-[A-Za-z0-9+/=]+"\]')
 if ($alt1OcrScripts.Count -ne 6) {
-    throw 'The six official Alt1 OCR scripts must be version-pinned and protected by SRI.'
+    throw 'The six official Alt1 OCR scripts must be loaded in the background, version-pinned and protected by SRI.'
+}
+if (($html -notmatch 'function loadOcrScript') -or
+    ($html -notmatch '__dungeonsOcrReady') -or
+    ($html -notmatch 'OCR dependency timed out')) {
+    throw 'Alt1 OCR dependencies must load in the background with bounded failure handling.'
 }
 
 $manifest = Get-Content (Join-Path $appRoot 'appconfig.json') -Raw | ConvertFrom-Json
@@ -177,9 +182,14 @@ foreach ($relativePath in $manifest.appUrl, $manifest.configUrl, $manifest.iconU
         throw "Manifest target does not exist: $relativePath"
     }
 }
-if ($html -notmatch 'fetch\("\./version\.json", \{ cache: "no-store" \}\)' -or
+if ($html -notmatch 'fetch\("\./version\.json\?ts=" \+ Date\.now\(\), \{ cache: "no-store" \}\)' -or
     -not (Test-Path (Join-Path $appRoot 'version.json'))) {
     throw 'The Alt1 bootstrap must fetch version.json without cache so installed apps update without reinstalling.'
+}
+if (($html -notmatch 'var fallbackVersion = "[0-9-]+"') -or
+    ($html -notmatch 'setTimeout\(function \(\) \{\s*startApp\(fallbackVersion\);\s*\}, 2500\)') -or
+    ($html -notmatch 'appScript\.onerror')) {
+    throw 'The Alt1 bootstrap must start from a bounded local fallback and expose core module load failures.'
 }
 
 $ocrAssets = @('WinterfaceMarker.png')

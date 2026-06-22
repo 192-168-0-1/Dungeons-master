@@ -111,16 +111,96 @@
     </details>
   </main>
 
-  <script src="https://unpkg.com/alt1@0.1.3/dist/base/index.js" integrity="sha384-SH8zHr5lhNGRUmUYySZyazRoJM9zep3+K2On1e/f7PoP9NZFZTe04m5nfE3wq8gh" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-  <script src="https://unpkg.com/alt1@0.1.3/dist/ocr/index.js" integrity="sha384-Cd72JP+Z7CdiRzqq5pyZDoQa7WHNrV/1eCihhWzfOOzpV7gV6Tmk6llhG/z3dI2h" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-  <script src="https://unpkg.com/alt1@0.1.3/dist/fonts/aa_8px.js" integrity="sha384-VByGlUOPjwczDEzYkTitQiFtUVxc78Zj0IHuNX54ORaXyzgbZD/+NN20B6c8khcI" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-  <script src="https://unpkg.com/alt1@0.1.3/dist/fonts/aa_8px_mono.js" integrity="sha256-aB4F2VOzFrz7VIFg8Qzp0GQ2Lhiy7b6wOCYKvmwKh7I=" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-  <script src="https://unpkg.com/alt1@0.1.3/dist/fonts/aa_10px_mono.js" integrity="sha256-6LNqgAIUirmBiFuxAhoXLUwp9lBuCYQ/H5nH1qgkspg=" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-  <script src="https://unpkg.com/alt1@0.1.3/dist/fonts/aa_12px_mono.js" integrity="sha256-v/dXa9A3WvoMKc9gtyLQdnl+WLSV3hPizonFH/HQZJY=" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-  <script type="module">
-    const response = await fetch("./version.json", { cache: "no-store" });
-    const { version } = await response.json();
-    await import(`./app.js?v=${encodeURIComponent(version)}`);
+  <script>
+    (function bootstrapDungeons() {
+      "use strict";
+
+      var fallbackVersion = "20260622-4";
+      var appStarted = false;
+      var environment = document.getElementById("environment");
+      var status = document.getElementById("status");
+      var ocrScripts = [
+        ["https://unpkg.com/alt1@0.1.3/dist/base/index.js", "sha384-SH8zHr5lhNGRUmUYySZyazRoJM9zep3+K2On1e/f7PoP9NZFZTe04m5nfE3wq8gh"],
+        ["https://unpkg.com/alt1@0.1.3/dist/ocr/index.js", "sha384-Cd72JP+Z7CdiRzqq5pyZDoQa7WHNrV/1eCihhWzfOOzpV7gV6Tmk6llhG/z3dI2h"],
+        ["https://unpkg.com/alt1@0.1.3/dist/fonts/aa_8px.js", "sha384-VByGlUOPjwczDEzYkTitQiFtUVxc78Zj0IHuNX54ORaXyzgbZD/+NN20B6c8khcI"],
+        ["https://unpkg.com/alt1@0.1.3/dist/fonts/aa_8px_mono.js", "sha256-aB4F2VOzFrz7VIFg8Qzp0GQ2Lhiy7b6wOCYKvmwKh7I="],
+        ["https://unpkg.com/alt1@0.1.3/dist/fonts/aa_10px_mono.js", "sha256-6LNqgAIUirmBiFuxAhoXLUwp9lBuCYQ/H5nH1qgkspg="],
+        ["https://unpkg.com/alt1@0.1.3/dist/fonts/aa_12px_mono.js", "sha256-v/dXa9A3WvoMKc9gtyLQdnl+WLSV3hPizonFH/HQZJY="]
+      ];
+
+      function startApp(version) {
+        if (appStarted) return;
+        appStarted = true;
+
+        var appScript = document.createElement("script");
+        appScript.type = "module";
+        appScript.src = "./app.js?v=" + encodeURIComponent(version || fallbackVersion);
+        appScript.onerror = function () {
+          environment.textContent = "Load failed";
+          status.textContent = "Dungeons could not load. Close and reopen the Alt1 app.";
+          status.dataset.tone = "error";
+        };
+        document.body.appendChild(appScript);
+      }
+
+      function loadOcrScript(asset) {
+        return new Promise(function (resolve, reject) {
+          var settled = false;
+          var script = document.createElement("script");
+          var timeout = window.setTimeout(function () {
+            if (settled) return;
+            settled = true;
+            script.remove();
+            reject(new Error("OCR dependency timed out"));
+          }, 8000);
+
+          script.src = asset[0];
+          script.integrity = asset[1];
+          script.crossOrigin = "anonymous";
+          script.referrerPolicy = "no-referrer";
+          script.onload = function () {
+            if (settled) return;
+            settled = true;
+            window.clearTimeout(timeout);
+            resolve();
+          };
+          script.onerror = function () {
+            if (settled) return;
+            settled = true;
+            window.clearTimeout(timeout);
+            reject(new Error("OCR dependency failed to load"));
+          };
+          document.head.appendChild(script);
+        });
+      }
+
+      var ocrLoad = Promise.resolve();
+      ocrScripts.forEach(function (asset) {
+        ocrLoad = ocrLoad.then(function () { return loadOcrScript(asset); });
+      });
+      window.__dungeonsOcrReady = ocrLoad.catch(function (error) {
+        window.__dungeonsOcrLoadError = error;
+        return false;
+      });
+
+      var versionTimeout = window.setTimeout(function () {
+        startApp(fallbackVersion);
+      }, 2500);
+
+      fetch("./version.json?ts=" + Date.now(), { cache: "no-store" })
+        .then(function (response) {
+          if (!response.ok) throw new Error("Version request failed");
+          return response.json();
+        })
+        .then(function (data) {
+          window.clearTimeout(versionTimeout);
+          startApp(data && data.version);
+        })
+        .catch(function () {
+          window.clearTimeout(versionTimeout);
+          startApp(fallbackVersion);
+        });
+    })();
   </script>
 </body>
 </html>

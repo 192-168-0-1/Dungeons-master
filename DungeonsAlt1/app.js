@@ -19,7 +19,7 @@ import {
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260622-3";
+} from "./src/alt1-overlay.js?v=20260622-4";
 import { TeamSync, createRoomCode } from "./src/team-sync.js";
 import {
   PARTY_COLORS,
@@ -28,7 +28,7 @@ import {
   partyTextColor,
   reconcileObservedParty,
 } from "./src/party-core.js";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260622-3";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260622-4";
 import { WinterfaceReader } from "./src/winterface.js";
 
 const SCAN_INTERVAL = 600;
