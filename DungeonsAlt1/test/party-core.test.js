@@ -10,6 +10,7 @@ import {
   parsePartyRoster,
   partyColor,
   partyTextColor,
+  reconcileObservedParty,
   removePartyMember,
 } from "../src/party-core.js";
 
@@ -84,5 +85,21 @@ test("OCR party names override join order with conservative fuzzy matching", () 
   ]), [
     { slot: 1, name: "A Ninja", occupied: true },
     { slot: 2, name: "s If", occupied: true },
+  ]);
+});
+
+test("scanned rows are constrained to known team members and canonical names", () => {
+  const scanned = Array.from({ length: 5 }, (_, index) => ({
+    slot: index + 1,
+    occupied: true,
+    name: index === 0 ? "k gpwgggmw-" : `garbage ${index}`,
+    pixelCount: 20,
+  }));
+  assert.deepEqual(reconcileObservedParty(scanned, ["X R P"]), [
+    { slot: 1, occupied: true, name: "X R P", pixelCount: 20 },
+    { slot: 2, occupied: false, name: "", pixelCount: 20 },
+    { slot: 3, occupied: false, name: "", pixelCount: 20 },
+    { slot: 4, occupied: false, name: "", pixelCount: 20 },
+    { slot: 5, occupied: false, name: "", pixelCount: 20 },
   ]);
 });

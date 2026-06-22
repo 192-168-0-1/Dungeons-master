@@ -69,6 +69,31 @@ export function observedPartySlot(members, name) {
   return Number(ranked[0].member.slot);
 }
 
+export function reconcileObservedParty(scannedMembers, expectedNames) {
+  const scanned = Array.isArray(scannedMembers) ? scannedMembers : [];
+  const expected = (expectedNames ?? [])
+    .map((name) => String(name ?? "").trim().slice(0, 24))
+    .filter((name, index, values) => normalizePartyName(name)
+      && values.findIndex((candidate) => normalizePartyName(candidate) === normalizePartyName(name)) === index)
+    .slice(0, PARTY_SIZE);
+  const maximumOccupied = Math.max(1, expected.length);
+  const usedNames = new Set();
+
+  return Array.from({ length: PARTY_SIZE }, (_, index) => {
+    const slot = index + 1;
+    const candidate = scanned.find((member) => Number(member?.slot) === slot);
+    const occupied = slot <= maximumOccupied && candidate?.occupied === true;
+    let name = "";
+    if (occupied) {
+      name = expected.find((expectedName) => !usedNames.has(normalizePartyName(expectedName))
+        && observedPartySlot([{ ...candidate, slot: 1 }], expectedName) === 1) ?? "";
+      if (!name && expected.length === 1 && slot === 1) name = expected[0];
+      if (name) usedNames.add(normalizePartyName(name));
+    }
+    return { slot, occupied, name, pixelCount: Number(candidate?.pixelCount) || 0 };
+  });
+}
+
 export function normalizeObservedParty(value) {
   if (!Array.isArray(value)) return [];
   const slots = new Set();

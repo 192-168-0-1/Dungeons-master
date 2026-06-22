@@ -1,8 +1,8 @@
 {
   "appName": "Dungeons",
   "description": "Dungeoneering map reader, room counter, annotations and team sync for Alt1.",
-  "appUrl": "./index.html?v=20260622-2",
-  "configUrl": "./appconfig.json?v=20260622-2",
+  "appUrl": "./index.html",
+  "configUrl": "./appconfig.json",
   "iconUrl": "./icon.png",
   "defaultWidth": 360,
   "defaultHeight": 620,

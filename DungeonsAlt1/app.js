@@ -19,15 +19,16 @@ import {
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260622-2";
+} from "./src/alt1-overlay.js?v=20260622-3";
 import { TeamSync, createRoomCode } from "./src/team-sync.js";
 import {
   PARTY_COLORS,
   observedPartySlot,
   partyColor,
   partyTextColor,
+  reconcileObservedParty,
 } from "./src/party-core.js";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260622-2";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260622-3";
 import { WinterfaceReader } from "./src/winterface.js";
 
 const SCAN_INTERVAL = 600;
@@ -785,6 +786,12 @@ function globalPartyPanel(panel, offset) {
   };
 }
 
+function expectedPartyNames() {
+  const names = [elements.teamName.value.trim(), ...teamSync.members.map((member) => member.name)]
+    .filter(Boolean);
+  return names.filter((name, index) => names.findIndex((candidate) => candidate.toLowerCase() === name.toLowerCase()) === index);
+}
+
 async function scanPartyInterface({ manual = false, forceFull = false } = {}) {
   if (state.partyScanBusy || !elements.partyInterface.checked) return false;
   state.lastPartyScan = Date.now();
@@ -821,14 +828,14 @@ async function scanPartyInterface({ manual = false, forceFull = false } = {}) {
       const result = readPartyInterface(image, runtime);
       if (!result) continue;
       state.partyPanel = globalPartyPanel(result.panel, area);
-      state.observedParty = result.members;
-      const named = result.members.filter((member) => member.name).length;
-      const occupied = result.members.filter((member) => member.occupied).length;
+      state.observedParty = reconcileObservedParty(result.members, expectedPartyNames());
+      const named = state.observedParty.filter((member) => member.name).length;
+      const occupied = state.observedParty.filter((member) => member.occupied).length;
       const rowEvidence = result.members.map((member) => member.pixelCount).join("/");
       elements.partyScanStatus.textContent = named
         ? `RuneScape party read: ${named}/${occupied} names · positions active`
         : `Party rows ${occupied}/5, OCR missed names · pixels ${rowEvidence}`;
-      if (named) teamSync.sendPartyOrder(result.members);
+      if (named) teamSync.sendPartyOrder(state.observedParty);
       renderParty();
       render();
       return true;
@@ -1027,7 +1034,7 @@ function initialize() {
     render();
   });
 
-  const configUrl = new URL("appconfig.json?v=20260622-2", window.location.href).href;
+  const configUrl = new URL("appconfig.json", window.location.href).href;
   elements.installLink.href = `alt1://addapp/${configUrl}`;
   if (hasAlt1()) {
     identifyApp();

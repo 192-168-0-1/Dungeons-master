@@ -177,6 +177,10 @@ foreach ($relativePath in $manifest.appUrl, $manifest.configUrl, $manifest.iconU
         throw "Manifest target does not exist: $relativePath"
     }
 }
+if ($html -notmatch 'fetch\("\./version\.json", \{ cache: "no-store" \}\)' -or
+    -not (Test-Path (Join-Path $appRoot 'version.json'))) {
+    throw 'The Alt1 bootstrap must fetch version.json without cache so installed apps update without reinstalling.'
+}
 
 $ocrAssets = @('WinterfaceMarker.png')
 $ocrAssets += 0..9 | ForEach-Object { "Base$_.png" }
