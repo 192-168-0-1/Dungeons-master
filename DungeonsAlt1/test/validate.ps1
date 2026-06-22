@@ -207,8 +207,11 @@ if (($partyCore -notmatch 'duplicate: true') -or
 }
 if (($html -notmatch 'id="party-interface" type="checkbox" checked') -or
     ($html -notmatch 'party-scan-option" hidden') -or
+    ($html -notmatch 'party-scan-tools" hidden') -or
+    ($html -notmatch 'id="party-scan"') -or
+    ($html -notmatch 'id="party-forget"') -or
     ($app -notmatch 'partyInterface\.checked')) {
-    throw 'RuneScape party-position helper code must remain available while the checkbox stays hidden.'
+    throw 'RuneScape party-position helper code must remain available while the helper UI stays hidden.'
 }
 if (($app -notmatch 'function installedInAlt1') -or
     ($app -notmatch 'installLink\.hidden') -or
@@ -239,13 +242,13 @@ if (($winterface -notmatch 'readWithOffset') -or
     ($app -notmatch 'offset\.x, offset\.y, width, height')) {
     throw 'Winterface reads must expose their offset so the cropped results PNG matches the detected interface.'
 }
-if (($app -notmatch 'team-sync\.js\?v=20260622-15') -or
-    ($app -notmatch 'party-core\.js\?v=20260622-15') -or
-    ($app -notmatch 'results-core\.js\?v=20260622-15') -or
-    ($app -notmatch 'party-menu\.js\?v=20260622-15') -or
-    ($app -notmatch 'team-gates\.js\?v=20260622-15') -or
-    ($teamSync -notmatch 'party-core\.js\?v=20260622-15') -or
-    ($teamGates -notmatch 'party-core\.js\?v=20260622-15')) {
+if (($app -notmatch 'team-sync\.js\?v=20260622-16') -or
+    ($app -notmatch 'party-core\.js\?v=20260622-16') -or
+    ($app -notmatch 'results-core\.js\?v=20260622-16') -or
+    ($app -notmatch 'party-menu\.js\?v=20260622-16') -or
+    ($app -notmatch 'team-gates\.js\?v=20260622-16') -or
+    ($teamSync -notmatch 'party-core\.js\?v=20260622-16') -or
+    ($teamGates -notmatch 'party-core\.js\?v=20260622-16')) {
     throw 'Changed team-sync modules must be cache-busted for existing Alt1 installations.'
 }
 if (($app -notmatch 'buildVisibleRemoteGatestones') -or
