@@ -89,6 +89,21 @@ test("stats panel is fully filled black with one clean EXE-style text line", () 
   assert.deepEqual({ y: fill.at(-1).y, height: fill.at(-1).height }, { y: 212, height: 1 });
 });
 
+test("stats panel sits below the scaled RuneScape map", () => {
+  const commands = buildStatsOverlayCommands({
+    stats: "1 room (1) | 0.3 rpm | 0 dead ends",
+    mapX: 33,
+    mapY: 18,
+    floor,
+    overlayScale: 1.5,
+  });
+  const fill = commands.find((command) => command.type === "rect");
+  const label = commands.find((command) => command.type === "text");
+  assert.equal(fill.y, 18 + Math.round(floor.imageHeight * 1.5));
+  assert.equal(fill.width, Math.round(floor.imageWidth * 1.5));
+  assert.equal(label.text, "1 room (1) | 0.3 rpm | 0 dead ends");
+});
+
 test("map commands use client-relative coordinates and include every marker type", () => {
   const gatestones = assignGatestoneSlots([
     { source: "local", point: { x: 1, y: 1 }, text: "G1", fill: "#ffd23f", textColor: "#111111" },

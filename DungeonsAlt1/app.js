@@ -23,24 +23,23 @@ import {
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-  formatRpmCounter,
-} from "./src/alt1-overlay.js?v=20260623-1";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260623-1";
+} from "./src/alt1-overlay.js?v=20260623-2";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260623-2";
 import {
   PARTY_COLORS,
   mergeObservedPartyCache,
   observedPartySlot,
   partyColor,
   reconcileObservedParty,
-} from "./src/party-core.js?v=20260623-1";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260623-1";
+} from "./src/party-core.js?v=20260623-2";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260623-2";
 import {
   RESULT_COLUMNS,
   nextAutoResultState,
   plannedResultExports,
   safeFilePart,
   safeTimestampForFilename,
-} from "./src/results-core.js?v=20260623-1";
+} from "./src/results-core.js?v=20260623-2";
 import {
   chooseSaveFolder,
   clearStoredSaveFolder,
@@ -48,9 +47,9 @@ import {
   querySaveFolderPermission,
   supportsFolderSaving,
   writeDataUrlToFolder,
-} from "./src/file-saver.js?v=20260623-1";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260623-1";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260623-1";
+} from "./src/file-saver.js?v=20260623-2";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260623-2";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260623-2";
 import { WinterfaceReader } from "./src/winterface.js";
 
 const SCAN_INTERVAL = 600;
@@ -448,11 +447,7 @@ function updateStats() {
   const rooms = state.gameMap.openedRoomCount;
   const possible = rooms + state.gameMap.mysteryCount;
   const minutes = state.floorStart ? Math.max((Date.now() - state.floorStart) / 60_000, 1 / 60) : 0;
-  if (elements.rpmOnly.checked) {
-    elements.stats.textContent = formatRpmCounter({ rooms, minutes });
-    return;
-  }
-  const rpm = formatRpmCounter({ rooms, minutes }).replace(" rpm", "");
+  const rpm = Math.max(0, (rooms - 0.8) / Math.max(minutes, 1 / 60)).toFixed(1);
   const elapsedSeconds = state.floorStart ? Math.max(0, Math.floor((Date.now() - state.floorStart) / 1000)) : 0;
   const elapsed = `${String(Math.floor(elapsedSeconds / 60)).padStart(2, "0")}:${String(elapsedSeconds % 60).padStart(2, "0")}`;
   elements.stats.textContent = `${rooms} rooms (${possible}) · ${rpm} rpm · ${state.gameMap.deadEndCount} dead ends · ${elapsed}`;
@@ -461,12 +456,6 @@ function updateStats() {
 function currentOverlayStats() {
   if (!state.gameMap) return "";
   const minutes = state.floorStart ? Math.max((Date.now() - state.floorStart) / 60_000, 1 / 60) : 0;
-  if (elements.rpmOnly.checked) {
-    return formatRpmCounter({
-      rooms: state.gameMap.openedRoomCount,
-      minutes,
-    });
-  }
   return formatMapStats({
     rooms: state.gameMap.openedRoomCount,
     mystery: state.gameMap.mysteryCount,
@@ -722,6 +711,7 @@ function renderGameOverlay() {
     mapX: state.calibration.x,
     mapY: state.calibration.y,
     floor: state.gameMap.floor,
+    overlayScale: state.calibration.scale || 1,
     annotations: elements.rpmOnly.checked ? [] : [...state.annotations].map(([pointKey, annotation]) => ({
       point: pointFromKey(pointKey),
       text: annotation.text,
@@ -757,8 +747,8 @@ function testGameOverlay() {
   const group = "dungeons-alt1-test";
   const x = Math.round(state.calibration?.x ?? Math.max(20, api.rsWidth / 2 - 140));
   const y = Math.round(state.calibration?.y ?? Math.max(20, api.rsHeight / 2 - 50));
-  const width = Math.round(state.calibration?.floor.imageWidth ?? 280);
-  const height = Math.round(state.calibration?.floor.imageHeight ?? 100);
+  const width = Math.round(state.calibration?.captureWidth ?? state.calibration?.floor.imageWidth ?? 280);
+  const height = Math.round(state.calibration?.captureHeight ?? state.calibration?.floor.imageHeight ?? 100);
   const report = drawOverlayGroup(api, group, buildTestOverlayCommands({ x, y, width, height }));
   updateOverlayStatus(report.rejected
     ? `Alt1 rejected ${report.rejected}/${report.sent} native overlay test calls`

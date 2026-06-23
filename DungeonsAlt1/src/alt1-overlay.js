@@ -94,14 +94,20 @@ function estimateOverlayTextWidth(value, size = 12) {
   return Math.ceil(String(value).length * size * 0.52);
 }
 
-export function buildStatsOverlayCommands({ stats, mapX, mapY, floor, duration = 30_000 }) {
+function overlayScaleValue(value = 1) {
+  const scale = Number(value);
+  return Number.isFinite(scale) && scale > 0 ? scale : 1;
+}
+
+export function buildStatsOverlayCommands({ stats, mapX, mapY, floor, overlayScale = 1, duration = 30_000 }) {
   if (!stats || !floor) return [];
+  const scale = overlayScaleValue(overlayScale);
   const originX = Math.round(mapX);
-  const barTop = Math.round(mapY + floor.imageHeight);
+  const barTop = Math.round(mapY + floor.imageHeight * scale);
   const barHeight = 21;
   const fontSize = 11;
   const value = String(stats);
-  const barWidth = Math.max(floor.imageWidth, estimateOverlayTextWidth(value, fontSize) + 8);
+  const barWidth = Math.max(Math.round(floor.imageWidth * scale), estimateOverlayTextWidth(value, fontSize) + 8);
   const commands = [];
 
   // Alt1 rectangles are outlines rather than fills. Nested opaque-black
@@ -119,6 +125,7 @@ export function buildMapOverlayCommands({
   mapX,
   mapY,
   floor,
+  overlayScale = 1,
   annotations = [],
   manualCritical = [],
   gatestones = [],
@@ -126,14 +133,17 @@ export function buildMapOverlayCommands({
   duration = 30_000,
 }) {
   const commands = [];
+  const scale = overlayScaleValue(overlayScale);
   const originX = Math.round(mapX);
   const originY = Math.round(mapY);
+  const mapOverlayX = (value) => Math.round(originX + value * scale);
+  const mapOverlayY = (value) => Math.round(originY + value * scale);
 
   for (const annotation of annotations) {
     if (!annotation?.text || !pointInFloor(annotation.point, floor)) continue;
     const origin = mapToImage(annotation.point, floor);
-    const centerX = Math.round(originX + origin.x + ROOM_SIZE / 2);
-    const centerY = Math.round(originY + origin.y + ROOM_SIZE / 2);
+    const centerX = mapOverlayX(origin.x + ROOM_SIZE / 2);
+    const centerY = mapOverlayY(origin.y + ROOM_SIZE / 2);
     commands.push(rect(mixColor(1, 1, 1, 180), centerX - 13, centerY - 8, 26, 16, duration, 2));
     const color = annotation.color
       ? hexToOverlayColor(annotation.color, 255)
@@ -145,16 +155,16 @@ export function buildMapOverlayCommands({
   for (const point of manualCritical) {
     if (!pointInFloor(point, floor)) continue;
     const origin = mapToImage(point, floor);
-    commands.push(rect(mixColor(60, 220, 238, 220), Math.round(originX + origin.x + 2),
-      Math.round(originY + origin.y + 2), 28, 28, duration, 2));
+    commands.push(rect(mixColor(60, 220, 238, 220), mapOverlayX(origin.x + 2),
+      mapOverlayY(origin.y + 2), Math.max(1, Math.round(28 * scale)), Math.max(1, Math.round(28 * scale)), duration, 2));
   }
 
   for (const marker of gatestones) {
     if (!pointInFloor(marker?.point, floor)) continue;
     const origin = mapToImage(marker.point, floor);
     const [dx, dy] = GATESTONE_POSITIONS[(marker.slot ?? 0) % GATESTONE_POSITIONS.length];
-    const x = Math.round(originX + origin.x + dx);
-    const y = Math.round(originY + origin.y + dy);
+    const x = mapOverlayX(origin.x + dx);
+    const y = mapOverlayY(origin.y + dy);
     const fill = hexToOverlayColor(marker.fill, 255);
     commands.push(rect(fill, x, y, 9, 9, duration, 4));
     commands.push(text(marker.text, hexToOverlayColor(marker.textColor, 255), 7,
@@ -167,6 +177,7 @@ export function buildMapOverlayCommands({
       mapX: originX,
       mapY: originY,
       floor,
+      overlayScale: scale,
       duration,
     }));
   }

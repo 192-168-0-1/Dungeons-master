@@ -263,14 +263,14 @@ if (($winterface -notmatch 'readWithOffset') -or
     ($app -notmatch 'offset\.x, offset\.y, width, height')) {
     throw 'Winterface reads must expose their offset so the cropped results PNG matches the detected interface.'
 }
-if (($app -notmatch 'team-sync\.js\?v=20260623-1') -or
-    ($app -notmatch 'party-core\.js\?v=20260623-1') -or
-    ($app -notmatch 'results-core\.js\?v=20260623-1') -or
-    ($app -notmatch 'party-menu\.js\?v=20260623-1') -or
-    ($app -notmatch 'team-gates\.js\?v=20260623-1') -or
-    ($app -notmatch 'file-saver\.js\?v=20260623-1') -or
-    ($teamSync -notmatch 'party-core\.js\?v=20260623-1') -or
-    ($teamGates -notmatch 'party-core\.js\?v=20260623-1')) {
+if (($app -notmatch 'team-sync\.js\?v=20260623-2') -or
+    ($app -notmatch 'party-core\.js\?v=20260623-2') -or
+    ($app -notmatch 'results-core\.js\?v=20260623-2') -or
+    ($app -notmatch 'party-menu\.js\?v=20260623-2') -or
+    ($app -notmatch 'team-gates\.js\?v=20260623-2') -or
+    ($app -notmatch 'file-saver\.js\?v=20260623-2') -or
+    ($teamSync -notmatch 'party-core\.js\?v=20260623-2') -or
+    ($teamGates -notmatch 'party-core\.js\?v=20260623-2')) {
     throw 'Changed team-sync modules must be cache-busted for existing Alt1 installations.'
 }
 if (($app -notmatch 'buildVisibleRemoteGatestones') -or
@@ -343,6 +343,12 @@ if (($app -notmatch 'findMapByAlt1Anchor') -or
 if (($mapLocator -notmatch 'readableRooms === 1 && !gameMap\.base') -or
     ($app -notmatch 'singleBaseRoom')) {
     throw 'Map detection must reject one-room non-base false positives and only reset floors on a single base room.'
+}
+if (($overlay -notmatch 'overlayScale') -or
+    ($overlay -notmatch 'floor\.imageHeight \* scale') -or
+    ($app -notmatch 'overlayScale:\s*state\.calibration\.scale') -or
+    ($app -notmatch 'state\.calibration\?\.captureHeight \?\? state\.calibration\?\.floor\.imageHeight')) {
+    throw 'Native overlays must use the calibrated UI scale so the stats strip is placed under scaled RuneScape maps.'
 }
 if (-not (Test-Path (Join-Path $appRoot 'THIRD_PARTY_NOTES.md')) -or
     ((Get-Content (Join-Path $appRoot 'THIRD_PARTY_NOTES.md') -Raw) -notmatch 'Sleepy-meh-alt-1/dg-map')) {
