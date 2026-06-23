@@ -400,6 +400,22 @@ summary {
 
 .results-panel { padding-top: 8px; }
 
+.result-batch-controls {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+}
+
+.result-batch-controls button,
+.result-batch-controls small {
+  grid-column: 2;
+}
+
+.result-batch-controls small {
+  color: var(--muted);
+}
+
 .table-scroll {
   margin-bottom: 7px;
   overflow-x: auto;

@@ -23,23 +23,28 @@ import {
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260623-2";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260623-2";
+} from "./src/alt1-overlay.js?v=20260623-3";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260623-3";
 import {
   PARTY_COLORS,
   mergeObservedPartyCache,
   observedPartySlot,
   partyColor,
   reconcileObservedParty,
-} from "./src/party-core.js?v=20260623-2";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260623-2";
+} from "./src/party-core.js?v=20260623-3";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260623-3";
 import {
   RESULT_COLUMNS,
+  RESULT_BATCH_MODES,
   nextAutoResultState,
   plannedResultExports,
+  resultBatchIsComplete,
+  resultBatchStatus,
+  resultMatchesFloorFilter,
+  normalizeResultBatchTarget,
   safeFilePart,
   safeTimestampForFilename,
-} from "./src/results-core.js?v=20260623-2";
+} from "./src/results-core.js?v=20260623-3";
 import {
   chooseSaveFolder,
   clearStoredSaveFolder,
@@ -47,9 +52,9 @@ import {
   querySaveFolderPermission,
   supportsFolderSaving,
   writeDataUrlToFolder,
-} from "./src/file-saver.js?v=20260623-2";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260623-2";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260623-2";
+} from "./src/file-saver.js?v=20260623-3";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260623-3";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260623-3";
 import { WinterfaceReader } from "./src/winterface.js";
 
 const SCAN_INTERVAL = 600;
@@ -80,6 +85,11 @@ const elements = {
   autoTrackResults: document.querySelector("#auto-track-results"),
   autoSaveMapPng: document.querySelector("#auto-save-map-png"),
   autoSaveResultsPng: document.querySelector("#auto-save-results-png"),
+  resultBatchSize: document.querySelector("#result-batch-size"),
+  resultFloorFilter: document.querySelector("#result-floor-filter"),
+  resultBatchMode: document.querySelector("#result-batch-mode"),
+  resetResultBatch: document.querySelector("#reset-result-batch"),
+  resultBatchSummary: document.querySelector("#result-batch-summary"),
   chooseMapSaveFolder: document.querySelector("#choose-map-save-folder"),
   clearMapSaveFolder: document.querySelector("#clear-map-save-folder"),
   mapSaveFolderStatus: document.querySelector("#map-save-folder-status"),
@@ -1020,6 +1030,62 @@ function appendResult(result) {
   renderResults();
 }
 
+function resultBatchTarget() {
+  return normalizeResultBatchTarget(elements.resultBatchSize.value);
+}
+
+function resultBatchMode() {
+  return elements.resultBatchMode.value === RESULT_BATCH_MODES.Reset
+    ? RESULT_BATCH_MODES.Reset
+    : RESULT_BATCH_MODES.Lock;
+}
+
+function resultBatchFilter() {
+  return elements.resultFloorFilter.value.trim();
+}
+
+function renderResultBatchSummary() {
+  const status = resultBatchStatus(state.results, {
+    target: resultBatchTarget(),
+    filter: resultBatchFilter(),
+  });
+  const mode = resultBatchMode() === RESULT_BATCH_MODES.Reset ? "auto-next" : "locked";
+  elements.resultBatchSummary.textContent = `${status.summary}${status.complete ? ` | complete (${mode})` : ""}`;
+}
+
+function resetResultBatch(notify = true) {
+  state.results = [];
+  state.autoResultKeys.clear();
+  state.autoResultState = nextAutoResultState(state.autoResultState, null);
+  renderResults();
+  if (notify) setStatus("Dungeon results batch reset", "warn");
+}
+
+function prepareResultBatch(result) {
+  const filter = resultBatchFilter();
+  if (!resultMatchesFloorFilter(result, filter)) {
+    const filterText = filter || "all";
+    return {
+      accepted: false,
+      status: `Results skipped: floor ${result?.Floor || "?"} does not match filter ${filterText}`,
+      tone: "warn",
+    };
+  }
+  const target = resultBatchTarget();
+  if (resultBatchIsComplete(state.results, target)) {
+    if (resultBatchMode() === RESULT_BATCH_MODES.Reset) {
+      resetResultBatch(false);
+    } else {
+      return {
+        accepted: false,
+        status: "Results batch is complete; reset batch before adding more floors",
+        tone: "warn",
+      };
+    }
+  }
+  return { accepted: true };
+}
+
 async function saveResultArtifacts(capture) {
   const exports = plannedResultExports({
     autoSaveMap: elements.autoSaveMapPng.checked,
@@ -1054,6 +1120,31 @@ function resultArtifactTone(results) {
   return results?.some((result) => !result.saved) ? "warn" : "ok";
 }
 
+async function commitDungeonResultsCapture(capture, source = "manual") {
+  const { result } = capture;
+  const batch = prepareResultBatch(result);
+  if (!batch.accepted) {
+    return batch;
+  }
+  appendResult(result);
+  const artifacts = await saveResultArtifacts(capture);
+  const status = resultBatchStatus(state.results, {
+    target: resultBatchTarget(),
+    filter: resultBatchFilter(),
+  });
+  const complete = status.complete
+    ? resultBatchMode() === RESULT_BATCH_MODES.Reset
+      ? "; batch target reached, next matching floor starts a new batch"
+      : "; batch complete, reset to continue"
+    : "";
+  const label = source === "auto" ? "Results auto-tracked" : "Results read";
+  return {
+    accepted: true,
+    status: `${label}: floor ${result.Floor || "?"}, ${result.FinalXP || "?"} XP | avg ${status.averageText}${complete}${resultArtifactSuffix(artifacts)}`,
+    tone: resultArtifactTone(artifacts),
+  };
+}
+
 async function captureDungeonResults() {
   if (state.resultsBusy) return;
   state.resultsBusy = true;
@@ -1066,13 +1157,8 @@ async function captureDungeonResults() {
       setStatus("Results screen not found — keep the XP overview visible", "error");
       return;
     }
-    const { result } = capture;
-    appendResult(result);
-    const artifacts = await saveResultArtifacts(capture);
-    setStatus(
-      `Results read: floor ${result.Floor || "?"}, ${result.FinalXP || "?"} XP${resultArtifactSuffix(artifacts)}`,
-      resultArtifactTone(artifacts),
-    );
+    const committed = await commitDungeonResultsCapture(capture, "manual");
+    setStatus(committed.status, committed.tone);
   } catch (error) {
     setStatus(`Could not read the results screen: ${error.message || error}`, "error");
   } finally {
@@ -1097,13 +1183,10 @@ async function autoCaptureDungeonResults() {
     const next = nextAutoResultState(state.autoResultState, capture?.result ?? null);
     state.autoResultState = { visible: next.visible, key: next.key };
     if (!capture || !next.shouldAdd || state.autoResultKeys.has(next.key)) return;
-    state.autoResultKeys.add(next.key);
-    appendResult(capture.result);
-    const artifacts = await saveResultArtifacts(capture);
-    setStatus(
-      `Results auto-tracked: floor ${capture.result.Floor || "?"}, ${capture.result.FinalXP || "?"} XP${resultArtifactSuffix(artifacts)}`,
-      resultArtifactTone(artifacts),
-    );
+    const committed = await commitDungeonResultsCapture(capture, "auto");
+    const complete = committed.status.includes("complete");
+    if (committed.accepted || complete) state.autoResultKeys.add(next.key);
+    if (committed.accepted || complete) setStatus(committed.status, committed.tone);
   } catch {
     state.autoResultState = nextAutoResultState(state.autoResultState, null);
   } finally {
@@ -1121,6 +1204,7 @@ function renderResults() {
     }
     return row;
   }));
+  renderResultBatchSummary();
 }
 
 async function copyResults() {
@@ -1463,6 +1547,14 @@ function bindEvents() {
   elements.clearMapSaveFolder.addEventListener("click", () => clearSelectedSaveFolder("map"));
   elements.chooseResultsSaveFolder.addEventListener("click", () => selectSaveFolder("results"));
   elements.clearResultsSaveFolder.addEventListener("click", () => clearSelectedSaveFolder("results"));
+  elements.resetResultBatch.addEventListener("click", () => resetResultBatch(true));
+  for (const control of [elements.resultBatchSize, elements.resultFloorFilter, elements.resultBatchMode]) {
+    control.addEventListener("change", () => {
+      state.autoResultState = nextAutoResultState(state.autoResultState, null);
+      renderResultBatchSummary();
+    });
+    control.addEventListener("input", renderResultBatchSummary);
+  }
   elements.autoTrackResults.addEventListener("change", () => {
     if (!elements.autoTrackResults.checked) {
       state.autoResultState = nextAutoResultState(state.autoResultState, null);
@@ -1669,6 +1761,7 @@ function initialize() {
   bindEvents();
   updateAllSaveFolderStatuses();
   refreshStoredSaveFolders();
+  renderResults();
   renderParty();
   drawEmptyState();
   updateStats();

@@ -2,9 +2,16 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
+  averageResultTime,
+  formatResultDuration,
   nextAutoResultState,
+  normalizeResultBatchTarget,
+  parseResultTimeSeconds,
   plannedResultExports,
+  resultBatchIsComplete,
+  resultBatchStatus,
   resultFingerprint,
+  resultMatchesFloorFilter,
   safeFilePart,
   safeTimestampForFilename,
 } from "../src/results-core.js";
@@ -38,6 +45,9 @@ test("results auto tracking options are present and default off in the UI", () =
   const rpmOnly = html.match(/<input id="rpm-only"[^>]*>/);
   assert.ok(rpmOnly, "rpm-only should exist");
   assert.equal(/\bchecked\b/.test(rpmOnly[0]), false, "rpm-only should default off");
+  for (const id of ["result-batch-size", "result-floor-filter", "result-batch-mode", "reset-result-batch", "result-batch-summary"]) {
+    assert.match(html, new RegExp(`id="${id}"`));
+  }
 });
 
 test("auto results state does nothing when no results screen is visible", () => {
@@ -88,4 +98,37 @@ test("result file helpers produce safe deterministic file parts", () => {
   assert.equal(safeTimestampForFilename(new Date("2026-06-22T10:11:12.000Z")), "2026-06-22T10-11-12");
   assert.equal(safeFilePart("Floor 54 / Large"), "Floor-54-Large");
   assert.equal(safeFilePart(""), "unknown");
+});
+
+test("result time helpers calculate floor averages", () => {
+  assert.equal(parseResultTimeSeconds("12:34"), 754);
+  assert.equal(parseResultTimeSeconds("1:02:03"), 3723);
+  assert.equal(parseResultTimeSeconds("garbage"), null);
+  assert.equal(formatResultDuration(754), "12:34");
+  assert.equal(formatResultDuration(3723), "1:02:03");
+  assert.equal(averageResultTime([{ Time: "10:00" }, { Time: "20:00" }]), 900);
+});
+
+test("floor filters accept ranges, themes and floor sizes", () => {
+  assert.equal(resultMatchesFloorFilter({ Floor: "54", FloorSize: "Large" }, ""), true);
+  assert.equal(resultMatchesFloorFilter({ Floor: "54", FloorSize: "Large" }, "warped"), true);
+  assert.equal(resultMatchesFloorFilter({ Floor: "42", FloorSize: "Large" }, "occult"), true);
+  assert.equal(resultMatchesFloorFilter({ Floor: "16", FloorSize: "Medium" }, "abandoned"), true);
+  assert.equal(resultMatchesFloorFilter({ Floor: "54", FloorSize: "Large" }, "1-11, occult"), false);
+  assert.equal(resultMatchesFloorFilter({ Floor: "54", FloorSize: "Large" }, "large"), true);
+});
+
+test("result batch status tracks target completion and average time", () => {
+  const rows = [{ Time: "10:00", Floor: "48" }, { Time: "20:00", Floor: "49" }];
+  assert.equal(normalizeResultBatchTarget("0"), 0);
+  assert.equal(normalizeResultBatchTarget("3"), 3);
+  assert.equal(resultBatchIsComplete(rows, 2), true);
+  assert.deepEqual(resultBatchStatus(rows, { target: 3, filter: "warped" }), {
+    count: 2,
+    target: 3,
+    complete: false,
+    averageSeconds: 900,
+    averageText: "15:00",
+    summary: "Batch 2/3 floors | avg 15:00 | filter warped",
+  });
 });

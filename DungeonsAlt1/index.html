@@ -8,7 +8,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>Dungeons Alt1</title>
-  <link rel="stylesheet" href="./styles.css?v=20260623-2">
+  <link rel="stylesheet" href="./styles.css?v=20260623-3">
 </head>
 <body>
   <header class="titlebar">
@@ -69,6 +69,19 @@
           <label><input id="auto-track-results" type="checkbox"> Auto track results screen</label>
           <label><input id="auto-save-map-png" type="checkbox"> Auto-save map PNG</label>
           <label><input id="auto-save-results-png" type="checkbox"> Auto-save results interface PNG</label>
+          <div class="result-batch-controls">
+            <label for="result-batch-size">Batch floors</label>
+            <input id="result-batch-size" type="number" min="0" max="999" value="0" inputmode="numeric" aria-label="Batch floors">
+            <label for="result-floor-filter">Floors/themes</label>
+            <input id="result-floor-filter" autocomplete="off" spellcheck="false" placeholder="all, 1-11, occult">
+            <label for="result-batch-mode">After target</label>
+            <select id="result-batch-mode" aria-label="After target">
+              <option value="lock" selected>Stop until reset</option>
+              <option value="reset">Start next batch</option>
+            </select>
+            <button id="reset-result-batch" type="button">Reset batch</button>
+            <small id="result-batch-summary">Batch 0 floors | avg -- | filter all</small>
+          </div>
           <div class="save-folder-tools">
             <button id="choose-map-save-folder" type="button">Choose map folder</button>
             <button id="clear-map-save-folder" type="button">Clear map folder</button>
@@ -143,7 +156,7 @@
     (function bootstrapDungeons() {
       "use strict";
 
-      var fallbackVersion = "20260623-2";
+      var fallbackVersion = "20260623-3";
       var appStarted = false;
       var environment = document.getElementById("environment");
       var status = document.getElementById("status");

@@ -226,6 +226,11 @@ if (($html -notmatch 'id="auto-track-results" type="checkbox"') -or
     ($html -notmatch 'id="auto-save-map-png" type="checkbox"') -or
     ($html -notmatch 'id="auto-save-results-png" type="checkbox"') -or
     ($html -notmatch 'id="rpm-only" type="checkbox"') -or
+    ($html -notmatch 'id="result-batch-size"') -or
+    ($html -notmatch 'id="result-floor-filter"') -or
+    ($html -notmatch 'id="result-batch-mode"') -or
+    ($html -notmatch 'id="reset-result-batch"') -or
+    ($html -notmatch 'id="result-batch-summary"') -or
     ($html -notmatch 'id="choose-map-save-folder"') -or
     ($html -notmatch 'id="clear-map-save-folder"') -or
     ($html -notmatch 'id="map-save-folder-status"') -or
@@ -253,6 +258,12 @@ if (($app -notmatch 'autoCaptureDungeonResults') -or
     ($app -notmatch 'results-folder') -or
     ($app -notmatch 'resultsBusy') -or
     ($app -notmatch 'autoResultKeys') -or
+    ($app -notmatch 'commitDungeonResultsCapture') -or
+    ($app -notmatch 'prepareResultBatch') -or
+    ($resultsCore -notmatch 'averageResultTime') -or
+    ($resultsCore -notmatch 'resultMatchesFloorFilter') -or
+    ($resultsCore -notmatch 'RESULT_THEME_RANGES') -or
+    ($resultsCore -notmatch 'resultBatchStatus') -or
     ($resultsCore -notmatch 'nextAutoResultState') -or
     ($resultsCore -notmatch 'plannedResultExports')) {
     throw 'Automatic dungeon-results capture, dedupe and folder-based PNG export are incomplete.'
@@ -263,14 +274,14 @@ if (($winterface -notmatch 'readWithOffset') -or
     ($app -notmatch 'offset\.x, offset\.y, width, height')) {
     throw 'Winterface reads must expose their offset so the cropped results PNG matches the detected interface.'
 }
-if (($app -notmatch 'team-sync\.js\?v=20260623-2') -or
-    ($app -notmatch 'party-core\.js\?v=20260623-2') -or
-    ($app -notmatch 'results-core\.js\?v=20260623-2') -or
-    ($app -notmatch 'party-menu\.js\?v=20260623-2') -or
-    ($app -notmatch 'team-gates\.js\?v=20260623-2') -or
-    ($app -notmatch 'file-saver\.js\?v=20260623-2') -or
-    ($teamSync -notmatch 'party-core\.js\?v=20260623-2') -or
-    ($teamGates -notmatch 'party-core\.js\?v=20260623-2')) {
+if (($app -notmatch 'team-sync\.js\?v=20260623-3') -or
+    ($app -notmatch 'party-core\.js\?v=20260623-3') -or
+    ($app -notmatch 'results-core\.js\?v=20260623-3') -or
+    ($app -notmatch 'party-menu\.js\?v=20260623-3') -or
+    ($app -notmatch 'team-gates\.js\?v=20260623-3') -or
+    ($app -notmatch 'file-saver\.js\?v=20260623-3') -or
+    ($teamSync -notmatch 'party-core\.js\?v=20260623-3') -or
+    ($teamGates -notmatch 'party-core\.js\?v=20260623-3')) {
     throw 'Changed team-sync modules must be cache-busted for existing Alt1 installations.'
 }
 if (($app -notmatch 'buildVisibleRemoteGatestones') -or
