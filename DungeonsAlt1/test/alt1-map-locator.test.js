@@ -10,7 +10,9 @@ import {
 } from "../src/map-core.js";
 import {
   MAP_ANCHOR,
+  MAP_SCALE_CANDIDATES,
   findMapByAlt1Anchor,
+  findMapByScaledCorners,
   mapCandidateFromAnchor,
   normalizeMapCapture,
   scoreMapCandidate,
@@ -121,6 +123,47 @@ test("scaled corner detection and normalization supports 150 percent RuneScape U
   const scored = scoreMapCandidate(normalized, floor);
   assert.equal(scored.gameMap.openedRoomCount, 1);
   assert.deepEqual(scored.gameMap.base, { x: 0, y: 0 });
+});
+
+test("scale candidates follow the desktop EXE 5 percent interface-scaling range", () => {
+  assert.deepEqual(MAP_SCALE_CANDIDATES.slice(0, 2), [1, 1.5]);
+  assert.ok(MAP_SCALE_CANDIDATES.includes(1.05));
+  assert.ok(MAP_SCALE_CANDIDATES.includes(1.25));
+  assert.ok(MAP_SCALE_CANDIDATES.includes(2));
+});
+
+test("EXE-style scaled corner locator uses the top-right run edge at 150 percent", () => {
+  const floor = FLOOR_SIZES.find((candidate) => candidate.name === "Small");
+  const dimensions = scaledFloorDimensions(floor, 1.5);
+  const fullClient = image(700, 500);
+  const mapX = 80;
+  const mapY = 40;
+  const right = mapX + dimensions.width - 1;
+  const bottom = mapY + dimensions.height - 1;
+  const corner = [108, 96, 75, 255];
+  setPixel(fullClient, mapX, mapY, corner);
+  setPixel(fullClient, mapX, bottom, corner);
+  setPixel(fullClient, right, bottom, corner);
+  setPixel(fullClient, right - 1, mapY, [122, 52, 44, 255]);
+  setPixel(fullClient, right, mapY, [122, 52, 44, 255]);
+
+  const canonical = image(floor.imageWidth, floor.imageHeight);
+  paintValidMapCorners(canonical);
+  paintReadableRoom(canonical, floor);
+  const scaled = scaleImageNearest(canonical, 1.5);
+  const calls = [];
+  const match = findMapByScaledCorners(fullClient, (x, y, width, height) => {
+    calls.push([x, y, width, height]);
+    return x === mapX && y === mapY && width === dimensions.width && height === dimensions.height
+      ? scaled
+      : image(width, height);
+  });
+
+  assert.equal(match.x, mapX);
+  assert.equal(match.y, mapY);
+  assert.equal(match.scale, 1.5);
+  assert.equal(match.readableRooms, 1);
+  assert.deepEqual(calls[0], [mapX, mapY, dimensions.width, dimensions.height]);
 });
 
 test("findMapByAlt1Anchor uses Alt1 template matching and validates the captured map", () => {

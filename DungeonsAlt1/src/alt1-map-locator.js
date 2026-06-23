@@ -1,8 +1,9 @@
 import {
   FLOOR_SIZES,
+  findMapCandidatesByCorners,
   isValidMap,
   readGameMap,
-} from "./map-core.js";
+} from "./map-core.js?v=20260624-1";
 
 // Anchor-based map location adapted from Sleepy-meh-alt-1/dg-map with
 // permission relayed by this project's maintainer. The anchor is the fixed
@@ -13,7 +14,23 @@ export const MAP_ANCHOR = Object.freeze({
   width: 15,
 });
 
-export const MAP_SCALE_CANDIDATES = Object.freeze([1, 1.25, 1.5, 1.75, 2]);
+function createExeScaleCandidates() {
+  const values = [1, 1.5];
+  for (let percent = 100; percent <= 200; percent += 5) {
+    values.push(percent / 100);
+  }
+  const seen = new Set();
+  const result = [];
+  for (const value of values) {
+    const key = value.toFixed(4);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(value);
+  }
+  return Object.freeze(result);
+}
+
+export const MAP_SCALE_CANDIDATES = createExeScaleCandidates();
 
 export function scaledFloorDimensions(floor, scale = 1) {
   const value = Number.isFinite(Number(scale)) && Number(scale) > 0 ? Number(scale) : 1;
@@ -99,6 +116,40 @@ export function scoreMapCandidate(image, floor) {
     validCorners,
     score: (validCorners ? 10_000 : 0) + (gameMap.base ? 1_000 : 0) + readableRooms * 50 + floor.width * floor.height,
   };
+}
+
+export function findMapByScaledCorners(fullClient, captureRegion, {
+  floors = FLOOR_SIZES,
+  scales = MAP_SCALE_CANDIDATES,
+  limit = 100,
+} = {}) {
+  if (!fullClient || typeof captureRegion !== "function") return null;
+  const candidates = findMapCandidatesByCorners(fullClient, { floors, scales, limit });
+  for (const candidate of candidates) {
+    let image;
+    try {
+      image = captureRegion(candidate.x, candidate.y, candidate.captureWidth, candidate.captureHeight);
+    } catch {
+      continue;
+    }
+    const normalized = normalizeMapCapture(image, candidate.floor, candidate.scale);
+    const scored = scoreMapCandidate(normalized, candidate.floor);
+    if (!scored) continue;
+    return {
+      x: candidate.x,
+      y: candidate.y,
+      floor: candidate.floor,
+      scale: candidate.scale,
+      captureWidth: candidate.captureWidth,
+      captureHeight: candidate.captureHeight,
+      method: "corners",
+      readableRooms: scored.readableRooms,
+      validCorners: scored.validCorners,
+      gameMap: scored.gameMap,
+      score: scored.score,
+    };
+  }
+  return null;
 }
 
 export function findMapByAlt1Anchor(api, captureRegion, {

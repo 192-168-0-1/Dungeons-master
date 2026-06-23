@@ -274,15 +274,19 @@ if (($winterface -notmatch 'readWithOffset') -or
     ($app -notmatch 'offset\.x, offset\.y, width, height')) {
     throw 'Winterface reads must expose their offset so the cropped results PNG matches the detected interface.'
 }
-if (($app -notmatch 'team-sync\.js\?v=20260623-3') -or
-    ($app -notmatch 'party-core\.js\?v=20260623-3') -or
-    ($app -notmatch 'results-core\.js\?v=20260623-3') -or
-    ($app -notmatch 'party-menu\.js\?v=20260623-3') -or
-    ($app -notmatch 'team-gates\.js\?v=20260623-3') -or
-    ($app -notmatch 'file-saver\.js\?v=20260623-3') -or
-    ($teamSync -notmatch 'party-core\.js\?v=20260623-3') -or
-    ($teamGates -notmatch 'party-core\.js\?v=20260623-3')) {
-    throw 'Changed team-sync modules must be cache-busted for existing Alt1 installations.'
+if (($app -notmatch 'map-core\.js\?v=20260624-1') -or
+    ($app -notmatch 'alt1-map-locator\.js\?v=20260624-1') -or
+    ($app -notmatch 'team-sync\.js\?v=20260624-1') -or
+    ($app -notmatch 'party-core\.js\?v=20260624-1') -or
+    ($app -notmatch 'results-core\.js\?v=20260624-1') -or
+    ($app -notmatch 'party-menu\.js\?v=20260624-1') -or
+    ($app -notmatch 'team-gates\.js\?v=20260624-1') -or
+    ($app -notmatch 'file-saver\.js\?v=20260624-1') -or
+    ($teamSync -notmatch 'party-core\.js\?v=20260624-1') -or
+    ($teamGates -notmatch 'party-core\.js\?v=20260624-1') -or
+    ($teamGates -notmatch 'alt1-overlay\.js\?v=20260624-1') -or
+    ($mapLocator -notmatch 'map-core\.js\?v=20260624-1')) {
+    throw 'Changed Alt1 runtime modules must be cache-busted for existing Alt1 installations.'
 }
 if (($app -notmatch 'buildVisibleRemoteGatestones') -or
     ($teamGates -notmatch 'source: "team"') -or
@@ -337,22 +341,27 @@ if ($runtimeSource -match '\.replaceAll\(' -or
     throw 'Runtime Alt1 modules must avoid replaceAll() and at(-1) for older Alt1 Chromium builds.'
 }
 if (($app -notmatch 'findMapByAlt1Anchor') -or
+    ($app -notmatch 'findMapByScaledCorners') -or
     ($app -notmatch 'scoreMapCandidate') -or
     ($app -notmatch 'normalizeMapCapture') -or
     ($app -notmatch 'MAP_SCALE_CANDIDATES') -or
-    ($app -notmatch 'findMapCandidatesByCorners') -or
     ($app -notmatch 'function findMapInRuneScapeClient') -or
     ($mapLocator -notmatch 'MAP_ANCHOR') -or
     ($mapLocator -notmatch 'MAP_SCALE_CANDIDATES') -or
+    ($mapLocator -notmatch 'createExeScaleCandidates') -or
+    ($mapLocator -notmatch 'findMapByScaledCorners') -or
     ($mapLocator -notmatch 'normalizeMapCapture') -or
     ($mapCore -notmatch 'findMapCandidatesByCorners') -or
     ($mapCore -notmatch 'scales = \[1\]') -or
+    ($mapCore -notmatch 'rightX \+ 1 < image\.width') -or
     ($mapLocator -notmatch 'bindFindSubImg') -or
     ($mapLocator -notmatch 'readableRooms')) {
     throw 'Scale-aware anchor-first Alt1 map location with readable-room validation is missing.'
 }
 if (($mapLocator -notmatch 'readableRooms === 1 && !gameMap\.base') -or
-    ($app -notmatch 'singleBaseRoom')) {
+    ($app -notmatch 'singleBaseRoom') -or
+    ($app -notmatch 'pendingFloorReset') -or
+    ($app -notmatch 'function shouldResetForNewFloor')) {
     throw 'Map detection must reject one-room non-base false positives and only reset floors on a single base room.'
 }
 if (($overlay -notmatch 'overlayScale') -or

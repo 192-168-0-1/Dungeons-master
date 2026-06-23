@@ -3,36 +3,36 @@ import {
   ROOM_SIZE,
   RoomType,
   detectGatestones,
-  findMapCandidatesByCorners,
   gridOffset,
   imageToMap,
   isOpened,
   mapToImage,
   toChess,
-} from "./src/map-core.js";
+} from "./src/map-core.js?v=20260624-1";
 import {
   MAP_SCALE_CANDIDATES,
   findMapByAlt1Anchor,
+  findMapByScaledCorners,
   normalizeMapCapture,
   scaledFloorDimensions,
   scoreMapCandidate,
-} from "./src/alt1-map-locator.js";
+} from "./src/alt1-map-locator.js?v=20260624-1";
 import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js";
 import {
   buildMapOverlayCommands,
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260623-3";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260623-3";
+} from "./src/alt1-overlay.js?v=20260624-1";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260624-1";
 import {
   PARTY_COLORS,
   mergeObservedPartyCache,
   observedPartySlot,
   partyColor,
   reconcileObservedParty,
-} from "./src/party-core.js?v=20260623-3";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260623-3";
+} from "./src/party-core.js?v=20260624-1";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260624-1";
 import {
   RESULT_COLUMNS,
   RESULT_BATCH_MODES,
@@ -44,7 +44,7 @@ import {
   normalizeResultBatchTarget,
   safeFilePart,
   safeTimestampForFilename,
-} from "./src/results-core.js?v=20260623-3";
+} from "./src/results-core.js?v=20260624-1";
 import {
   chooseSaveFolder,
   clearStoredSaveFolder,
@@ -52,9 +52,9 @@ import {
   querySaveFolderPermission,
   supportsFolderSaving,
   writeDataUrlToFolder,
-} from "./src/file-saver.js?v=20260623-3";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260623-3";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260623-3";
+} from "./src/file-saver.js?v=20260624-1";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260624-1";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260624-1";
 import { WinterfaceReader } from "./src/winterface.js";
 
 const SCAN_INTERVAL = 600;
@@ -143,6 +143,7 @@ const state = {
   autoResultState: { visible: false, key: "" },
   autoResultKeys: new Set(),
   lastAutoResultScan: 0,
+  pendingFloorReset: null,
   saveFolders: {
     supported: false,
     map: {
@@ -277,6 +278,7 @@ function pointInFloor(point, floor = state.gameMap?.floor) {
 
 function resetFloor() {
   state.floorStart = Date.now() - 2000;
+  state.pendingFloorReset = null;
   state.annotations.clear();
   state.manualCritical.clear();
   state.teamGatestones.clear();
@@ -294,33 +296,41 @@ function findMapInRuneScapeClient() {
   const anchored = findMapByAlt1Anchor(window.alt1, captureRegion);
   if (anchored) return anchored;
   const fullClient = captureFullRuneScape();
-  const cornerMatches = findMapCandidatesByCorners(fullClient, { scales: MAP_SCALE_CANDIDATES });
-  let best = null;
-  for (const cornerMatch of cornerMatches) {
-    const dimensions = scaledFloorDimensions(cornerMatch.floor, cornerMatch.scale);
-    let raw;
-    try {
-      raw = captureRegion(cornerMatch.x, cornerMatch.y, dimensions.width, dimensions.height);
-    } catch {
-      continue;
-    }
-    const image = normalizeMapCapture(raw, cornerMatch.floor, dimensions.scale);
-    const scored = scoreMapCandidate(image, cornerMatch.floor);
-    if (!scored) continue;
-    const match = {
-      ...cornerMatch,
-      scale: dimensions.scale,
-      captureWidth: dimensions.width,
-      captureHeight: dimensions.height,
-      method: "corners",
-      readableRooms: scored.readableRooms,
-      validCorners: scored.validCorners,
-      gameMap: scored.gameMap,
-      score: scored.score,
-    };
-    if (!best || match.score > best.score) best = match;
+  return findMapByScaledCorners(fullClient, captureRegion, { scales: MAP_SCALE_CANDIDATES });
+}
+
+function floorResetKey(gameMap, calibration) {
+  if (!gameMap?.base || !calibration) return "";
+  return [
+    calibration.floor?.name ?? "",
+    calibration.x,
+    calibration.y,
+    gameMap.base.x,
+    gameMap.base.y,
+  ].join(":");
+}
+
+function shouldResetForNewFloor(gameMap) {
+  if (!state.floorStart) {
+    state.pendingFloorReset = null;
+    return true;
   }
-  return best;
+  const singleBaseRoom = gameMap.openedRoomCount === 1 && Boolean(gameMap.base);
+  const resetCandidate = (state.lastBase && gameMap.base && !samePoint(state.lastBase, gameMap.base))
+    || (state.lastRoomCount > 1 && singleBaseRoom);
+  if (!resetCandidate) {
+    state.pendingFloorReset = null;
+    return false;
+  }
+  const key = floorResetKey(gameMap, state.calibration);
+  if (key
+    && state.pendingFloorReset?.key === key
+    && gameMap.openedRoomCount <= Math.max(3, (state.pendingFloorReset.openedRoomCount || 1) + 2)) {
+    state.pendingFloorReset = null;
+    return true;
+  }
+  state.pendingFloorReset = { key, openedRoomCount: gameMap.openedRoomCount, seenAt: Date.now() };
+  return false;
 }
 
 async function calibrate({ silent = false } = {}) {
@@ -399,11 +409,7 @@ async function updateMap() {
 
     state.invalidCaptures = 0;
     const gameMap = scoredMap.gameMap;
-    const singleBaseRoom = gameMap.openedRoomCount === 1 && Boolean(gameMap.base);
-    const newFloor = !state.floorStart
-      || (state.lastBase && gameMap.base && !samePoint(state.lastBase, gameMap.base))
-      || (state.lastRoomCount > 1 && singleBaseRoom);
-    if (newFloor) resetFloor();
+    if (shouldResetForNewFloor(gameMap)) resetFloor();
 
     state.image = image;
     state.gameMap = gameMap;

@@ -137,19 +137,30 @@ function isMapTopRightAt(image, x, y) {
   return dr * dr + dg * dg + db * db <= MAP_TOP_RIGHT_DISTANCE;
 }
 
-export function findMapCandidatesByCorners(image, { scales = [1], limit = 50 } = {}) {
+export function findMapCandidatesByCorners(image, { scales = [1], floors = FLOOR_SIZES, limit = 50 } = {}) {
   if (!image) return [];
-  const scaleCandidates = [...scales]
-    .map((scale) => Number(scale))
-    .filter((scale) => Number.isFinite(scale) && scale > 0)
-    .sort((left, right) => left - right);
+  const seenScales = new Set();
+  const scaleCandidates = [];
+  for (const rawScale of scales) {
+    const scale = Number(rawScale);
+    if (!Number.isFinite(scale) || scale <= 0) continue;
+    const key = scale.toFixed(4);
+    if (seenScales.has(key)) continue;
+    seenScales.add(key);
+    scaleCandidates.push(scale);
+  }
+  const floorCandidates = Array.isArray(floors) && floors.length ? floors : FLOOR_SIZES;
   const candidates = [];
 
   for (let y = 0; y < image.height; y += 1) {
     for (let rightX = 0; rightX < image.width; rightX += 1) {
       if (!isMapTopRightAt(image, rightX, y)) continue;
+      // Match the desktop EXE locator: scaling can turn the top-right marker
+      // into a short run, so derive the crop from its upper-right edge only.
+      if (y > 0 && isMapTopRightAt(image, rightX, y - 1)) continue;
+      if (rightX + 1 < image.width && isMapTopRightAt(image, rightX + 1, y)) continue;
       for (const scale of scaleCandidates) {
-        for (const floor of FLOOR_SIZES) {
+        for (const floor of floorCandidates) {
           const captureWidth = Math.round(floor.imageWidth * scale);
           const captureHeight = Math.round(floor.imageHeight * scale);
           const x = rightX - captureWidth + 1;
