@@ -35,6 +35,9 @@ test("results auto tracking options are present and default off in the UI", () =
     assert.ok(match, `${id} should exist`);
     assert.equal(/\bchecked\b/.test(match[0]), false, `${id} should default off`);
   }
+  const rpmOnly = html.match(/<input id="rpm-only"[^>]*>/);
+  assert.ok(rpmOnly, "rpm-only should exist");
+  assert.equal(/\bchecked\b/.test(rpmOnly[0]), false, "rpm-only should default off");
 });
 
 test("auto results state does nothing when no results screen is visible", () => {

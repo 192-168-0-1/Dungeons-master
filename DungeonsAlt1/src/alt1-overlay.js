@@ -53,11 +53,20 @@ export function assignGatestoneSlots(markers, floor) {
   return result;
 }
 
+function rpmValue(rooms = 0, minutes = 0) {
+  const roomCount = Math.max(0, Number(rooms) || 0);
+  const elapsedMinutes = Math.max(Number(minutes) || 0, 1 / 60);
+  return Math.max(0, (roomCount - 0.8) / elapsedMinutes).toFixed(1);
+}
+
+export function formatRpmCounter({ rooms = 0, minutes = 0 } = {}) {
+  return `${rpmValue(rooms, minutes)} rpm`;
+}
+
 export function formatMapStats({ rooms = 0, mystery = 0, deadEnds = 0, minutes = 0 } = {}) {
   const roomCount = Math.max(0, Number(rooms) || 0);
   const possible = roomCount + Math.max(0, Number(mystery) || 0);
-  const elapsedMinutes = Math.max(Number(minutes) || 0, 1 / 60);
-  const rpm = Math.max(0, (roomCount - 0.8) / elapsedMinutes).toFixed(1);
+  const rpm = rpmValue(roomCount, minutes);
   const roomLabel = roomCount === 1 ? "room" : "rooms";
   return `${roomCount} ${roomLabel} (${possible}) | ${rpm} rpm | ${Math.max(0, Number(deadEnds) || 0)} dead ends`;
 }

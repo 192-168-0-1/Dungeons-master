@@ -8,6 +8,7 @@ import {
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
+  formatRpmCounter,
   hexToOverlayColor,
   mixColor,
 } from "../src/alt1-overlay.js";
@@ -61,6 +62,7 @@ test("visible gatestone markers contain remote gates only", () => {
 });
 
 test("map stats match the desktop EXE wording and RPM calculation", () => {
+  assert.equal(formatRpmCounter({ rooms: 12, minutes: 2 }), "5.6 rpm");
   assert.equal(formatMapStats({ rooms: 1, mystery: 3, deadEnds: 2, minutes: 2 }),
     "1 room (4) | 0.1 rpm | 2 dead ends");
   assert.equal(formatMapStats({ rooms: 12, mystery: 4, deadEnds: 5, minutes: 2 }),

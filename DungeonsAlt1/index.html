@@ -8,7 +8,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>Dungeons Alt1</title>
-  <link rel="stylesheet" href="./styles.css?v=20260622-18">
+  <link rel="stylesheet" href="./styles.css?v=20260623-1">
 </head>
 <body>
   <header class="titlebar">
@@ -53,6 +53,7 @@
       <div class="options">
         <label><input id="show-capture" type="checkbox" checked> Show original map</label>
         <label><input id="show-grid" type="checkbox" checked> Show grid</label>
+        <label><input id="rpm-only" type="checkbox"> RPM counter only</label>
         <label><input id="game-overlay" type="checkbox" checked> Draw labels and gatestones in game</label>
         <div class="overlay-tools">
           <button id="test-overlay" type="button">Test native overlay</button>
@@ -69,9 +70,14 @@
           <label><input id="auto-save-map-png" type="checkbox"> Auto-save map PNG</label>
           <label><input id="auto-save-results-png" type="checkbox"> Auto-save results interface PNG</label>
           <div class="save-folder-tools">
-            <button id="choose-save-folder" type="button">Choose save folder</button>
-            <button id="clear-save-folder" type="button">Clear save folder</button>
-            <small id="save-folder-status">Choose a save folder before PNG auto-save</small>
+            <button id="choose-map-save-folder" type="button">Choose map folder</button>
+            <button id="clear-map-save-folder" type="button">Clear map folder</button>
+            <small id="map-save-folder-status">Choose a map folder before map PNG auto-save</small>
+          </div>
+          <div class="save-folder-tools">
+            <button id="choose-results-save-folder" type="button">Choose results folder</button>
+            <button id="clear-results-save-folder" type="button">Clear results folder</button>
+            <small id="results-save-folder-status">Choose a results folder before results PNG auto-save</small>
           </div>
         </div>
         <div class="table-scroll">
@@ -137,7 +143,7 @@
     (function bootstrapDungeons() {
       "use strict";
 
-      var fallbackVersion = "20260622-18";
+      var fallbackVersion = "20260623-1";
       var appStarted = false;
       var environment = document.getElementById("environment");
       var status = document.getElementById("status");

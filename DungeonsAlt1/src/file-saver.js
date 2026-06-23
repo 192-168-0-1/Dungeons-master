@@ -1,7 +1,7 @@
 const DB_NAME = "dungeons-alt1-file-save";
 const DB_VERSION = 1;
 const STORE_NAME = "handles";
-const SAVE_FOLDER_KEY = "save-folder";
+const DEFAULT_SAVE_FOLDER_KEY = "save-folder";
 
 export function supportsFolderSaving(root = globalThis) {
   return typeof root?.showDirectoryPicker === "function" && typeof root?.indexedDB !== "undefined";
@@ -36,29 +36,33 @@ function requestToPromise(request) {
   });
 }
 
-export async function loadStoredSaveFolder(root = globalThis) {
+function saveFolderKey(key) {
+  return String(key || DEFAULT_SAVE_FOLDER_KEY);
+}
+
+export async function loadStoredSaveFolder(root = globalThis, key = DEFAULT_SAVE_FOLDER_KEY) {
   if (!supportsFolderSaving(root)) return null;
   try {
-    return await withHandleStore(root, "readonly", (store) => requestToPromise(store.get(SAVE_FOLDER_KEY)));
+    return await withHandleStore(root, "readonly", (store) => requestToPromise(store.get(saveFolderKey(key))));
   } catch {
     return null;
   }
 }
 
-export async function storeSaveFolder(handle, root = globalThis) {
+export async function storeSaveFolder(handle, root = globalThis, key = DEFAULT_SAVE_FOLDER_KEY) {
   if (!supportsFolderSaving(root) || !handle) return false;
   try {
-    await withHandleStore(root, "readwrite", (store) => requestToPromise(store.put(handle, SAVE_FOLDER_KEY)));
+    await withHandleStore(root, "readwrite", (store) => requestToPromise(store.put(handle, saveFolderKey(key))));
     return true;
   } catch {
     return false;
   }
 }
 
-export async function clearStoredSaveFolder(root = globalThis) {
+export async function clearStoredSaveFolder(root = globalThis, key = DEFAULT_SAVE_FOLDER_KEY) {
   if (!supportsFolderSaving(root)) return false;
   try {
-    await withHandleStore(root, "readwrite", (store) => requestToPromise(store.delete(SAVE_FOLDER_KEY)));
+    await withHandleStore(root, "readwrite", (store) => requestToPromise(store.delete(saveFolderKey(key))));
     return true;
   } catch {
     return false;
@@ -84,12 +88,12 @@ export async function requestSaveFolderPermission(handle) {
   }
 }
 
-export async function chooseSaveFolder(root = globalThis) {
+export async function chooseSaveFolder(root = globalThis, key = DEFAULT_SAVE_FOLDER_KEY) {
   if (!supportsFolderSaving(root)) return null;
   const handle = await root.showDirectoryPicker({ mode: "readwrite" });
   const permission = await requestSaveFolderPermission(handle);
   if (permission !== "granted") return null;
-  await storeSaveFolder(handle, root);
+  await storeSaveFolder(handle, root, key);
   return handle;
 }
 

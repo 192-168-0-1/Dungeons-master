@@ -4,6 +4,7 @@ import {
   FLOOR_SIZES,
   RoomType,
   SIGNATURES,
+  findMapByCorners,
   mapToImage,
   setPixel,
 } from "../src/map-core.js";
@@ -11,7 +12,9 @@ import {
   MAP_ANCHOR,
   findMapByAlt1Anchor,
   mapCandidateFromAnchor,
+  normalizeMapCapture,
   scoreMapCandidate,
+  scaledFloorDimensions,
 } from "../src/alt1-map-locator.js";
 
 function image(width, height) {
@@ -40,12 +43,32 @@ function paintReadableRoom(target, floor, point = { x: 0, y: 0 }) {
   setPixel(target, origin.x + 19, origin.y + 18, [150, 145, 105, 255]);
 }
 
+function scaleImageNearest(source, scale) {
+  const width = Math.round(source.width * scale);
+  const height = Math.round(source.height * scale);
+  const target = image(width, height);
+  for (let y = 0; y < height; y += 1) {
+    const sourceY = Math.min(source.height - 1, Math.floor(y / scale));
+    for (let x = 0; x < width; x += 1) {
+      const sourceX = Math.min(source.width - 1, Math.floor(x / scale));
+      const from = (sourceY * source.width + sourceX) * 4;
+      const to = (y * width + x) * 4;
+      target.data[to] = source.data[from];
+      target.data[to + 1] = source.data[from + 1];
+      target.data[to + 2] = source.data[from + 2];
+      target.data[to + 3] = source.data[from + 3];
+    }
+  }
+  return target;
+}
+
 test("mapCandidateFromAnchor converts the top-right anchor to client-relative map coordinates", () => {
   const floor = FLOOR_SIZES.find((candidate) => candidate.name === "Large");
-  assert.deepEqual(mapCandidateFromAnchor({ x: 300, y: 20 }, floor), {
-    x: 300 - floor.imageWidth + MAP_ANCHOR.width,
-    y: 20,
-  });
+  const candidate = mapCandidateFromAnchor({ x: 300, y: 20 }, floor);
+  assert.equal(candidate.x, 300 - floor.imageWidth + MAP_ANCHOR.width);
+  assert.equal(candidate.y, 20);
+  assert.equal(candidate.scale, 1);
+  assert.equal(candidate.captureWidth, floor.imageWidth);
 });
 
 test("scoreMapCandidate accepts a readable map even when corner colors are unavailable", () => {
@@ -63,6 +86,41 @@ test("scoreMapCandidate rejects blank or mismatched captures", () => {
   const floor = FLOOR_SIZES.find((candidate) => candidate.name === "Small");
   assert.equal(scoreMapCandidate(image(floor.imageWidth, floor.imageHeight), floor), null);
   assert.equal(scoreMapCandidate(image(floor.imageWidth + 1, floor.imageHeight), floor), null);
+});
+
+test("scoreMapCandidate rejects one readable non-base room to avoid false map locks", () => {
+  const floor = FLOOR_SIZES.find((candidate) => candidate.name === "Small");
+  const target = image(floor.imageWidth, floor.imageHeight);
+  const [signature] = [...SIGNATURES.entries()].find(([, type]) => type === RoomType.E);
+  paintSignature(target, mapToImage({ x: 0, y: 0 }, floor), signature);
+  assert.equal(scoreMapCandidate(target, floor), null);
+});
+
+test("scaled corner detection and normalization supports 150 percent RuneScape UI scale", () => {
+  const floor = FLOOR_SIZES.find((candidate) => candidate.name === "Small");
+  const dimensions = scaledFloorDimensions(floor, 1.5);
+  const fullClient = image(600, 500);
+  const mapX = 40;
+  const mapY = 30;
+  const corner = [108, 96, 75, 255];
+  setPixel(fullClient, mapX, mapY, corner);
+  setPixel(fullClient, mapX, mapY + dimensions.height - 1, corner);
+  setPixel(fullClient, mapX + dimensions.width - 1, mapY + dimensions.height - 1, corner);
+  setPixel(fullClient, mapX + dimensions.width - 1, mapY, [122, 52, 44, 255]);
+
+  const match = findMapByCorners(fullClient, { scales: [1, 1.5] });
+  assert.equal(match.x, mapX);
+  assert.equal(match.y, mapY);
+  assert.equal(match.scale, 1.5);
+  assert.equal(match.captureWidth, dimensions.width);
+
+  const canonical = image(floor.imageWidth, floor.imageHeight);
+  paintValidMapCorners(canonical);
+  paintReadableRoom(canonical, floor);
+  const normalized = normalizeMapCapture(scaleImageNearest(canonical, 1.5), floor, 1.5);
+  const scored = scoreMapCandidate(normalized, floor);
+  assert.equal(scored.gameMap.openedRoomCount, 1);
+  assert.deepEqual(scored.gameMap.base, { x: 0, y: 0 });
 });
 
 test("findMapByAlt1Anchor uses Alt1 template matching and validates the captured map", () => {

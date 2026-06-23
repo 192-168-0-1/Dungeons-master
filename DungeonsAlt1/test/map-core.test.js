@@ -5,6 +5,7 @@ import {
   RoomType,
   SIGNATURES,
   detectGatestones,
+  findMapCandidatesByCorners,
   findMapByCorners,
   mapToImage,
   readGameMap,
@@ -100,6 +101,24 @@ test("boss-room red pixels are not detected as G2", () => {
   const gameMap = readGameMap(target, floor);
   assert.ok(gameMap.typeAt(0, 0) & RoomType.Boss);
   assert.equal(detectGatestones(target, gameMap)[2], undefined);
+});
+
+test("corner calibration can return multiple candidates for scoring", () => {
+  const target = image(700, 500);
+  const floor = FLOOR_SIZES.find((candidate) => candidate.name === "Small");
+  const corner = [108, 96, 75, 255];
+  for (const [x, y] of [[40, 20], [300, 80]]) {
+    setPixel(target, x, y, corner);
+    setPixel(target, x, y + floor.imageHeight - 1, corner);
+    setPixel(target, x + floor.imageWidth - 1, y + floor.imageHeight - 1, corner);
+    setPixel(target, x + floor.imageWidth - 1, y, [122, 52, 44, 255]);
+  }
+
+  const candidates = findMapCandidatesByCorners(target, { limit: 5 });
+  assert.deepEqual(candidates.map(({ x, y }) => ({ x, y })), [
+    { x: 40, y: 20 },
+    { x: 300, y: 80 },
+  ]);
 });
 
 test("shifted boss skulls are excluded from G2 detection", () => {

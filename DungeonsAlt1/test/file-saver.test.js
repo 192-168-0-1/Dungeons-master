@@ -45,9 +45,16 @@ test("writeDataUrlToFolder writes a PNG blob and closes the stream", async () =>
   assert.equal(closed, true);
 });
 
-test("folder picker controls are present in the results UI", () => {
+test("separate map and results folder picker controls are present in the results UI", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
-  for (const id of ["choose-save-folder", "clear-save-folder", "save-folder-status"]) {
+  for (const id of [
+    "choose-map-save-folder",
+    "clear-map-save-folder",
+    "map-save-folder-status",
+    "choose-results-save-folder",
+    "clear-results-save-folder",
+    "results-save-folder-status",
+  ]) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
 });

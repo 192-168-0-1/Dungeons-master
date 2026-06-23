@@ -13,6 +13,45 @@ export const MAP_ANCHOR = Object.freeze({
   width: 15,
 });
 
+export const MAP_SCALE_CANDIDATES = Object.freeze([1, 1.25, 1.5, 1.75, 2]);
+
+export function scaledFloorDimensions(floor, scale = 1) {
+  const value = Number.isFinite(Number(scale)) && Number(scale) > 0 ? Number(scale) : 1;
+  return {
+    width: Math.round(floor.imageWidth * value),
+    height: Math.round(floor.imageHeight * value),
+    scale: value,
+  };
+}
+
+export function normalizeMapCapture(image, floor, scale = 1) {
+  if (!image || !floor) return image;
+  const normalizedScale = Number.isFinite(Number(scale)) && Number(scale) > 0 ? Number(scale) : 1;
+  if (normalizedScale === 1
+    && image.width === floor.imageWidth
+    && image.height === floor.imageHeight) {
+    return image;
+  }
+
+  const data = new Uint8ClampedArray(floor.imageWidth * floor.imageHeight * 4);
+  const xRatio = image.width / floor.imageWidth;
+  const yRatio = image.height / floor.imageHeight;
+  for (let y = 0; y < floor.imageHeight; y += 1) {
+    const sourceY = Math.min(image.height - 1, Math.floor((y + 0.5) * yRatio));
+    for (let x = 0; x < floor.imageWidth; x += 1) {
+      const sourceX = Math.min(image.width - 1, Math.floor((x + 0.5) * xRatio));
+      const source = (sourceY * image.width + sourceX) * 4;
+      const target = (y * floor.imageWidth + x) * 4;
+      data[target] = image.data[source];
+      data[target + 1] = image.data[source + 1];
+      data[target + 2] = image.data[source + 2];
+      data[target + 3] = image.data[source + 3];
+    }
+  }
+  if (typeof ImageData === "function") return new ImageData(data, floor.imageWidth, floor.imageHeight);
+  return { width: floor.imageWidth, height: floor.imageHeight, data };
+}
+
 function parseMatches(value) {
   if (!value) return [];
   if (Array.isArray(value)) return value;
@@ -32,9 +71,17 @@ function withinClient(candidate, floor, clientWidth, clientHeight) {
 }
 
 export function mapCandidateFromAnchor(anchor, floor) {
+  return mapCandidateFromScaledAnchor(anchor, floor, 1);
+}
+
+export function mapCandidateFromScaledAnchor(anchor, floor, scale = 1) {
+  const dimensions = scaledFloorDimensions(floor, scale);
   return {
-    x: Math.round(anchor.x) - floor.imageWidth + MAP_ANCHOR.width,
+    x: Math.round(anchor.x) - dimensions.width + Math.round(MAP_ANCHOR.width * dimensions.scale),
     y: Math.round(anchor.y),
+    scale: dimensions.scale,
+    captureWidth: dimensions.width,
+    captureHeight: dimensions.height,
   };
 }
 
@@ -43,17 +90,20 @@ export function scoreMapCandidate(image, floor) {
   const gameMap = readGameMap(image, floor);
   const readableRooms = gameMap.openedRoomCount + gameMap.mysteryCount;
   const validCorners = isValidMap(image);
-  if (!validCorners && readableRooms < 1) return null;
+  if (readableRooms < 1) return null;
+  if (readableRooms === 1 && !gameMap.base) return null;
+  if (!validCorners && readableRooms < 2 && !gameMap.base) return null;
   return {
     gameMap,
     readableRooms,
     validCorners,
-    score: (validCorners ? 10_000 : 0) + readableRooms * 50 + floor.width * floor.height,
+    score: (validCorners ? 10_000 : 0) + (gameMap.base ? 1_000 : 0) + readableRooms * 50 + floor.width * floor.height,
   };
 }
 
 export function findMapByAlt1Anchor(api, captureRegion, {
   floors = FLOOR_SIZES,
+  scales = MAP_SCALE_CANDIDATES,
   clientWidth = Number(api?.rsWidth) || 0,
   clientHeight = Number(api?.rsHeight) || 0,
 } = {}) {
@@ -84,29 +134,38 @@ export function findMapByAlt1Anchor(api, captureRegion, {
   let best = null;
   for (const anchor of anchors) {
     if (!Number.isFinite(anchor?.x) || !Number.isFinite(anchor?.y)) continue;
-    for (const floor of floors) {
-      const candidate = mapCandidateFromAnchor(anchor, floor);
-      if (!withinClient(candidate, floor, clientWidth, clientHeight)) continue;
-      let image;
-      try {
-        image = captureRegion(candidate.x, candidate.y, floor.imageWidth, floor.imageHeight);
-      } catch {
-        continue;
+    for (const scale of scales) {
+      for (const floor of floors) {
+        const candidate = mapCandidateFromScaledAnchor(anchor, floor, scale);
+        if (!withinClient({
+          x: candidate.x,
+          y: candidate.y,
+        }, { imageWidth: candidate.captureWidth, imageHeight: candidate.captureHeight }, clientWidth, clientHeight)) continue;
+        let image;
+        try {
+          image = captureRegion(candidate.x, candidate.y, candidate.captureWidth, candidate.captureHeight);
+        } catch {
+          continue;
+        }
+        const normalized = normalizeMapCapture(image, floor, candidate.scale);
+        const scored = scoreMapCandidate(normalized, floor);
+        if (!scored) continue;
+        const match = {
+          x: candidate.x,
+          y: candidate.y,
+          floor,
+          scale: candidate.scale,
+          captureWidth: candidate.captureWidth,
+          captureHeight: candidate.captureHeight,
+          method: "anchor",
+          anchor: { x: Math.round(anchor.x), y: Math.round(anchor.y) },
+          readableRooms: scored.readableRooms,
+          validCorners: scored.validCorners,
+          gameMap: scored.gameMap,
+          score: scored.score,
+        };
+        if (!best || match.score > best.score) best = match;
       }
-      const scored = scoreMapCandidate(image, floor);
-      if (!scored) continue;
-      const match = {
-        x: candidate.x,
-        y: candidate.y,
-        floor,
-        method: "anchor",
-        anchor: { x: Math.round(anchor.x), y: Math.round(anchor.y) },
-        readableRooms: scored.readableRooms,
-        validCorners: scored.validCorners,
-        gameMap: scored.gameMap,
-        score: scored.score,
-      };
-      if (!best || match.score > best.score) best = match;
     }
   }
 

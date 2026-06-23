@@ -145,8 +145,9 @@ if ($overlay -notmatch 'overLayFreezeGroup' -or $overlay -notmatch 'overLayRefre
 if ($overlay -notmatch 'overLaySetGroup\(""\)') {
     throw 'Native Alt1 overlay rendering must reset the active group after drawing.'
 }
-if ($app -notmatch 'gatestones:\s*collectGatestoneMarkers' -or $overlay -notmatch 'for \(const marker of gatestones\)') {
-    throw 'Local and team gatestones must be included in the native RuneScape overlay.'
+if ($app -notmatch 'gatestones:\s*elements\.rpmOnly\.checked \? \[\] : collectGatestoneMarkers' -or
+    $overlay -notmatch 'for \(const marker of gatestones\)') {
+    throw 'Native RuneScape overlay must draw gatestones normally and suppress them in RPM-only mode.'
 }
 if (([regex]::Matches($html, 'class="party-slot" data-slot="[1-5]"')).Count -ne 5) {
     throw 'The Dungeoneering party interface must contain exactly five visible slots.'
@@ -224,12 +225,17 @@ if (($app -notmatch 'function installedInAlt1') -or
 if (($html -notmatch 'id="auto-track-results" type="checkbox"') -or
     ($html -notmatch 'id="auto-save-map-png" type="checkbox"') -or
     ($html -notmatch 'id="auto-save-results-png" type="checkbox"') -or
-    ($html -notmatch 'id="choose-save-folder"') -or
-    ($html -notmatch 'id="clear-save-folder"') -or
-    ($html -notmatch 'id="save-folder-status"') -or
+    ($html -notmatch 'id="rpm-only" type="checkbox"') -or
+    ($html -notmatch 'id="choose-map-save-folder"') -or
+    ($html -notmatch 'id="clear-map-save-folder"') -or
+    ($html -notmatch 'id="map-save-folder-status"') -or
+    ($html -notmatch 'id="choose-results-save-folder"') -or
+    ($html -notmatch 'id="clear-results-save-folder"') -or
+    ($html -notmatch 'id="results-save-folder-status"') -or
     ($html -match 'id="auto-track-results"[^>]*checked') -or
     ($html -match 'id="auto-save-map-png"[^>]*checked') -or
-    ($html -match 'id="auto-save-results-png"[^>]*checked')) {
+    ($html -match 'id="auto-save-results-png"[^>]*checked') -or
+    ($html -match 'id="rpm-only"[^>]*checked')) {
     throw 'Dungeon results auto tracking and PNG export options must exist and default off.'
 }
 if (($app -notmatch 'autoCaptureDungeonResults') -or
@@ -243,6 +249,8 @@ if (($app -notmatch 'autoCaptureDungeonResults') -or
     ($fileSaver -notmatch 'showDirectoryPicker') -or
     ($fileSaver -notmatch 'indexedDB') -or
     ($fileSaver -notmatch 'writeDataUrlToFolder') -or
+    ($app -notmatch 'map-folder') -or
+    ($app -notmatch 'results-folder') -or
     ($app -notmatch 'resultsBusy') -or
     ($app -notmatch 'autoResultKeys') -or
     ($resultsCore -notmatch 'nextAutoResultState') -or
@@ -255,14 +263,14 @@ if (($winterface -notmatch 'readWithOffset') -or
     ($app -notmatch 'offset\.x, offset\.y, width, height')) {
     throw 'Winterface reads must expose their offset so the cropped results PNG matches the detected interface.'
 }
-if (($app -notmatch 'team-sync\.js\?v=20260622-18') -or
-    ($app -notmatch 'party-core\.js\?v=20260622-18') -or
-    ($app -notmatch 'results-core\.js\?v=20260622-18') -or
-    ($app -notmatch 'party-menu\.js\?v=20260622-18') -or
-    ($app -notmatch 'team-gates\.js\?v=20260622-18') -or
-    ($app -notmatch 'file-saver\.js\?v=20260622-18') -or
-    ($teamSync -notmatch 'party-core\.js\?v=20260622-18') -or
-    ($teamGates -notmatch 'party-core\.js\?v=20260622-18')) {
+if (($app -notmatch 'team-sync\.js\?v=20260623-1') -or
+    ($app -notmatch 'party-core\.js\?v=20260623-1') -or
+    ($app -notmatch 'results-core\.js\?v=20260623-1') -or
+    ($app -notmatch 'party-menu\.js\?v=20260623-1') -or
+    ($app -notmatch 'team-gates\.js\?v=20260623-1') -or
+    ($app -notmatch 'file-saver\.js\?v=20260623-1') -or
+    ($teamSync -notmatch 'party-core\.js\?v=20260623-1') -or
+    ($teamGates -notmatch 'party-core\.js\?v=20260623-1')) {
     throw 'Changed team-sync modules must be cache-busted for existing Alt1 installations.'
 }
 if (($app -notmatch 'buildVisibleRemoteGatestones') -or
@@ -319,11 +327,22 @@ if ($runtimeSource -match '\.replaceAll\(' -or
 }
 if (($app -notmatch 'findMapByAlt1Anchor') -or
     ($app -notmatch 'scoreMapCandidate') -or
+    ($app -notmatch 'normalizeMapCapture') -or
+    ($app -notmatch 'MAP_SCALE_CANDIDATES') -or
+    ($app -notmatch 'findMapCandidatesByCorners') -or
     ($app -notmatch 'function findMapInRuneScapeClient') -or
     ($mapLocator -notmatch 'MAP_ANCHOR') -or
+    ($mapLocator -notmatch 'MAP_SCALE_CANDIDATES') -or
+    ($mapLocator -notmatch 'normalizeMapCapture') -or
+    ($mapCore -notmatch 'findMapCandidatesByCorners') -or
+    ($mapCore -notmatch 'scales = \[1\]') -or
     ($mapLocator -notmatch 'bindFindSubImg') -or
     ($mapLocator -notmatch 'readableRooms')) {
-    throw 'Anchor-first Alt1 map location with readable-room validation is missing.'
+    throw 'Scale-aware anchor-first Alt1 map location with readable-room validation is missing.'
+}
+if (($mapLocator -notmatch 'readableRooms === 1 && !gameMap\.base') -or
+    ($app -notmatch 'singleBaseRoom')) {
+    throw 'Map detection must reject one-room non-base false positives and only reset floors on a single base room.'
 }
 if (-not (Test-Path (Join-Path $appRoot 'THIRD_PARTY_NOTES.md')) -or
     ((Get-Content (Join-Path $appRoot 'THIRD_PARTY_NOTES.md') -Raw) -notmatch 'Sleepy-meh-alt-1/dg-map')) {

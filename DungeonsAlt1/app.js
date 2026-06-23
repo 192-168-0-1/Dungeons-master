@@ -3,37 +3,44 @@ import {
   ROOM_SIZE,
   RoomType,
   detectGatestones,
-  findMapByCorners,
+  findMapCandidatesByCorners,
   gridOffset,
   imageToMap,
   isOpened,
   mapToImage,
   toChess,
 } from "./src/map-core.js";
-import { findMapByAlt1Anchor, scoreMapCandidate } from "./src/alt1-map-locator.js";
+import {
+  MAP_SCALE_CANDIDATES,
+  findMapByAlt1Anchor,
+  normalizeMapCapture,
+  scaledFloorDimensions,
+  scoreMapCandidate,
+} from "./src/alt1-map-locator.js";
 import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js";
 import {
   buildMapOverlayCommands,
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260622-18";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260622-18";
+  formatRpmCounter,
+} from "./src/alt1-overlay.js?v=20260623-1";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260623-1";
 import {
   PARTY_COLORS,
   mergeObservedPartyCache,
   observedPartySlot,
   partyColor,
   reconcileObservedParty,
-} from "./src/party-core.js?v=20260622-18";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260622-18";
+} from "./src/party-core.js?v=20260623-1";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260623-1";
 import {
   RESULT_COLUMNS,
   nextAutoResultState,
   plannedResultExports,
   safeFilePart,
   safeTimestampForFilename,
-} from "./src/results-core.js?v=20260622-18";
+} from "./src/results-core.js?v=20260623-1";
 import {
   chooseSaveFolder,
   clearStoredSaveFolder,
@@ -41,9 +48,9 @@ import {
   querySaveFolderPermission,
   supportsFolderSaving,
   writeDataUrlToFolder,
-} from "./src/file-saver.js?v=20260622-18";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260622-18";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260622-18";
+} from "./src/file-saver.js?v=20260623-1";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260623-1";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260623-1";
 import { WinterfaceReader } from "./src/winterface.js";
 
 const SCAN_INTERVAL = 600;
@@ -58,6 +65,7 @@ const elements = {
   titlebar: document.querySelector(".titlebar"),
   status: document.querySelector("#status"),
   stats: document.querySelector("#stats"),
+  mapShell: document.querySelector(".map-shell"),
   canvas: document.querySelector("#map"),
   calibrate: document.querySelector("#calibrate"),
   pause: document.querySelector("#pause"),
@@ -66,15 +74,19 @@ const elements = {
   captureResults: document.querySelector("#capture-results"),
   showCapture: document.querySelector("#show-capture"),
   showGrid: document.querySelector("#show-grid"),
+  rpmOnly: document.querySelector("#rpm-only"),
   gameOverlay: document.querySelector("#game-overlay"),
   testOverlay: document.querySelector("#test-overlay"),
   overlayStatus: document.querySelector("#overlay-status"),
   autoTrackResults: document.querySelector("#auto-track-results"),
   autoSaveMapPng: document.querySelector("#auto-save-map-png"),
   autoSaveResultsPng: document.querySelector("#auto-save-results-png"),
-  chooseSaveFolder: document.querySelector("#choose-save-folder"),
-  clearSaveFolder: document.querySelector("#clear-save-folder"),
-  saveFolderStatus: document.querySelector("#save-folder-status"),
+  chooseMapSaveFolder: document.querySelector("#choose-map-save-folder"),
+  clearMapSaveFolder: document.querySelector("#clear-map-save-folder"),
+  mapSaveFolderStatus: document.querySelector("#map-save-folder-status"),
+  chooseResultsSaveFolder: document.querySelector("#choose-results-save-folder"),
+  clearResultsSaveFolder: document.querySelector("#clear-results-save-folder"),
+  resultsSaveFolderStatus: document.querySelector("#results-save-folder-status"),
   selection: document.querySelector("#selection"),
   annotation: document.querySelector("#annotation"),
   applyAnnotation: document.querySelector("#apply-annotation"),
@@ -122,12 +134,20 @@ const state = {
   autoResultState: { visible: false, key: "" },
   autoResultKeys: new Set(),
   lastAutoResultScan: 0,
-  saveFolder: {
+  saveFolders: {
     supported: false,
-    handle: null,
-    name: "",
-    permission: "unknown",
-    loading: true,
+    map: {
+      handle: null,
+      name: "",
+      permission: "unknown",
+      loading: true,
+    },
+    results: {
+      handle: null,
+      name: "",
+      permission: "unknown",
+      loading: true,
+    },
   },
   observedParty: [],
   partyPendingChanges: new Map(),
@@ -143,7 +163,18 @@ function loadCalibration() {
   try {
     const saved = JSON.parse(storageGet(`${STORAGE_PREFIX}:calibration`));
     const floor = FLOOR_SIZES.find((candidate) => candidate.name === saved?.floor);
-    if (floor && Number.isInteger(saved.x) && Number.isInteger(saved.y)) return { x: saved.x, y: saved.y, floor };
+    const scale = Number(saved?.scale) > 0 ? Number(saved.scale) : 1;
+    if (floor && Number.isInteger(saved.x) && Number.isInteger(saved.y)) {
+      const dimensions = scaledFloorDimensions(floor, scale);
+      return {
+        x: saved.x,
+        y: saved.y,
+        floor,
+        scale: dimensions.scale,
+        captureWidth: dimensions.width,
+        captureHeight: dimensions.height,
+      };
+    }
   } catch {
     // A corrupt development setting is safe to ignore.
   }
@@ -156,6 +187,7 @@ function saveCalibration() {
     x: state.calibration.x,
     y: state.calibration.y,
     floor: state.calibration.floor.name,
+    scale: state.calibration.scale || 1,
   }));
 }
 
@@ -253,8 +285,33 @@ function findMapInRuneScapeClient() {
   const anchored = findMapByAlt1Anchor(window.alt1, captureRegion);
   if (anchored) return anchored;
   const fullClient = captureFullRuneScape();
-  const cornerMatch = findMapByCorners(fullClient);
-  return cornerMatch ? { ...cornerMatch, method: "corners" } : null;
+  const cornerMatches = findMapCandidatesByCorners(fullClient, { scales: MAP_SCALE_CANDIDATES });
+  let best = null;
+  for (const cornerMatch of cornerMatches) {
+    const dimensions = scaledFloorDimensions(cornerMatch.floor, cornerMatch.scale);
+    let raw;
+    try {
+      raw = captureRegion(cornerMatch.x, cornerMatch.y, dimensions.width, dimensions.height);
+    } catch {
+      continue;
+    }
+    const image = normalizeMapCapture(raw, cornerMatch.floor, dimensions.scale);
+    const scored = scoreMapCandidate(image, cornerMatch.floor);
+    if (!scored) continue;
+    const match = {
+      ...cornerMatch,
+      scale: dimensions.scale,
+      captureWidth: dimensions.width,
+      captureHeight: dimensions.height,
+      method: "corners",
+      readableRooms: scored.readableRooms,
+      validCorners: scored.validCorners,
+      gameMap: scored.gameMap,
+      score: scored.score,
+    };
+    if (!best || match.score > best.score) best = match;
+  }
+  return best;
 }
 
 async function calibrate({ silent = false } = {}) {
@@ -276,7 +333,8 @@ async function calibrate({ silent = false } = {}) {
       state.invalidCaptures = 0;
       saveCalibration();
       found = true;
-      setStatus(`Calibrated by ${match.method || "corners"}: ${match.floor.name} at ${match.x},${match.y}`, "ok");
+      const scaleText = match.scale && match.scale !== 1 ? ` @${Math.round(match.scale * 100)}%` : "";
+      setStatus(`Calibrated by ${match.method || "corners"}: ${match.floor.name}${scaleText} at ${match.x},${match.y}`, "ok");
     }
   } catch (error) {
     setStatus(error.message || String(error), silent ? "warn" : "error");
@@ -305,7 +363,9 @@ async function updateMap() {
   try {
     assertAlt1Ready();
     let { x, y, floor } = state.calibration;
-    let image = captureRegion(x, y, floor.imageWidth, floor.imageHeight);
+    let dimensions = scaledFloorDimensions(floor, state.calibration.scale || 1);
+    let rawImage = captureRegion(x, y, dimensions.width, dimensions.height);
+    let image = normalizeMapCapture(rawImage, floor, dimensions.scale);
     let scoredMap = scoreMapCandidate(image, floor);
     if (!scoredMap) {
       // Reacquire a moved map immediately so native labels, gatestones and the
@@ -314,8 +374,10 @@ async function updateMap() {
       if (relocated) {
         state.calibration = relocated;
         ({ x, y, floor } = relocated);
+        dimensions = scaledFloorDimensions(floor, relocated.scale || 1);
         saveCalibration();
-        image = captureRegion(x, y, floor.imageWidth, floor.imageHeight);
+        rawImage = captureRegion(x, y, dimensions.width, dimensions.height);
+        image = normalizeMapCapture(rawImage, floor, dimensions.scale);
         scoredMap = scoreMapCandidate(image, floor);
       }
     }
@@ -328,9 +390,10 @@ async function updateMap() {
 
     state.invalidCaptures = 0;
     const gameMap = scoredMap.gameMap;
+    const singleBaseRoom = gameMap.openedRoomCount === 1 && Boolean(gameMap.base);
     const newFloor = !state.floorStart
       || (state.lastBase && gameMap.base && !samePoint(state.lastBase, gameMap.base))
-      || (state.lastRoomCount > 1 && gameMap.openedRoomCount === 1);
+      || (state.lastRoomCount > 1 && singleBaseRoom);
     if (newFloor) resetFloor();
 
     state.image = image;
@@ -385,7 +448,11 @@ function updateStats() {
   const rooms = state.gameMap.openedRoomCount;
   const possible = rooms + state.gameMap.mysteryCount;
   const minutes = state.floorStart ? Math.max((Date.now() - state.floorStart) / 60_000, 1 / 60) : 0;
-  const rpm = minutes ? Math.max(0, (rooms - 0.8) / minutes).toFixed(1) : "0.0";
+  if (elements.rpmOnly.checked) {
+    elements.stats.textContent = formatRpmCounter({ rooms, minutes });
+    return;
+  }
+  const rpm = formatRpmCounter({ rooms, minutes }).replace(" rpm", "");
   const elapsedSeconds = state.floorStart ? Math.max(0, Math.floor((Date.now() - state.floorStart) / 1000)) : 0;
   const elapsed = `${String(Math.floor(elapsedSeconds / 60)).padStart(2, "0")}:${String(elapsedSeconds % 60).padStart(2, "0")}`;
   elements.stats.textContent = `${rooms} rooms (${possible}) · ${rpm} rpm · ${state.gameMap.deadEndCount} dead ends · ${elapsed}`;
@@ -394,6 +461,12 @@ function updateStats() {
 function currentOverlayStats() {
   if (!state.gameMap) return "";
   const minutes = state.floorStart ? Math.max((Date.now() - state.floorStart) / 60_000, 1 / 60) : 0;
+  if (elements.rpmOnly.checked) {
+    return formatRpmCounter({
+      rooms: state.gameMap.openedRoomCount,
+      minutes,
+    });
+  }
   return formatMapStats({
     rooms: state.gameMap.openedRoomCount,
     mystery: state.gameMap.mysteryCount,
@@ -404,6 +477,7 @@ function currentOverlayStats() {
 
 function render() {
   const { image, gameMap } = state;
+  elements.mapShell.hidden = elements.rpmOnly.checked;
   if (!image || !gameMap) {
     drawEmptyState();
     updateStats();
@@ -648,13 +722,13 @@ function renderGameOverlay() {
     mapX: state.calibration.x,
     mapY: state.calibration.y,
     floor: state.gameMap.floor,
-    annotations: [...state.annotations].map(([pointKey, annotation]) => ({
+    annotations: elements.rpmOnly.checked ? [] : [...state.annotations].map(([pointKey, annotation]) => ({
       point: pointFromKey(pointKey),
       text: annotation.text,
       color: ownerColor(annotation.ownerId, annotation.slot, null),
     })),
-    manualCritical: [...state.manualCritical].map(pointFromKey),
-    gatestones: collectGatestoneMarkers(state.gameMap.floor),
+    manualCritical: elements.rpmOnly.checked ? [] : [...state.manualCritical].map(pointFromKey),
+    gatestones: elements.rpmOnly.checked ? [] : collectGatestoneMarkers(state.gameMap.floor),
     stats: currentOverlayStats(),
     duration: OVERLAY_DURATION,
   });
@@ -729,106 +803,152 @@ function canvasPoint(event) {
   };
 }
 
-function updateSaveFolderStatus() {
-  elements.chooseSaveFolder.disabled = state.saveFolder.loading || !state.saveFolder.supported;
-  elements.clearSaveFolder.disabled = state.saveFolder.loading || !state.saveFolder.handle;
-  if (state.saveFolder.loading) {
-    elements.saveFolderStatus.textContent = "Checking save folder...";
-    return;
-  }
-  if (!state.saveFolder.supported) {
-    elements.saveFolderStatus.textContent = "Folder saving is not supported in this Alt1 browser";
-    return;
-  }
-  if (state.saveFolder.handle && state.saveFolder.permission === "granted") {
-    elements.saveFolderStatus.textContent = `Saving PNGs to: ${state.saveFolder.name || "selected folder"}`;
-    return;
-  }
-  if (state.saveFolder.handle) {
-    elements.saveFolderStatus.textContent = "Save folder permission needed; choose the folder again";
-    return;
-  }
-  elements.saveFolderStatus.textContent = "Choose a save folder before PNG auto-save";
+const SAVE_FOLDER_TARGETS = Object.freeze({
+  map: Object.freeze({
+    key: "map-folder",
+    label: "map",
+    choose: "chooseMapSaveFolder",
+    clear: "clearMapSaveFolder",
+    status: "mapSaveFolderStatus",
+  }),
+  results: Object.freeze({
+    key: "results-folder",
+    label: "results",
+    choose: "chooseResultsSaveFolder",
+    clear: "clearResultsSaveFolder",
+    status: "resultsSaveFolderStatus",
+  }),
+});
+
+function saveFolderTarget(kind) {
+  return SAVE_FOLDER_TARGETS[kind] || SAVE_FOLDER_TARGETS.map;
 }
 
-async function refreshStoredSaveFolder() {
-  state.saveFolder.loading = true;
-  state.saveFolder.supported = supportsFolderSaving(window);
-  updateSaveFolderStatus();
-  if (!state.saveFolder.supported) {
-    state.saveFolder.loading = false;
-    updateSaveFolderStatus();
+function saveFolderState(kind) {
+  return state.saveFolders[kind] || state.saveFolders.map;
+}
+
+function updateSaveFolderStatus(kind) {
+  const target = saveFolderTarget(kind);
+  const folder = saveFolderState(kind);
+  elements[target.choose].disabled = folder.loading || !state.saveFolders.supported;
+  elements[target.clear].disabled = folder.loading || !folder.handle;
+  if (folder.loading) {
+    elements[target.status].textContent = `Checking ${target.label} save folder...`;
+    return;
+  }
+  if (!state.saveFolders.supported) {
+    elements[target.status].textContent = "Folder saving is not supported in this Alt1 browser";
+    return;
+  }
+  if (folder.handle && folder.permission === "granted") {
+    elements[target.status].textContent = `Saving ${target.label} PNGs to: ${folder.name || "selected folder"}`;
+    return;
+  }
+  if (folder.handle) {
+    elements[target.status].textContent = `${target.label} folder permission needed; choose the folder again`;
+    return;
+  }
+  elements[target.status].textContent = `Choose a ${target.label} folder before ${target.label} PNG auto-save`;
+}
+
+function updateAllSaveFolderStatuses() {
+  updateSaveFolderStatus("map");
+  updateSaveFolderStatus("results");
+}
+
+async function refreshStoredSaveFolder(kind) {
+  const target = saveFolderTarget(kind);
+  const folder = saveFolderState(kind);
+  folder.loading = true;
+  state.saveFolders.supported = supportsFolderSaving(window);
+  updateSaveFolderStatus(kind);
+  if (!state.saveFolders.supported) {
+    folder.loading = false;
+    updateSaveFolderStatus(kind);
     return;
   }
   try {
-    const handle = await loadStoredSaveFolder(window);
-    state.saveFolder.handle = handle;
-    state.saveFolder.name = handle?.name || "";
-    state.saveFolder.permission = handle ? await querySaveFolderPermission(handle) : "unknown";
+    const handle = await loadStoredSaveFolder(window, target.key);
+    folder.handle = handle;
+    folder.name = handle?.name || "";
+    folder.permission = handle ? await querySaveFolderPermission(handle) : "unknown";
   } catch {
-    state.saveFolder.handle = null;
-    state.saveFolder.name = "";
-    state.saveFolder.permission = "unknown";
+    folder.handle = null;
+    folder.name = "";
+    folder.permission = "unknown";
   } finally {
-    state.saveFolder.loading = false;
-    updateSaveFolderStatus();
+    folder.loading = false;
+    updateSaveFolderStatus(kind);
   }
 }
 
-async function selectSaveFolder() {
-  if (!state.saveFolder.supported) {
+function refreshStoredSaveFolders() {
+  state.saveFolders.supported = supportsFolderSaving(window);
+  refreshStoredSaveFolder("map");
+  refreshStoredSaveFolder("results");
+}
+
+async function selectSaveFolder(kind) {
+  const target = saveFolderTarget(kind);
+  const folder = saveFolderState(kind);
+  if (!state.saveFolders.supported) {
     setStatus("Folder saving is not supported in this Alt1 browser", "error");
-    updateSaveFolderStatus();
+    updateSaveFolderStatus(kind);
     return;
   }
-  state.saveFolder.loading = true;
-  updateSaveFolderStatus();
+  folder.loading = true;
+  updateSaveFolderStatus(kind);
   try {
-    const handle = await chooseSaveFolder(window);
-    state.saveFolder.handle = handle;
-    state.saveFolder.name = handle?.name || "";
-    state.saveFolder.permission = handle ? await querySaveFolderPermission(handle) : "unknown";
-    if (handle) setStatus(`Save folder selected: ${state.saveFolder.name || "selected folder"}`, "ok");
-    else setStatus("Save folder permission was not granted", "error");
+    const handle = await chooseSaveFolder(window, target.key);
+    folder.handle = handle;
+    folder.name = handle?.name || "";
+    folder.permission = handle ? await querySaveFolderPermission(handle) : "unknown";
+    if (handle) setStatus(`${target.label} save folder selected: ${folder.name || "selected folder"}`, "ok");
+    else setStatus(`${target.label} save folder permission was not granted`, "error");
   } catch (error) {
     const cancelled = error?.name === "AbortError";
-    setStatus(cancelled ? "Save folder unchanged" : `Could not choose save folder: ${error.message || error}`, cancelled ? "warn" : "error");
+    setStatus(cancelled ? `${target.label} save folder unchanged` : `Could not choose ${target.label} folder: ${error.message || error}`, cancelled ? "warn" : "error");
   } finally {
-    state.saveFolder.loading = false;
-    updateSaveFolderStatus();
+    folder.loading = false;
+    updateSaveFolderStatus(kind);
   }
 }
 
-async function clearSelectedSaveFolder() {
-  await clearStoredSaveFolder(window);
-  state.saveFolder.handle = null;
-  state.saveFolder.name = "";
-  state.saveFolder.permission = "unknown";
-  updateSaveFolderStatus();
-  setStatus("Save folder cleared", "warn");
+async function clearSelectedSaveFolder(kind) {
+  const target = saveFolderTarget(kind);
+  const folder = saveFolderState(kind);
+  await clearStoredSaveFolder(window, target.key);
+  folder.handle = null;
+  folder.name = "";
+  folder.permission = "unknown";
+  updateSaveFolderStatus(kind);
+  setStatus(`${target.label} save folder cleared`, "warn");
 }
 
-async function writePngToSaveFolder(filename, dataUrl, label, options = {}) {
+async function writePngToSaveFolder(kind, filename, dataUrl, label, options = {}) {
+  const target = saveFolderTarget(kind);
+  const folder = saveFolderState(kind);
   const quiet = Boolean(options?.quiet);
-  if (!state.saveFolder.supported) {
+  if (!state.saveFolders.supported) {
     if (!quiet) setStatus("Folder saving is not supported in this Alt1 browser", "error");
     return { saved: false, reason: "unsupported" };
   }
-  if (!state.saveFolder.handle) {
-    if (!quiet) setStatus("Choose a save folder before saving PNGs", "warn");
-    updateSaveFolderStatus();
+  if (!folder.handle) {
+    if (!quiet) setStatus(`Choose a ${target.label} folder before saving ${label}`, "warn");
+    updateSaveFolderStatus(kind);
     return { saved: false, reason: "no-folder" };
   }
-  const permission = await querySaveFolderPermission(state.saveFolder.handle);
-  state.saveFolder.permission = permission;
-  updateSaveFolderStatus();
+  const permission = await querySaveFolderPermission(folder.handle);
+  folder.permission = permission;
+  updateSaveFolderStatus(kind);
   if (permission !== "granted") {
-    if (!quiet) setStatus("Save folder permission needed; choose the folder again", "warn");
+    if (!quiet) setStatus(`${target.label} folder permission needed; choose the folder again`, "warn");
     return { saved: false, reason: "permission" };
   }
   try {
-    await writeDataUrlToFolder(state.saveFolder.handle, filename, dataUrl);
-    if (!quiet) setStatus(`${label} saved to ${state.saveFolder.name || "selected folder"}`, "ok");
+    await writeDataUrlToFolder(folder.handle, filename, dataUrl);
+    if (!quiet) setStatus(`${label} saved to ${folder.name || "selected folder"}`, "ok");
     return { saved: true, filename };
   } catch (error) {
     if (!quiet) setStatus(`Could not save ${label}: ${error.message || error}`, "error");
@@ -845,6 +965,7 @@ async function saveMap(options = {}) {
   if (!state.image) return { saved: false, reason: "no-map" };
   const date = options?.date instanceof Date ? options.date : new Date();
   return writePngToSaveFolder(
+    "map",
     mapPngFilename(date),
     elements.canvas.toDataURL("image/png"),
     "Map PNG",
@@ -882,6 +1003,7 @@ async function saveResultsInterfacePng(capture, date = new Date(), options = {})
   const cropped = cropImageData(image, offset.x, offset.y, width, height);
   if (!cropped) return { saved: false, reason: "no-results-crop" };
   return writePngToSaveFolder(
+    "results",
     resultsPngFilename(result, date),
     imageDataToDataUrl(cropped),
     "Results interface PNG",
@@ -1347,8 +1469,10 @@ function bindEvents() {
   elements.clear.addEventListener("click", () => clearAnnotations(true));
   elements.captureResults.addEventListener("click", captureDungeonResults);
   elements.copyResults.addEventListener("click", copyResults);
-  elements.chooseSaveFolder.addEventListener("click", selectSaveFolder);
-  elements.clearSaveFolder.addEventListener("click", clearSelectedSaveFolder);
+  elements.chooseMapSaveFolder.addEventListener("click", () => selectSaveFolder("map"));
+  elements.clearMapSaveFolder.addEventListener("click", () => clearSelectedSaveFolder("map"));
+  elements.chooseResultsSaveFolder.addEventListener("click", () => selectSaveFolder("results"));
+  elements.clearResultsSaveFolder.addEventListener("click", () => clearSelectedSaveFolder("results"));
   elements.autoTrackResults.addEventListener("change", () => {
     if (!elements.autoTrackResults.checked) {
       state.autoResultState = nextAutoResultState(state.autoResultState, null);
@@ -1356,6 +1480,7 @@ function bindEvents() {
   });
   elements.showCapture.addEventListener("change", render);
   elements.showGrid.addEventListener("change", render);
+  elements.rpmOnly.addEventListener("change", render);
   elements.gameOverlay.addEventListener("change", renderGameOverlay);
   elements.testOverlay.addEventListener("click", testGameOverlay);
   window.addEventListener("beforeunload", () => {
@@ -1552,8 +1677,8 @@ async function scanOnce() {
 
 function initialize() {
   bindEvents();
-  updateSaveFolderStatus();
-  refreshStoredSaveFolder();
+  updateAllSaveFolderStatuses();
+  refreshStoredSaveFolders();
   renderParty();
   drawEmptyState();
   updateStats();

@@ -137,26 +137,40 @@ function isMapTopRightAt(image, x, y) {
   return dr * dr + dg * dg + db * db <= MAP_TOP_RIGHT_DISTANCE;
 }
 
-export function findMapByCorners(image) {
-  if (!image) return null;
+export function findMapCandidatesByCorners(image, { scales = [1], limit = 50 } = {}) {
+  if (!image) return [];
+  const scaleCandidates = [...scales]
+    .map((scale) => Number(scale))
+    .filter((scale) => Number.isFinite(scale) && scale > 0)
+    .sort((left, right) => left - right);
+  const candidates = [];
 
   for (let y = 0; y < image.height; y += 1) {
     for (let rightX = 0; rightX < image.width; rightX += 1) {
       if (!isMapTopRightAt(image, rightX, y)) continue;
-      for (const floor of FLOOR_SIZES) {
-        const x = rightX - floor.imageWidth + 1;
-        const bottomY = y + floor.imageHeight - 1;
-        if (x < 0 || bottomY >= image.height) continue;
-        if (isMapCornerAt(image, x, y)
-          && isMapCornerAt(image, x, bottomY)
-          && isMapCornerAt(image, rightX, bottomY)) {
-          return { x, y, floor };
+      for (const scale of scaleCandidates) {
+        for (const floor of FLOOR_SIZES) {
+          const captureWidth = Math.round(floor.imageWidth * scale);
+          const captureHeight = Math.round(floor.imageHeight * scale);
+          const x = rightX - captureWidth + 1;
+          const bottomY = y + captureHeight - 1;
+          if (x < 0 || bottomY >= image.height) continue;
+          if (isMapCornerAt(image, x, y)
+            && isMapCornerAt(image, x, bottomY)
+            && isMapCornerAt(image, rightX, bottomY)) {
+            candidates.push({ x, y, floor, scale, captureWidth, captureHeight });
+            if (candidates.length >= limit) return candidates;
+          }
         }
       }
     }
   }
 
-  return null;
+  return candidates;
+}
+
+export function findMapByCorners(image, options = {}) {
+  return findMapCandidatesByCorners(image, { ...options, limit: 1 })[0] ?? null;
 }
 
 export function gridOffset(floor) {
