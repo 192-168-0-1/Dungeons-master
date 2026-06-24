@@ -45,6 +45,13 @@ function paintReadableRoom(target, floor, point = { x: 0, y: 0 }) {
   setPixel(target, origin.x + 19, origin.y + 18, [150, 145, 105, 255]);
 }
 
+function paintOpenedRoom(target, floor, point = { x: 0, y: 0 }, { base = false } = {}) {
+  const [signature] = [...SIGNATURES.entries()].find(([, type]) => type === RoomType.E);
+  const origin = mapToImage(point, floor);
+  paintSignature(target, origin, signature);
+  if (base) setPixel(target, origin.x + 19, origin.y + 18, [150, 145, 105, 255]);
+}
+
 function scaleImageNearest(source, scale) {
   const width = Math.round(source.width * scale);
   const height = Math.round(source.height * scale);
@@ -181,6 +188,46 @@ test("EXE-style scaled corner locator uses the top-right run edge at 150 percent
   assert.equal(match.scale, 1.5);
   assert.equal(match.readableRooms, 1);
   assert.deepEqual(calls[0], [mapX, mapY, dimensions.width, dimensions.height]);
+});
+
+test("scaled corner locator scores all candidates and ignores an earlier small false lock", () => {
+  const small = FLOOR_SIZES.find((candidate) => candidate.name === "Small");
+  const large = FLOOR_SIZES.find((candidate) => candidate.name === "Large");
+  const fullClient = image(900, 700);
+  const smallX = 40;
+  const smallY = 20;
+  const largeX = 120;
+  const largeY = 220;
+  const corner = [108, 96, 75, 255];
+
+  for (const [x, y, floor] of [[smallX, smallY, small], [largeX, largeY, large]]) {
+    setPixel(fullClient, x, y, corner);
+    setPixel(fullClient, x, y + floor.imageHeight - 1, corner);
+    setPixel(fullClient, x + floor.imageWidth - 1, y + floor.imageHeight - 1, corner);
+    setPixel(fullClient, x + floor.imageWidth - 1, y, [122, 52, 44, 255]);
+  }
+
+  const falseLock = image(small.imageWidth, small.imageHeight);
+  paintValidMapCorners(falseLock);
+  paintOpenedRoom(falseLock, small, { x: 0, y: 0 }, { base: true });
+
+  const realMap = image(large.imageWidth, large.imageHeight);
+  paintValidMapCorners(realMap);
+  paintOpenedRoom(realMap, large, { x: 0, y: 0 }, { base: true });
+  paintOpenedRoom(realMap, large, { x: 1, y: 0 });
+  paintOpenedRoom(realMap, large, { x: 2, y: 0 });
+  paintOpenedRoom(realMap, large, { x: 3, y: 0 });
+
+  const match = findMapByScaledCorners(fullClient, (x, y, width, height) => {
+    if (x === smallX && y === smallY && width === small.imageWidth && height === small.imageHeight) return falseLock;
+    if (x === largeX && y === largeY && width === large.imageWidth && height === large.imageHeight) return realMap;
+    return image(width, height);
+  }, { scales: [1], floors: [small, large], limit: 20 });
+
+  assert.equal(match.x, largeX);
+  assert.equal(match.y, largeY);
+  assert.equal(match.floor.name, "Large");
+  assert.equal(match.readableRooms, 4);
 });
 
 test("findMapByAlt1Anchor uses Alt1 template matching and validates the captured map", () => {

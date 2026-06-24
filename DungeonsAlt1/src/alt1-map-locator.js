@@ -4,7 +4,7 @@ import {
   isValidInGameMapFrame,
   isValidMap,
   readGameMap,
-} from "./map-core.js?v=20260624-4";
+} from "./map-core.js?v=20260624-5";
 
 // Anchor-based map location adapted from Sleepy-meh-alt-1/dg-map with
 // permission relayed by this project's maintainer. The anchor is the fixed
@@ -128,6 +128,7 @@ export function findMapByScaledCorners(fullClient, captureRegion, {
 } = {}) {
   if (!fullClient || typeof captureRegion !== "function") return null;
   const candidates = findMapCandidatesByCorners(fullClient, { floors, scales, limit });
+  let best = null;
   for (const candidate of candidates) {
     let image;
     try {
@@ -138,7 +139,7 @@ export function findMapByScaledCorners(fullClient, captureRegion, {
     const normalized = normalizeMapCapture(image, candidate.floor, candidate.scale);
     const scored = scoreMapCandidate(normalized, candidate.floor);
     if (!scored) continue;
-    return {
+    const match = {
       x: candidate.x,
       y: candidate.y,
       floor: candidate.floor,
@@ -151,8 +152,9 @@ export function findMapByScaledCorners(fullClient, captureRegion, {
       gameMap: scored.gameMap,
       score: scored.score,
     };
+    if (!best || match.score > best.score) best = match;
   }
-  return null;
+  return best;
 }
 
 export function findMapByAlt1Anchor(api, captureRegion, {

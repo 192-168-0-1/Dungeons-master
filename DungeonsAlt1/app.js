@@ -8,7 +8,7 @@ import {
   isOpened,
   mapToImage,
   toChess,
-} from "./src/map-core.js?v=20260624-4";
+} from "./src/map-core.js?v=20260624-5";
 import {
   MAP_SCALE_CANDIDATES,
   findMapByAlt1Anchor,
@@ -16,14 +16,14 @@ import {
   normalizeMapCapture,
   scaledFloorDimensions,
   scoreMapCandidate,
-} from "./src/alt1-map-locator.js?v=20260624-4";
+} from "./src/alt1-map-locator.js?v=20260624-5";
 import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js";
 import {
   buildMapOverlayCommands,
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260624-4";
+} from "./src/alt1-overlay.js?v=20260624-5";
 import {
   elapsedFloorMinutes,
   elapsedFloorSeconds,
@@ -31,16 +31,16 @@ import {
   floorStartForDetectedMap,
   formatElapsedClock,
   rpmValue,
-} from "./src/rpm-state.js?v=20260624-4";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260624-4";
+} from "./src/rpm-state.js?v=20260624-5";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260624-5";
 import {
   PARTY_COLORS,
   mergeObservedPartyCache,
   observedPartySlot,
   partyColor,
   reconcileObservedParty,
-} from "./src/party-core.js?v=20260624-4";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260624-4";
+} from "./src/party-core.js?v=20260624-5";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260624-5";
 import {
   RESULT_COLUMNS,
   RESULT_BATCH_MODES,
@@ -52,7 +52,7 @@ import {
   normalizeResultBatchTarget,
   safeFilePart,
   safeTimestampForFilename,
-} from "./src/results-core.js?v=20260624-4";
+} from "./src/results-core.js?v=20260624-5";
 import {
   chooseSaveFolder,
   clearStoredSaveFolder,
@@ -60,9 +60,9 @@ import {
   querySaveFolderPermission,
   supportsFolderSaving,
   writeDataUrlToFolder,
-} from "./src/file-saver.js?v=20260624-4";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260624-4";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260624-4";
+} from "./src/file-saver.js?v=20260624-5";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260624-5";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260624-5";
 import { WinterfaceReader } from "./src/winterface.js";
 
 const SCAN_INTERVAL = 600;
