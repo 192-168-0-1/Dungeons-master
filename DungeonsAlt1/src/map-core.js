@@ -119,6 +119,13 @@ export function isValidMap(image) {
     && isMapTopRightColor(getPixel(image, image.width - 1, 0));
 }
 
+export function isValidInGameMapFrame(image) {
+  return Boolean(image)
+    && isMapCornerColor(getPixel(image, 0, 0))
+    && isMapCornerColor(getPixel(image, 0, image.height - 1))
+    && isMapCornerColor(getPixel(image, image.width - 1, image.height - 1));
+}
+
 function isMapCornerAt(image, x, y) {
   const index = indexOf(image, x, y);
   return image.data[index] >= MAP_CORNER_MIN[0] - MAP_CORNER_TOLERANCE

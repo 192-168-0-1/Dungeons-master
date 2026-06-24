@@ -73,12 +73,29 @@ test("mapCandidateFromAnchor converts the top-right anchor to client-relative ma
   assert.equal(candidate.captureWidth, floor.imageWidth);
 });
 
-test("scoreMapCandidate accepts a readable map even when corner colors are unavailable", () => {
+function paintExeMapFrame(target) {
+  const corner = [108, 96, 75, 255];
+  setPixel(target, 0, 0, corner);
+  setPixel(target, 0, target.height - 1, corner);
+  setPixel(target, target.width - 1, target.height - 1, corner);
+}
+
+test("scoreMapCandidate rejects readable captures without the RuneScape map frame", () => {
   const floor = FLOOR_SIZES.find((candidate) => candidate.name === "Small");
   const target = image(floor.imageWidth, floor.imageHeight);
   paintReadableRoom(target, floor);
 
+  assert.equal(scoreMapCandidate(target, floor), null);
+});
+
+test("scoreMapCandidate accepts the desktop EXE three-corner map frame without the top-right marker", () => {
+  const floor = FLOOR_SIZES.find((candidate) => candidate.name === "Small");
+  const target = image(floor.imageWidth, floor.imageHeight);
+  paintExeMapFrame(target);
+  paintReadableRoom(target, floor);
+
   const scored = scoreMapCandidate(target, floor);
+  assert.equal(scored.validFrame, true);
   assert.equal(scored.validCorners, false);
   assert.equal(scored.readableRooms, 1);
   assert.equal(scored.gameMap.openedRoomCount, 1);

@@ -1,9 +1,10 @@
 import {
   FLOOR_SIZES,
   findMapCandidatesByCorners,
+  isValidInGameMapFrame,
   isValidMap,
   readGameMap,
-} from "./map-core.js?v=20260624-3";
+} from "./map-core.js?v=20260624-4";
 
 // Anchor-based map location adapted from Sleepy-meh-alt-1/dg-map with
 // permission relayed by this project's maintainer. The anchor is the fixed
@@ -104,15 +105,17 @@ export function mapCandidateFromScaledAnchor(anchor, floor, scale = 1) {
 
 export function scoreMapCandidate(image, floor) {
   if (!image || !floor || image.width !== floor.imageWidth || image.height !== floor.imageHeight) return null;
+  const validFrame = isValidInGameMapFrame(image);
+  if (!validFrame) return null;
   const gameMap = readGameMap(image, floor);
   const readableRooms = gameMap.openedRoomCount + gameMap.mysteryCount;
   const validCorners = isValidMap(image);
   if (readableRooms < 1) return null;
   if (readableRooms === 1 && !gameMap.base) return null;
-  if (!validCorners && readableRooms < 2 && !gameMap.base) return null;
   return {
     gameMap,
     readableRooms,
+    validFrame,
     validCorners,
     score: (validCorners ? 10_000 : 0) + (gameMap.base ? 1_000 : 0) + readableRooms * 50 + floor.width * floor.height,
   };
