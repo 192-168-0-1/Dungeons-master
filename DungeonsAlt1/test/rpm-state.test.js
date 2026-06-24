@@ -43,6 +43,7 @@ test("first valid map starts a new floor immediately", () => {
 
   assert.equal(result.accept, true);
   assert.equal(result.reset, true);
+  assert.equal(result.resetAt, 10_000);
   assert.equal(result.pendingReset, null);
   assert.equal(result.reason, "first-map");
 });
@@ -57,6 +58,7 @@ test("normal same-floor progress is accepted without resetting rpm", () => {
 
   assert.equal(result.accept, true);
   assert.equal(result.reset, false);
+  assert.equal(result.resetAt, null);
   assert.equal(result.pendingReset, null);
   assert.equal(result.reason, "same-floor");
 });
@@ -83,6 +85,7 @@ test("single-base false locks do not update displayed rpm until confirmed", () =
 
   assert.equal(confirmed.accept, true);
   assert.equal(confirmed.reset, true);
+  assert.equal(confirmed.resetAt, 30_000);
   assert.equal(confirmed.pendingReset, null);
   assert.equal(confirmed.reason, "confirmed-single-base");
 });
@@ -107,5 +110,28 @@ test("base changes require a confirmation before resetting the floor timer", () 
 
   assert.equal(confirmed.accept, true);
   assert.equal(confirmed.reset, true);
+  assert.equal(confirmed.resetAt, 40_000);
   assert.equal(confirmed.reason, "confirmed-base-change");
+});
+
+test("confirmed new floors keep the first-seen pending time for rpm accuracy", () => {
+  const first = evaluateMapTransition({
+    floorStart: 10_000,
+    lastBase: { x: 0, y: 0 },
+    lastRoomCount: 18,
+    pendingReset: null,
+  }, gameMap({ rooms: 1, base: { x: 0, y: 0 } }), calibration, 60_000);
+
+  const confirmed = evaluateMapTransition({
+    floorStart: 10_000,
+    lastBase: { x: 0, y: 0 },
+    lastRoomCount: 18,
+    pendingReset: first.pendingReset,
+  }, gameMap({ rooms: 3, base: { x: 0, y: 0 } }), calibration, 62_000);
+
+  assert.equal(confirmed.accept, true);
+  assert.equal(confirmed.reset, true);
+  assert.equal(confirmed.resetAt, 60_000);
+  assert.equal(floorStartForDetectedMap(confirmed.resetAt), 58_000);
+  assert.equal(elapsedFloorSeconds(floorStartForDetectedMap(confirmed.resetAt), 62_000), 4);
 });

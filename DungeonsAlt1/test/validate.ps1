@@ -278,29 +278,31 @@ if (($winterface -notmatch 'readWithOffset') -or
 if (($rpmState -notmatch 'function evaluateMapTransition') -or
     ($rpmState -notmatch 'pending-single-base') -or
     ($rpmState -notmatch 'confirmed-base-change') -or
+    ($rpmState -notmatch 'resetAt') -or
     ($rpmState -notmatch 'FLOOR_START_OFFSET_MS = 2000') -or
     ($rpmState -notmatch 'function rpmValue') -or
     ($app -notmatch 'evaluateMapTransition') -or
     ($app -notmatch 'transition\.accept') -or
+    ($app -notmatch 'transition\.resetAt') -or
     ($app -notmatch 'Possible new floor detected') -or
     ($overlay -notmatch 'rpmValue')) {
     throw 'RPM state must be centralized and must gate suspicious floor resets before updating visible stats.'
 }
-if (($app -notmatch 'map-core\.js\?v=20260624-2') -or
-    ($app -notmatch 'alt1-map-locator\.js\?v=20260624-2') -or
-    ($app -notmatch 'rpm-state\.js\?v=20260624-2') -or
-    ($app -notmatch 'team-sync\.js\?v=20260624-2') -or
-    ($app -notmatch 'party-core\.js\?v=20260624-2') -or
-    ($app -notmatch 'results-core\.js\?v=20260624-2') -or
-    ($app -notmatch 'party-menu\.js\?v=20260624-2') -or
-    ($app -notmatch 'team-gates\.js\?v=20260624-2') -or
-    ($app -notmatch 'file-saver\.js\?v=20260624-2') -or
-    ($overlay -notmatch 'map-core\.js\?v=20260624-2') -or
-    ($overlay -notmatch 'rpm-state\.js\?v=20260624-2') -or
-    ($teamSync -notmatch 'party-core\.js\?v=20260624-2') -or
-    ($teamGates -notmatch 'party-core\.js\?v=20260624-2') -or
-    ($teamGates -notmatch 'alt1-overlay\.js\?v=20260624-2') -or
-    ($mapLocator -notmatch 'map-core\.js\?v=20260624-2')) {
+if (($app -notmatch 'map-core\.js\?v=20260624-3') -or
+    ($app -notmatch 'alt1-map-locator\.js\?v=20260624-3') -or
+    ($app -notmatch 'rpm-state\.js\?v=20260624-3') -or
+    ($app -notmatch 'team-sync\.js\?v=20260624-3') -or
+    ($app -notmatch 'party-core\.js\?v=20260624-3') -or
+    ($app -notmatch 'results-core\.js\?v=20260624-3') -or
+    ($app -notmatch 'party-menu\.js\?v=20260624-3') -or
+    ($app -notmatch 'team-gates\.js\?v=20260624-3') -or
+    ($app -notmatch 'file-saver\.js\?v=20260624-3') -or
+    ($overlay -notmatch 'map-core\.js\?v=20260624-3') -or
+    ($overlay -notmatch 'rpm-state\.js\?v=20260624-3') -or
+    ($teamSync -notmatch 'party-core\.js\?v=20260624-3') -or
+    ($teamGates -notmatch 'party-core\.js\?v=20260624-3') -or
+    ($teamGates -notmatch 'alt1-overlay\.js\?v=20260624-3') -or
+    ($mapLocator -notmatch 'map-core\.js\?v=20260624-3')) {
     throw 'Changed Alt1 runtime modules must be cache-busted for existing Alt1 installations.'
 }
 if (($app -notmatch 'buildVisibleRemoteGatestones') -or

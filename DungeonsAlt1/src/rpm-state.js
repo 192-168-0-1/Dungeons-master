@@ -47,11 +47,13 @@ function resetCandidateKey(gameMap, calibration) {
 }
 
 export function evaluateMapTransition(previous = {}, gameMap, calibration, now = Date.now()) {
+  const timestamp = Number(now) || Date.now();
   if (!gameMap) {
     return {
       accept: false,
       reset: false,
       pendingReset: previous.pendingReset ?? null,
+      resetAt: null,
       reason: "missing-map",
     };
   }
@@ -62,6 +64,7 @@ export function evaluateMapTransition(previous = {}, gameMap, calibration, now =
       accept: true,
       reset: true,
       pendingReset: null,
+      resetAt: timestamp,
       reason: "first-map",
     };
   }
@@ -74,9 +77,11 @@ export function evaluateMapTransition(previous = {}, gameMap, calibration, now =
   const pending = previous.pendingReset ?? null;
   const samePending = Boolean(key && pending?.key === key);
   const pendingRoomCount = Math.max(0, Number(pending?.openedRoomCount) || 0);
+  const pendingSeenAt = Number(pending?.seenAt);
+  const resetAt = Number.isFinite(pendingSeenAt) && pendingSeenAt > 0 ? pendingSeenAt : timestamp;
   const confirmationWindowMs = 10_000;
   const recentEnough = !Number.isFinite(Number(pending?.seenAt))
-    || Number(now) - Number(pending.seenAt) <= confirmationWindowMs;
+    || timestamp - Number(pending.seenAt) <= confirmationWindowMs;
   const plausibleSingleBase = openedRoomCount <= Math.max(5, pendingRoomCount + 3);
 
   if (samePending && pending?.reason === "single-base" && recentEnough && plausibleSingleBase) {
@@ -84,6 +89,7 @@ export function evaluateMapTransition(previous = {}, gameMap, calibration, now =
       accept: true,
       reset: true,
       pendingReset: null,
+      resetAt,
       reason: "confirmed-single-base",
     };
   }
@@ -93,6 +99,7 @@ export function evaluateMapTransition(previous = {}, gameMap, calibration, now =
       accept: true,
       reset: false,
       pendingReset: null,
+      resetAt: null,
       reason: "same-floor",
     };
   }
@@ -104,6 +111,7 @@ export function evaluateMapTransition(previous = {}, gameMap, calibration, now =
       accept: true,
       reset: true,
       pendingReset: null,
+      resetAt,
       reason: baseChanged ? "confirmed-base-change" : "confirmed-single-base",
     };
   }
@@ -111,11 +119,12 @@ export function evaluateMapTransition(previous = {}, gameMap, calibration, now =
   return {
     accept: false,
     reset: false,
+    resetAt: null,
     pendingReset: {
       key,
       openedRoomCount,
       base: gameMap.base ? { x: gameMap.base.x, y: gameMap.base.y } : null,
-      seenAt: Number(now) || Date.now(),
+      seenAt: timestamp,
       reason: baseChanged ? "base-change" : "single-base",
     },
     reason: baseChanged ? "pending-base-change" : "pending-single-base",
