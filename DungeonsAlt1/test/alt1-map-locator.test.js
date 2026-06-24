@@ -230,6 +230,59 @@ test("scaled corner locator scores all candidates and ignores an earlier small f
   assert.equal(match.readableRooms, 4);
 });
 
+test("scaled corner locator does not stop before the real map after many earlier candidates", () => {
+  const small = FLOOR_SIZES.find((candidate) => candidate.name === "Small");
+  const large = FLOOR_SIZES.find((candidate) => candidate.name === "Large");
+  const fullClient = image(700, 620);
+  const corner = [108, 96, 75, 255];
+  const falseCandidates = [];
+
+  for (let index = 0; index < 105; index += 1) {
+    const y = index;
+    const right = 220 + ((index * 7) % 220);
+    const x = right - small.imageWidth + 1;
+    const bottom = y + small.imageHeight - 1;
+    falseCandidates.push(`${x},${y},${small.imageWidth},${small.imageHeight}`);
+    setPixel(fullClient, x, y, corner);
+    setPixel(fullClient, x, bottom, corner);
+    setPixel(fullClient, right, bottom, corner);
+    setPixel(fullClient, right, y, [122, 52, 44, 255]);
+  }
+
+  const largeX = 350;
+  const largeY = 300;
+  const largeRight = largeX + large.imageWidth - 1;
+  const largeBottom = largeY + large.imageHeight - 1;
+  setPixel(fullClient, largeX, largeY, corner);
+  setPixel(fullClient, largeX, largeBottom, corner);
+  setPixel(fullClient, largeRight, largeBottom, corner);
+  setPixel(fullClient, largeRight, largeY, [122, 52, 44, 255]);
+
+  const falseLock = image(small.imageWidth, small.imageHeight);
+  paintValidMapCorners(falseLock);
+  paintOpenedRoom(falseLock, small, { x: 0, y: 0 }, { base: true });
+
+  const realMap = image(large.imageWidth, large.imageHeight);
+  paintValidMapCorners(realMap);
+  paintOpenedRoom(realMap, large, { x: 0, y: 0 }, { base: true });
+  paintOpenedRoom(realMap, large, { x: 1, y: 0 });
+  paintOpenedRoom(realMap, large, { x: 2, y: 0 });
+  paintOpenedRoom(realMap, large, { x: 3, y: 0 });
+  paintOpenedRoom(realMap, large, { x: 4, y: 0 });
+
+  const match = findMapByScaledCorners(fullClient, (x, y, width, height) => {
+    const key = `${x},${y},${width},${height}`;
+    if (falseCandidates.includes(key)) return falseLock;
+    if (x === largeX && y === largeY && width === large.imageWidth && height === large.imageHeight) return realMap;
+    return image(width, height);
+  }, { scales: [1], floors: [small, large] });
+
+  assert.equal(match.x, largeX);
+  assert.equal(match.y, largeY);
+  assert.equal(match.floor.name, "Large");
+  assert.equal(match.readableRooms, 5);
+});
+
 test("findMapByAlt1Anchor uses Alt1 template matching and validates the captured map", () => {
   const floor = FLOOR_SIZES.find((candidate) => candidate.name === "Large");
   const mapX = 35;
