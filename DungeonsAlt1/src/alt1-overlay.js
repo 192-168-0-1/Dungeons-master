@@ -1,4 +1,5 @@
-import { ROOM_SIZE, mapToImage } from "./map-core.js";
+import { ROOM_SIZE, mapToImage } from "./map-core.js?v=20260624-2";
+import { rpmValue } from "./rpm-state.js?v=20260624-2";
 
 export const GATESTONE_POSITIONS = Object.freeze([
   [2, 21],
@@ -51,12 +52,6 @@ export function assignGatestoneSlots(markers, floor) {
     result.push({ ...marker, slot });
   }
   return result;
-}
-
-function rpmValue(rooms = 0, minutes = 0) {
-  const roomCount = Math.max(0, Number(rooms) || 0);
-  const elapsedMinutes = Math.max(Number(minutes) || 0, 1 / 60);
-  return Math.max(0, (roomCount - 0.8) / elapsedMinutes).toFixed(1);
 }
 
 export function formatRpmCounter({ rooms = 0, minutes = 0 } = {}) {

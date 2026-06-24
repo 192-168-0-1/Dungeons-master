@@ -8,7 +8,7 @@ import {
   isOpened,
   mapToImage,
   toChess,
-} from "./src/map-core.js?v=20260624-1";
+} from "./src/map-core.js?v=20260624-2";
 import {
   MAP_SCALE_CANDIDATES,
   findMapByAlt1Anchor,
@@ -16,23 +16,31 @@ import {
   normalizeMapCapture,
   scaledFloorDimensions,
   scoreMapCandidate,
-} from "./src/alt1-map-locator.js?v=20260624-1";
+} from "./src/alt1-map-locator.js?v=20260624-2";
 import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js";
 import {
   buildMapOverlayCommands,
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260624-1";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260624-1";
+} from "./src/alt1-overlay.js?v=20260624-2";
+import {
+  elapsedFloorMinutes,
+  elapsedFloorSeconds,
+  evaluateMapTransition,
+  floorStartForDetectedMap,
+  formatElapsedClock,
+  rpmValue,
+} from "./src/rpm-state.js?v=20260624-2";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260624-2";
 import {
   PARTY_COLORS,
   mergeObservedPartyCache,
   observedPartySlot,
   partyColor,
   reconcileObservedParty,
-} from "./src/party-core.js?v=20260624-1";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260624-1";
+} from "./src/party-core.js?v=20260624-2";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260624-2";
 import {
   RESULT_COLUMNS,
   RESULT_BATCH_MODES,
@@ -44,7 +52,7 @@ import {
   normalizeResultBatchTarget,
   safeFilePart,
   safeTimestampForFilename,
-} from "./src/results-core.js?v=20260624-1";
+} from "./src/results-core.js?v=20260624-2";
 import {
   chooseSaveFolder,
   clearStoredSaveFolder,
@@ -52,9 +60,9 @@ import {
   querySaveFolderPermission,
   supportsFolderSaving,
   writeDataUrlToFolder,
-} from "./src/file-saver.js?v=20260624-1";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260624-1";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260624-1";
+} from "./src/file-saver.js?v=20260624-2";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260624-2";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260624-2";
 import { WinterfaceReader } from "./src/winterface.js";
 
 const SCAN_INTERVAL = 600;
@@ -276,8 +284,8 @@ function pointInFloor(point, floor = state.gameMap?.floor) {
   return Boolean(point && floor && point.x >= 0 && point.x < floor.width && point.y >= 0 && point.y < floor.height);
 }
 
-function resetFloor() {
-  state.floorStart = Date.now() - 2000;
+function resetFloor(now = Date.now()) {
+  state.floorStart = floorStartForDetectedMap(now);
   state.pendingFloorReset = null;
   state.annotations.clear();
   state.manualCritical.clear();
@@ -297,40 +305,6 @@ function findMapInRuneScapeClient() {
   if (anchored) return anchored;
   const fullClient = captureFullRuneScape();
   return findMapByScaledCorners(fullClient, captureRegion, { scales: MAP_SCALE_CANDIDATES });
-}
-
-function floorResetKey(gameMap, calibration) {
-  if (!gameMap?.base || !calibration) return "";
-  return [
-    calibration.floor?.name ?? "",
-    calibration.x,
-    calibration.y,
-    gameMap.base.x,
-    gameMap.base.y,
-  ].join(":");
-}
-
-function shouldResetForNewFloor(gameMap) {
-  if (!state.floorStart) {
-    state.pendingFloorReset = null;
-    return true;
-  }
-  const singleBaseRoom = gameMap.openedRoomCount === 1 && Boolean(gameMap.base);
-  const resetCandidate = (state.lastBase && gameMap.base && !samePoint(state.lastBase, gameMap.base))
-    || (state.lastRoomCount > 1 && singleBaseRoom);
-  if (!resetCandidate) {
-    state.pendingFloorReset = null;
-    return false;
-  }
-  const key = floorResetKey(gameMap, state.calibration);
-  if (key
-    && state.pendingFloorReset?.key === key
-    && gameMap.openedRoomCount <= Math.max(3, (state.pendingFloorReset.openedRoomCount || 1) + 2)) {
-    state.pendingFloorReset = null;
-    return true;
-  }
-  state.pendingFloorReset = { key, openedRoomCount: gameMap.openedRoomCount, seenAt: Date.now() };
-  return false;
 }
 
 async function calibrate({ silent = false } = {}) {
@@ -381,8 +355,9 @@ async function updateMap() {
   let shouldRecalibrate = false;
   try {
     assertAlt1Ready();
-    let { x, y, floor } = state.calibration;
-    let dimensions = scaledFloorDimensions(floor, state.calibration.scale || 1);
+    let nextCalibration = state.calibration;
+    let { x, y, floor } = nextCalibration;
+    let dimensions = scaledFloorDimensions(floor, nextCalibration.scale || 1);
     let rawImage = captureRegion(x, y, dimensions.width, dimensions.height);
     let image = normalizeMapCapture(rawImage, floor, dimensions.scale);
     let scoredMap = scoreMapCandidate(image, floor);
@@ -391,10 +366,9 @@ async function updateMap() {
       // stats strip remain magnetically attached to its client coordinates.
       const relocated = findMapInRuneScapeClient();
       if (relocated) {
-        state.calibration = relocated;
-        ({ x, y, floor } = relocated);
+        nextCalibration = relocated;
+        ({ x, y, floor } = nextCalibration);
         dimensions = scaledFloorDimensions(floor, relocated.scale || 1);
-        saveCalibration();
         rawImage = captureRegion(x, y, dimensions.width, dimensions.height);
         image = normalizeMapCapture(rawImage, floor, dimensions.scale);
         scoredMap = scoreMapCandidate(image, floor);
@@ -409,7 +383,24 @@ async function updateMap() {
 
     state.invalidCaptures = 0;
     const gameMap = scoredMap.gameMap;
-    if (shouldResetForNewFloor(gameMap)) resetFloor();
+    const now = Date.now();
+    const transition = evaluateMapTransition({
+      floorStart: state.floorStart,
+      lastBase: state.lastBase,
+      lastRoomCount: state.lastRoomCount,
+      pendingReset: state.pendingFloorReset,
+    }, gameMap, nextCalibration, now);
+    state.pendingFloorReset = transition.pendingReset;
+    if (!transition.accept) {
+      const pendingReason = transition.reason === "pending-base-change" ? "base moved" : "single base room";
+      setStatus(`Possible new floor detected (${pendingReason}); waiting for confirmation`, "warn");
+      return;
+    }
+    if (nextCalibration !== state.calibration) {
+      state.calibration = nextCalibration;
+      saveCalibration();
+    }
+    if (transition.reset) resetFloor(now);
 
     state.image = image;
     state.gameMap = gameMap;
@@ -462,16 +453,16 @@ function updateStats() {
   }
   const rooms = state.gameMap.openedRoomCount;
   const possible = rooms + state.gameMap.mysteryCount;
-  const minutes = state.floorStart ? Math.max((Date.now() - state.floorStart) / 60_000, 1 / 60) : 0;
-  const rpm = Math.max(0, (rooms - 0.8) / Math.max(minutes, 1 / 60)).toFixed(1);
-  const elapsedSeconds = state.floorStart ? Math.max(0, Math.floor((Date.now() - state.floorStart) / 1000)) : 0;
-  const elapsed = `${String(Math.floor(elapsedSeconds / 60)).padStart(2, "0")}:${String(elapsedSeconds % 60).padStart(2, "0")}`;
+  const now = Date.now();
+  const minutes = elapsedFloorMinutes(state.floorStart, now);
+  const rpm = rpmValue(rooms, minutes);
+  const elapsed = formatElapsedClock(elapsedFloorSeconds(state.floorStart, now));
   elements.stats.textContent = `${rooms} rooms (${possible}) · ${rpm} rpm · ${state.gameMap.deadEndCount} dead ends · ${elapsed}`;
 }
 
 function currentOverlayStats() {
   if (!state.gameMap) return "";
-  const minutes = state.floorStart ? Math.max((Date.now() - state.floorStart) / 60_000, 1 / 60) : 0;
+  const minutes = elapsedFloorMinutes(state.floorStart);
   return formatMapStats({
     rooms: state.gameMap.openedRoomCount,
     mystery: state.gameMap.mysteryCount,

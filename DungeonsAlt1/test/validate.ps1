@@ -122,8 +122,9 @@ $resultsCore = Get-Content (Join-Path $appRoot 'src\results-core.js') -Raw
 $fileSaver = Get-Content (Join-Path $appRoot 'src\file-saver.js') -Raw
 $winterface = Get-Content (Join-Path $appRoot 'src\winterface.js') -Raw
 $mapLocator = Get-Content (Join-Path $appRoot 'src\alt1-map-locator.js') -Raw
+$rpmState = Get-Content (Join-Path $appRoot 'src\rpm-state.js') -Raw
 $nativeOverlaySource = $app + "`n" + $overlay
-$runtimeSource = $app + "`n" + $overlay + "`n" + $partyCore + "`n" + $partyInterface + "`n" + $teamSync + "`n" + $teamGates + "`n" + $partyMenu + "`n" + $resultsCore + "`n" + $fileSaver + "`n" + $winterface + "`n" + $mapLocator
+$runtimeSource = $app + "`n" + $overlay + "`n" + $partyCore + "`n" + $partyInterface + "`n" + $teamSync + "`n" + $teamGates + "`n" + $partyMenu + "`n" + $resultsCore + "`n" + $fileSaver + "`n" + $winterface + "`n" + $mapLocator + "`n" + $rpmState
 $domIds = @([regex]::Matches($app, 'querySelector\("#(?<id>[a-z0-9-]+)"\)') | ForEach-Object { $_.Groups['id'].Value })
 $missingDomIds = @($domIds | Where-Object { $html -notmatch ('id="' + [regex]::Escape($_) + '"') })
 if ($missingDomIds.Count -ne 0) {
@@ -274,18 +275,32 @@ if (($winterface -notmatch 'readWithOffset') -or
     ($app -notmatch 'offset\.x, offset\.y, width, height')) {
     throw 'Winterface reads must expose their offset so the cropped results PNG matches the detected interface.'
 }
-if (($app -notmatch 'map-core\.js\?v=20260624-1') -or
-    ($app -notmatch 'alt1-map-locator\.js\?v=20260624-1') -or
-    ($app -notmatch 'team-sync\.js\?v=20260624-1') -or
-    ($app -notmatch 'party-core\.js\?v=20260624-1') -or
-    ($app -notmatch 'results-core\.js\?v=20260624-1') -or
-    ($app -notmatch 'party-menu\.js\?v=20260624-1') -or
-    ($app -notmatch 'team-gates\.js\?v=20260624-1') -or
-    ($app -notmatch 'file-saver\.js\?v=20260624-1') -or
-    ($teamSync -notmatch 'party-core\.js\?v=20260624-1') -or
-    ($teamGates -notmatch 'party-core\.js\?v=20260624-1') -or
-    ($teamGates -notmatch 'alt1-overlay\.js\?v=20260624-1') -or
-    ($mapLocator -notmatch 'map-core\.js\?v=20260624-1')) {
+if (($rpmState -notmatch 'function evaluateMapTransition') -or
+    ($rpmState -notmatch 'pending-single-base') -or
+    ($rpmState -notmatch 'confirmed-base-change') -or
+    ($rpmState -notmatch 'FLOOR_START_OFFSET_MS = 2000') -or
+    ($rpmState -notmatch 'function rpmValue') -or
+    ($app -notmatch 'evaluateMapTransition') -or
+    ($app -notmatch 'transition\.accept') -or
+    ($app -notmatch 'Possible new floor detected') -or
+    ($overlay -notmatch 'rpmValue')) {
+    throw 'RPM state must be centralized and must gate suspicious floor resets before updating visible stats.'
+}
+if (($app -notmatch 'map-core\.js\?v=20260624-2') -or
+    ($app -notmatch 'alt1-map-locator\.js\?v=20260624-2') -or
+    ($app -notmatch 'rpm-state\.js\?v=20260624-2') -or
+    ($app -notmatch 'team-sync\.js\?v=20260624-2') -or
+    ($app -notmatch 'party-core\.js\?v=20260624-2') -or
+    ($app -notmatch 'results-core\.js\?v=20260624-2') -or
+    ($app -notmatch 'party-menu\.js\?v=20260624-2') -or
+    ($app -notmatch 'team-gates\.js\?v=20260624-2') -or
+    ($app -notmatch 'file-saver\.js\?v=20260624-2') -or
+    ($overlay -notmatch 'map-core\.js\?v=20260624-2') -or
+    ($overlay -notmatch 'rpm-state\.js\?v=20260624-2') -or
+    ($teamSync -notmatch 'party-core\.js\?v=20260624-2') -or
+    ($teamGates -notmatch 'party-core\.js\?v=20260624-2') -or
+    ($teamGates -notmatch 'alt1-overlay\.js\?v=20260624-2') -or
+    ($mapLocator -notmatch 'map-core\.js\?v=20260624-2')) {
     throw 'Changed Alt1 runtime modules must be cache-busted for existing Alt1 installations.'
 }
 if (($app -notmatch 'buildVisibleRemoteGatestones') -or
@@ -359,9 +374,9 @@ if (($app -notmatch 'findMapByAlt1Anchor') -or
     throw 'Scale-aware anchor-first Alt1 map location with readable-room validation is missing.'
 }
 if (($mapLocator -notmatch 'readableRooms === 1 && !gameMap\.base') -or
-    ($app -notmatch 'singleBaseRoom') -or
+    ($rpmState -notmatch 'singleBaseAfterProgress') -or
     ($app -notmatch 'pendingFloorReset') -or
-    ($app -notmatch 'function shouldResetForNewFloor')) {
+    ($app -notmatch 'evaluateMapTransition')) {
     throw 'Map detection must reject one-room non-base false positives and only reset floors on a single base room.'
 }
 if (($overlay -notmatch 'overlayScale') -or

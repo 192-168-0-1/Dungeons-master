@@ -3,7 +3,7 @@ import {
   findMapCandidatesByCorners,
   isValidMap,
   readGameMap,
-} from "./map-core.js?v=20260624-1";
+} from "./map-core.js?v=20260624-2";
 
 // Anchor-based map location adapted from Sleepy-meh-alt-1/dg-map with
 // permission relayed by this project's maintainer. The anchor is the fixed
