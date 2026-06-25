@@ -26,6 +26,11 @@ export function resultFingerprint(result) {
   return RESULT_ID_COLUMNS.map((column) => String(result[column] ?? "").trim()).join("\u001f");
 }
 
+export function resultAlreadyRecorded(results = [], result) {
+  const key = resultFingerprint(result);
+  return Boolean(key) && (results ?? []).some((candidate) => resultFingerprint(candidate) === key);
+}
+
 export function nextAutoResultState(previous, result, { missesBeforeHidden = AUTO_RESULT_MISSES_BEFORE_HIDDEN } = {}) {
   if (!result) {
     const visible = Boolean(previous?.visible);

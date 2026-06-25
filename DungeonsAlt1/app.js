@@ -8,7 +8,7 @@ import {
   isOpened,
   mapToImage,
   toChess,
-} from "./src/map-core.js?v=20260625-2";
+} from "./src/map-core.js?v=20260625-3";
 import {
   MAP_SCALE_CANDIDATES,
   findMapByAlt1Anchor,
@@ -16,14 +16,14 @@ import {
   normalizeMapCapture,
   scaledFloorDimensions,
   scoreMapCandidate,
-} from "./src/alt1-map-locator.js?v=20260625-2";
+} from "./src/alt1-map-locator.js?v=20260625-3";
 import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js";
 import {
   buildMapOverlayCommands,
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260625-2";
+} from "./src/alt1-overlay.js?v=20260625-3";
 import {
   elapsedFloorMinutes,
   elapsedFloorSeconds,
@@ -31,28 +31,29 @@ import {
   floorStartForDetectedMap,
   formatElapsedClock,
   rpmValue,
-} from "./src/rpm-state.js?v=20260625-2";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-2";
+} from "./src/rpm-state.js?v=20260625-3";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-3";
 import {
   PARTY_COLORS,
   mergeObservedPartyCache,
   observedPartySlot,
   partyColor,
   reconcileObservedParty,
-} from "./src/party-core.js?v=20260625-2";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-2";
+} from "./src/party-core.js?v=20260625-3";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-3";
 import {
   RESULT_COLUMNS,
   RESULT_BATCH_MODES,
   nextAutoResultState,
   plannedResultExports,
+  resultAlreadyRecorded,
   resultBatchIsComplete,
   resultBatchStatus,
   resultMatchesFloorFilter,
   normalizeResultBatchTarget,
   safeFilePart,
   safeTimestampForFilename,
-} from "./src/results-core.js?v=20260625-2";
+} from "./src/results-core.js?v=20260625-3";
 import {
   chooseSaveFolder,
   clearStoredSaveFolder,
@@ -60,9 +61,9 @@ import {
   querySaveFolderPermission,
   supportsFolderSaving,
   writeDataUrlToFolder,
-} from "./src/file-saver.js?v=20260625-2";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-2";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-2";
+} from "./src/file-saver.js?v=20260625-3";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-3";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-3";
 import { WinterfaceReader } from "./src/winterface.js";
 
 const SCAN_INTERVAL = 600;
@@ -1065,6 +1066,14 @@ function prepareResultBatch(result) {
     return {
       accepted: false,
       status: `Results skipped: floor ${result?.Floor || "?"} does not match filter ${filterText}`,
+      tone: "warn",
+    };
+  }
+  if (resultAlreadyRecorded(state.results, result)) {
+    return {
+      accepted: false,
+      duplicate: true,
+      status: `Results skipped: floor ${result?.Floor || "?"} is already in the table`,
       tone: "warn",
     };
   }

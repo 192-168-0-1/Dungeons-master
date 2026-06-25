@@ -8,6 +8,7 @@ import {
   normalizeResultBatchTarget,
   parseResultTimeSeconds,
   plannedResultExports,
+  resultAlreadyRecorded,
   resultBatchIsComplete,
   resultBatchStatus,
   resultFingerprint,
@@ -133,6 +134,13 @@ test("auto results state adds a changed screen after the previous screen disappe
 test("result fingerprints ignore timestamp but include table values", () => {
   assert.equal(resultFingerprint(sampleResult), resultFingerprint({ ...sampleResult, Timestamp: "later" }));
   assert.notEqual(resultFingerprint(sampleResult), resultFingerprint({ ...sampleResult, DeadEnds: "5" }));
+});
+
+test("result table dedupe ignores timestamp-only changes but allows real result changes", () => {
+  const existing = [{ ...sampleResult, Timestamp: "first read" }];
+  assert.equal(resultAlreadyRecorded(existing, { ...sampleResult, Timestamp: "second read" }), true);
+  assert.equal(resultAlreadyRecorded(existing, { ...sampleResult, FinalXP: "54321" }), false);
+  assert.equal(resultAlreadyRecorded([], sampleResult), false);
 });
 
 test("auto PNG export planning follows the map/results checkboxes", () => {
