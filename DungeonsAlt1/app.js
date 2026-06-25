@@ -8,7 +8,7 @@ import {
   isOpened,
   mapToImage,
   toChess,
-} from "./src/map-core.js?v=20260625-1";
+} from "./src/map-core.js?v=20260625-2";
 import {
   MAP_SCALE_CANDIDATES,
   findMapByAlt1Anchor,
@@ -16,14 +16,14 @@ import {
   normalizeMapCapture,
   scaledFloorDimensions,
   scoreMapCandidate,
-} from "./src/alt1-map-locator.js?v=20260625-1";
+} from "./src/alt1-map-locator.js?v=20260625-2";
 import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js";
 import {
   buildMapOverlayCommands,
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260625-1";
+} from "./src/alt1-overlay.js?v=20260625-2";
 import {
   elapsedFloorMinutes,
   elapsedFloorSeconds,
@@ -31,16 +31,16 @@ import {
   floorStartForDetectedMap,
   formatElapsedClock,
   rpmValue,
-} from "./src/rpm-state.js?v=20260625-1";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-1";
+} from "./src/rpm-state.js?v=20260625-2";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-2";
 import {
   PARTY_COLORS,
   mergeObservedPartyCache,
   observedPartySlot,
   partyColor,
   reconcileObservedParty,
-} from "./src/party-core.js?v=20260625-1";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-1";
+} from "./src/party-core.js?v=20260625-2";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-2";
 import {
   RESULT_COLUMNS,
   RESULT_BATCH_MODES,
@@ -52,7 +52,7 @@ import {
   normalizeResultBatchTarget,
   safeFilePart,
   safeTimestampForFilename,
-} from "./src/results-core.js?v=20260625-1";
+} from "./src/results-core.js?v=20260625-2";
 import {
   chooseSaveFolder,
   clearStoredSaveFolder,
@@ -60,9 +60,9 @@ import {
   querySaveFolderPermission,
   supportsFolderSaving,
   writeDataUrlToFolder,
-} from "./src/file-saver.js?v=20260625-1";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-1";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-1";
+} from "./src/file-saver.js?v=20260625-2";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-2";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-2";
 import { WinterfaceReader } from "./src/winterface.js";
 
 const SCAN_INTERVAL = 600;
@@ -148,7 +148,7 @@ const state = {
   lastOverlayReport: null,
   results: [],
   resultsBusy: false,
-  autoResultState: { visible: false, key: "", handled: false },
+  autoResultState: { visible: false, key: "", handled: false, missing: 0 },
   autoResultKeys: new Set(),
   lastAutoResultScan: 0,
   pendingFloorReset: null,
@@ -1053,7 +1053,7 @@ function renderResultBatchSummary() {
 function resetResultBatch(notify = true) {
   state.results = [];
   state.autoResultKeys.clear();
-  state.autoResultState = nextAutoResultState(state.autoResultState, null);
+  state.autoResultState = nextAutoResultState(state.autoResultState, null, { missesBeforeHidden: 0 });
   renderResults();
   if (notify) setStatus("Dungeon results batch reset", "warn");
 }
@@ -1166,7 +1166,7 @@ async function captureDungeonResults() {
 
 async function autoCaptureDungeonResults() {
   if (!elements.autoTrackResults.checked) {
-    state.autoResultState = nextAutoResultState(state.autoResultState, null);
+    state.autoResultState = nextAutoResultState(state.autoResultState, null, { missesBeforeHidden: 0 });
     return;
   }
   if (state.resultsBusy || !hasAlt1() || !window.alt1.rsLinked) return;
@@ -1178,7 +1178,12 @@ async function autoCaptureDungeonResults() {
   try {
     const capture = await readDungeonResultsCapture(new Date());
     const next = nextAutoResultState(state.autoResultState, capture?.result ?? null);
-    state.autoResultState = { visible: next.visible, key: next.key, handled: next.handled };
+    state.autoResultState = {
+      visible: next.visible,
+      key: next.key,
+      handled: next.handled,
+      missing: next.missing,
+    };
     if (!capture || !next.shouldAdd || state.autoResultKeys.has(next.key)) return;
     const committed = await commitDungeonResultsCapture(capture, "auto");
     const complete = committed.status.includes("complete");
@@ -1547,14 +1552,14 @@ function bindEvents() {
   elements.resetResultBatch.addEventListener("click", () => resetResultBatch(true));
   for (const control of [elements.resultBatchSize, elements.resultFloorFilter, elements.resultBatchMode]) {
     control.addEventListener("change", () => {
-      state.autoResultState = nextAutoResultState(state.autoResultState, null);
+      state.autoResultState = nextAutoResultState(state.autoResultState, null, { missesBeforeHidden: 0 });
       renderResultBatchSummary();
     });
     control.addEventListener("input", renderResultBatchSummary);
   }
   elements.autoTrackResults.addEventListener("change", () => {
     if (!elements.autoTrackResults.checked) {
-      state.autoResultState = nextAutoResultState(state.autoResultState, null);
+      state.autoResultState = nextAutoResultState(state.autoResultState, null, { missesBeforeHidden: 0 });
     }
   });
   elements.showCapture.addEventListener("change", render);

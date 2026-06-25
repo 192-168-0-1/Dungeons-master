@@ -52,9 +52,17 @@ test("results auto tracking options are present and default off in the UI", () =
 
 test("auto results state does nothing when no results screen is visible", () => {
   assert.deepEqual(nextAutoResultState({ visible: true, key: "old" }, null), {
+    visible: true,
+    key: "old",
+    handled: false,
+    missing: 1,
+    shouldAdd: false,
+  });
+  assert.deepEqual(nextAutoResultState({ visible: true, key: "old" }, null, { missesBeforeHidden: 0 }), {
     visible: false,
     key: "",
     handled: false,
+    missing: 0,
     shouldAdd: false,
   });
 });
@@ -64,11 +72,13 @@ test("auto results state adds a new screen once but not while the same screen st
   assert.equal(first.shouldAdd, true);
   assert.equal(first.visible, true);
   assert.equal(first.handled, true);
+  assert.equal(first.missing, 0);
 
   const duplicate = nextAutoResultState(first, { ...sampleResult, Timestamp: "later" });
   assert.equal(duplicate.shouldAdd, false);
   assert.equal(duplicate.key, first.key);
   assert.equal(duplicate.handled, true);
+  assert.equal(duplicate.missing, 0);
 });
 
 test("auto results state ignores OCR changes while the same results screen remains visible", () => {
@@ -81,9 +91,40 @@ test("auto results state ignores OCR changes while the same results screen remai
   assert.notEqual(changedWhileVisible.key, first.key);
 });
 
+test("auto results state tolerates a transient missed read without adding the same screen twice", () => {
+  const first = nextAutoResultState({ visible: false, key: "", handled: false, missing: 0 }, sampleResult);
+  const missedOnce = nextAutoResultState(first, null);
+  const recovered = nextAutoResultState(missedOnce, { ...sampleResult, FinalXP: "54321" });
+
+  assert.equal(missedOnce.visible, true);
+  assert.equal(missedOnce.handled, true);
+  assert.equal(missedOnce.missing, 1);
+  assert.equal(recovered.visible, true);
+  assert.equal(recovered.shouldAdd, false);
+  assert.equal(recovered.handled, true);
+  assert.equal(recovered.missing, 0);
+});
+
+test("auto results state resets after consecutive missed reads so the next visible screen can add", () => {
+  const first = nextAutoResultState({ visible: false, key: "", handled: false, missing: 0 }, sampleResult);
+  const missedOnce = nextAutoResultState(first, null);
+  const missedTwice = nextAutoResultState(missedOnce, null);
+  const nextScreen = nextAutoResultState(missedTwice, { ...sampleResult, FinalXP: "54321" });
+
+  assert.deepEqual(missedTwice, {
+    visible: false,
+    key: "",
+    handled: false,
+    missing: 0,
+    shouldAdd: false,
+  });
+  assert.equal(nextScreen.shouldAdd, true);
+});
+
 test("auto results state adds a changed screen after the previous screen disappears", () => {
   const first = nextAutoResultState({ visible: false, key: "" }, sampleResult);
-  const gone = nextAutoResultState(first, null);
+  const missedOnce = nextAutoResultState(first, null);
+  const gone = nextAutoResultState(missedOnce, null);
   const changed = nextAutoResultState(gone, { ...sampleResult, FinalXP: "54321" });
   assert.equal(changed.shouldAdd, true);
   assert.notEqual(changed.key, first.key);

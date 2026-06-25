@@ -19,14 +19,29 @@ export const RESULT_THEME_RANGES = Object.freeze({
 });
 
 const RESULT_ID_COLUMNS = RESULT_COLUMNS.filter((column) => column !== "Timestamp");
+export const AUTO_RESULT_MISSES_BEFORE_HIDDEN = 2;
 
 export function resultFingerprint(result) {
   if (!result || typeof result !== "object") return "";
   return RESULT_ID_COLUMNS.map((column) => String(result[column] ?? "").trim()).join("\u001f");
 }
 
-export function nextAutoResultState(previous, result) {
-  if (!result) return { visible: false, key: "", handled: false, shouldAdd: false };
+export function nextAutoResultState(previous, result, { missesBeforeHidden = AUTO_RESULT_MISSES_BEFORE_HIDDEN } = {}) {
+  if (!result) {
+    const visible = Boolean(previous?.visible);
+    const threshold = Math.max(0, Number(missesBeforeHidden) || 0);
+    const missing = visible ? (Math.max(0, Number(previous?.missing) || 0) + 1) : 0;
+    if (visible && missing < threshold) {
+      return {
+        visible: true,
+        key: previous?.key ?? "",
+        handled: Boolean(previous?.handled),
+        missing,
+        shouldAdd: false,
+      };
+    }
+    return { visible: false, key: "", handled: false, missing: 0, shouldAdd: false };
+  }
   const key = resultFingerprint(result);
   const visible = Boolean(previous?.visible);
   const handled = visible ? Boolean(previous?.handled) : false;
@@ -35,6 +50,7 @@ export function nextAutoResultState(previous, result) {
     visible: true,
     key,
     handled: handled || shouldAdd,
+    missing: 0,
     shouldAdd,
   };
 }

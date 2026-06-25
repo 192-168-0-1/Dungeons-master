@@ -1,5 +1,5 @@
-import { assignGatestoneSlots } from "./alt1-overlay.js?v=20260625-1";
-import { partyColor, partyTextColor } from "./party-core.js?v=20260625-1";
+import { assignGatestoneSlots } from "./alt1-overlay.js?v=20260625-2";
+import { partyColor, partyTextColor } from "./party-core.js?v=20260625-2";
 
 export function buildVisibleRemoteGatestones(teamGatestones, floor, resolveSlot) {
   if (!floor || !(teamGatestones instanceof Map)) return [];
