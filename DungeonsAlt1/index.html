@@ -8,7 +8,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>Dungeons Alt1</title>
-  <link rel="stylesheet" href="./styles.css?v=20260625-4">
+  <link rel="stylesheet" href="./styles.css?v=20260625-5">
 </head>
 <body>
   <header class="titlebar">
@@ -29,7 +29,7 @@
     </div>
 
     <div class="toolbar" aria-label="Map actions">
-      <button id="calibrate" type="button">Calibrate</button>
+      <button id="calibrate" class="primary" type="button">Calibrate</button>
       <button id="pause" type="button">Pause</button>
       <button id="save" type="button">Save PNG</button>
       <button id="clear" type="button">Clear markings</button>
@@ -133,12 +133,24 @@
             <button id="team-disconnect" type="button">Disconnect</button>
           </div>
           <small id="team-status">Team-sync offline</small>
-          <label class="party-scan-option" hidden><input id="party-interface" type="checkbox" checked> Use RuneScape party positions helper</label>
-          <div class="party-scan-tools" hidden>
+        </div>
+      </div>
+    </details>
+
+    <details class="experimental">
+      <summary><span class="summary-label">Developer &amp; experimental</span><span class="summary-tag">beta</span></summary>
+      <div class="options experimental-panel">
+        <p class="experimental-note">Opt-in features that are still being tuned. Everything here is off by default.</p>
+        <label class="toggle-strong"><input id="experimental-features" type="checkbox"> Enable experimental features</label>
+        <div id="experimental-tools" class="experimental-tools" hidden>
+          <label><input id="party-interface" type="checkbox" checked> Read the RuneScape DG party interface (sprite anchor)</label>
+          <div class="party-scan-tools">
             <button id="party-scan" type="button">Scan DG party</button>
             <button id="party-forget" type="button">Forget party</button>
-            <small id="party-scan-status">Open the DG party interface to scan its player order</small>
           </div>
+          <small id="party-scan-status">Open the in-game DG party interface, then press Scan.</small>
+          <label><input id="experimental-auto-room" type="checkbox"> Auto-join a team room from the scanned party leader</label>
+          <label><input id="debug-mode" type="checkbox"> Verbose party-scan diagnostics</label>
         </div>
       </div>
     </details>
@@ -156,7 +168,7 @@
     (function bootstrapDungeons() {
       "use strict";
 
-      var fallbackVersion = "20260625-4";
+      var fallbackVersion = "20260625-5";
       var appStarted = false;
       var environment = document.getElementById("environment");
       var status = document.getElementById("status");

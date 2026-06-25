@@ -123,8 +123,9 @@ $fileSaver = Get-Content (Join-Path $appRoot 'src\file-saver.js') -Raw
 $winterface = Get-Content (Join-Path $appRoot 'src\winterface.js') -Raw
 $mapLocator = Get-Content (Join-Path $appRoot 'src\alt1-map-locator.js') -Raw
 $rpmState = Get-Content (Join-Path $appRoot 'src\rpm-state.js') -Raw
+$partyAnchor = Get-Content (Join-Path $appRoot 'src\party-anchor.js') -Raw
 $nativeOverlaySource = $app + "`n" + $overlay
-$runtimeSource = $app + "`n" + $overlay + "`n" + $partyCore + "`n" + $partyInterface + "`n" + $teamSync + "`n" + $teamGates + "`n" + $partyMenu + "`n" + $resultsCore + "`n" + $fileSaver + "`n" + $winterface + "`n" + $mapLocator + "`n" + $rpmState
+$runtimeSource = $app + "`n" + $overlay + "`n" + $partyCore + "`n" + $partyInterface + "`n" + $teamSync + "`n" + $teamGates + "`n" + $partyMenu + "`n" + $resultsCore + "`n" + $fileSaver + "`n" + $winterface + "`n" + $mapLocator + "`n" + $rpmState + "`n" + $partyAnchor
 $domIds = @([regex]::Matches($app, 'querySelector\("#(?<id>[a-z0-9-]+)"\)') | ForEach-Object { $_.Groups['id'].Value })
 $missingDomIds = @($domIds | Where-Object { $html -notmatch ('id="' + [regex]::Escape($_) + '"') })
 if ($missingDomIds.Count -ne 0) {
@@ -173,10 +174,13 @@ if (($partyInterface -notmatch 'function findPartyPanel') -or
     ($app -notmatch 'scanPartyInterface')) {
     throw 'RuneScape party-interface detection, OCR and slot matching must remain connected.'
 }
-if (($html -match 'id="auto-room"') -or
-    ($app -match 'syncAutomaticPartyRoom') -or
-    ($app -match 'teamSync\.connect\(status\.roomCode')) {
-    throw 'Automatic party-room joining must stay removed from the active Alt1 UI and app workflow.'
+if (($html -notmatch 'id="experimental-features"') -or
+    ($html -notmatch 'id="experimental-auto-room"') -or
+    ($html -match 'id="experimental-features"[^>]*\bchecked') -or
+    ($html -match 'id="experimental-auto-room"[^>]*\bchecked') -or
+    ($app -notmatch 'maybeAutoJoinFromParty') -or
+    ($app -notmatch 'experimentalAutoRoom')) {
+    throw 'Experimental party-room auto-join must be an opt-in feature behind the experimental toggle and default to off.'
 }
 if (($html -notmatch 'id="party-forget"') -or
     ($partyCore -notmatch 'function mergeObservedPartyCache') -or
@@ -210,13 +214,14 @@ if (($partyCore -notmatch 'duplicate: true') -or
     throw 'Manual room rosters must reject duplicate RuneScape names.'
 }
 if (($html -notmatch 'id="party-interface" type="checkbox" checked') -or
-    ($html -notmatch 'party-scan-option" hidden') -or
-    ($html -notmatch 'party-scan-tools" hidden') -or
+    ($html -notmatch 'id="experimental-tools"') -or
+    ($html -notmatch 'experimental-tools" hidden') -or
     ($styles -notmatch '\[hidden\]\s*\{\s*display:\s*none\s*!important;\s*\}') -or
     ($html -notmatch 'id="party-scan"') -or
     ($html -notmatch 'id="party-forget"') -or
-    ($app -notmatch 'partyInterface\.checked')) {
-    throw 'RuneScape party-position helper code must remain available while the helper UI stays hidden.'
+    ($app -notmatch 'partyInterface\.checked') -or
+    ($app -notmatch 'state\.experimentalEnabled')) {
+    throw 'RuneScape party scanning must live in the experimental tools section, gated behind the experimental toggle.'
 }
 if (($app -notmatch 'function installedInAlt1') -or
     ($app -notmatch 'installLink\.hidden') -or
@@ -294,21 +299,23 @@ if (($rpmState -notmatch 'function evaluateMapTransition') -or
     ($overlay -notmatch 'rpmValue')) {
     throw 'RPM state must be centralized and must gate suspicious floor resets before updating visible stats.'
 }
-if (($app -notmatch 'map-core\.js\?v=20260625-4') -or
-    ($app -notmatch 'alt1-map-locator\.js\?v=20260625-4') -or
-    ($app -notmatch 'rpm-state\.js\?v=20260625-4') -or
-    ($app -notmatch 'team-sync\.js\?v=20260625-4') -or
-    ($app -notmatch 'party-core\.js\?v=20260625-4') -or
-    ($app -notmatch 'results-core\.js\?v=20260625-4') -or
-    ($app -notmatch 'party-menu\.js\?v=20260625-4') -or
-    ($app -notmatch 'team-gates\.js\?v=20260625-4') -or
-    ($app -notmatch 'file-saver\.js\?v=20260625-4') -or
-    ($overlay -notmatch 'map-core\.js\?v=20260625-4') -or
-    ($overlay -notmatch 'rpm-state\.js\?v=20260625-4') -or
-    ($teamSync -notmatch 'party-core\.js\?v=20260625-4') -or
-    ($teamGates -notmatch 'party-core\.js\?v=20260625-4') -or
-    ($teamGates -notmatch 'alt1-overlay\.js\?v=20260625-4') -or
-    ($mapLocator -notmatch 'map-core\.js\?v=20260625-4')) {
+if (($app -notmatch 'map-core\.js\?v=20260625-5') -or
+    ($app -notmatch 'alt1-map-locator\.js\?v=20260625-5') -or
+    ($app -notmatch 'rpm-state\.js\?v=20260625-5') -or
+    ($app -notmatch 'team-sync\.js\?v=20260625-5') -or
+    ($app -notmatch 'party-core\.js\?v=20260625-5') -or
+    ($app -notmatch 'results-core\.js\?v=20260625-5') -or
+    ($app -notmatch 'party-menu\.js\?v=20260625-5') -or
+    ($app -notmatch 'team-gates\.js\?v=20260625-5') -or
+    ($app -notmatch 'file-saver\.js\?v=20260625-5') -or
+    ($app -notmatch 'party-anchor\.js\?v=20260625-5') -or
+    ($overlay -notmatch 'map-core\.js\?v=20260625-5') -or
+    ($overlay -notmatch 'rpm-state\.js\?v=20260625-5') -or
+    ($teamSync -notmatch 'party-core\.js\?v=20260625-5') -or
+    ($teamGates -notmatch 'party-core\.js\?v=20260625-5') -or
+    ($teamGates -notmatch 'alt1-overlay\.js\?v=20260625-5') -or
+    ($partyAnchor -notmatch 'party-interface\.js\?v=20260625-5') -or
+    ($mapLocator -notmatch 'map-core\.js\?v=20260625-5')) {
     throw 'Changed Alt1 runtime modules must be cache-busted for existing Alt1 installations.'
 }
 if (($app -notmatch 'buildVisibleRemoteGatestones') -or
@@ -400,6 +407,18 @@ if (($overlay -notmatch 'overlayScale') -or
 if (-not (Test-Path (Join-Path $appRoot 'THIRD_PARTY_NOTES.md')) -or
     ((Get-Content (Join-Path $appRoot 'THIRD_PARTY_NOTES.md') -Raw) -notmatch 'Sleepy-meh-alt-1/dg-map')) {
     throw 'Third-party attribution for the adapted map-anchor locator is missing.'
+}
+if (($partyAnchor -notmatch 'function readPartyByAnchor') -or
+    ($partyAnchor -notmatch 'function findDgIcon') -or
+    ($partyAnchor -notmatch 'function locatePartyRows') -or
+    ($partyAnchor -notmatch 'bindFindSubImg') -or
+    ($partyAnchor -notmatch 'CHATBOX_FONT_CONFIG') -or
+    ($app -notmatch 'readPartyByAnchor') -or
+    ($app -notmatch 'loadChatboxFont')) {
+    throw 'The sprite-anchor party reader (dg-map approach) and chatbox font loader must stay wired into the app.'
+}
+if (-not (Test-Path (Join-Path $appRoot 'assets\fonts\chatbox\12pt.data.png'))) {
+    throw 'The chatbox OCR font asset is missing.'
 }
 
 $ocrAssets = @('WinterfaceMarker.png')

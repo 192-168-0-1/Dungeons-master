@@ -8,21 +8,21 @@ import {
   isOpened,
   mapToImage,
   toChess,
-} from "./src/map-core.js?v=20260625-4";
+} from "./src/map-core.js?v=20260625-5";
 import {
   MAP_SCALE_CANDIDATES,
   findMapByAlt1Anchor,
   findMapByScaledCorners,
   readMapAtCalibration,
   scaledFloorDimensions,
-} from "./src/alt1-map-locator.js?v=20260625-4";
+} from "./src/alt1-map-locator.js?v=20260625-5";
 import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js";
 import {
   buildMapOverlayCommands,
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260625-4";
+} from "./src/alt1-overlay.js?v=20260625-5";
 import {
   elapsedFloorMinutes,
   elapsedFloorSeconds,
@@ -30,16 +30,18 @@ import {
   floorStartForDetectedMap,
   formatElapsedClock,
   rpmValue,
-} from "./src/rpm-state.js?v=20260625-4";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-4";
+} from "./src/rpm-state.js?v=20260625-5";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-5";
 import {
   PARTY_COLORS,
+  automaticPartyRoom,
   mergeObservedPartyCache,
   observedPartySlot,
   partyColor,
   reconcileObservedParty,
-} from "./src/party-core.js?v=20260625-4";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-4";
+} from "./src/party-core.js?v=20260625-5";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-5";
+import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-5";
 import {
   RESULT_COLUMNS,
   RESULT_BATCH_MODES,
@@ -52,7 +54,7 @@ import {
   normalizeResultBatchTarget,
   safeFilePart,
   safeTimestampForFilename,
-} from "./src/results-core.js?v=20260625-4";
+} from "./src/results-core.js?v=20260625-5";
 import {
   chooseSaveFolder,
   clearStoredSaveFolder,
@@ -60,9 +62,9 @@ import {
   querySaveFolderPermission,
   supportsFolderSaving,
   writeDataUrlToFolder,
-} from "./src/file-saver.js?v=20260625-4";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-4";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-4";
+} from "./src/file-saver.js?v=20260625-5";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-5";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-5";
 import { WinterfaceReader } from "./src/winterface.js";
 
 const SCAN_INTERVAL = 600;
@@ -118,6 +120,10 @@ const elements = {
   partyScan: document.querySelector("#party-scan"),
   partyForget: document.querySelector("#party-forget"),
   partyScanStatus: document.querySelector("#party-scan-status"),
+  experimentalFeatures: document.querySelector("#experimental-features"),
+  experimentalTools: document.querySelector("#experimental-tools"),
+  experimentalAutoRoom: document.querySelector("#experimental-auto-room"),
+  debugMode: document.querySelector("#debug-mode"),
   partyContextMenu: document.querySelector("#party-context-menu"),
   installLink: document.querySelector("#install-link"),
   environment: document.querySelector("#environment"),
@@ -173,6 +179,8 @@ const state = {
   partyScanBusy: false,
   partyAutoScan: false,
   lastPartyScan: 0,
+  chatboxFont: null,
+  experimentalEnabled: false,
   syncedLocalGatestones: new Set(),
   partyMenuTarget: null,
 };
@@ -1470,8 +1478,27 @@ function formatPartyScanStatus(result) {
   return `RuneScape party read ${rawNames.length}/${occupied} names (${namesText}); cached ${cachedNames.length}/5${roomText} - pixels ${rowEvidence}`;
 }
 
+function partyScanDebugSuffix(method) {
+  return elements.debugMode?.checked ? ` · ${method}` : "";
+}
+
+function maybeAutoJoinFromParty() {
+  if (!elements.experimentalAutoRoom?.checked) return;
+  // Only ever auto-join from a clean state. While a socket is OPEN or still
+  // CONNECTING we leave it alone: this stops a 5s rescan from tearing down an
+  // in-flight handshake (the relay can cold-start for ~30s) and never silently
+  // overrides a room the user joined by hand.
+  if (teamSync.connected || teamSync.connecting) return;
+  const localName = elements.teamName.value.trim() || teamSync.name;
+  const auto = automaticPartyRoom(state.observedParty, localName);
+  if (!auto) return;
+  clearRemoteTeamState();
+  elements.teamRoom.value = teamSync.connect(auto.roomCode, localName, undefined, { create: auto.localSlot === 1 });
+  elements.teamStatus.textContent = `Experimental: auto-joined room ${auto.roomCode} from party leader ${auto.leaderName}`;
+}
+
 async function scanPartyInterface({ manual = false, forceFull = false } = {}) {
-  if (state.partyScanBusy || !elements.partyInterface.checked) return false;
+  if (state.partyScanBusy || !state.experimentalEnabled || !elements.partyInterface.checked) return false;
   state.lastPartyScan = Date.now();
   if (manual) state.partyAutoScan = true;
   if (!hasAlt1() || !window.alt1.rsLinked) {
@@ -1484,7 +1511,11 @@ async function scanPartyInterface({ manual = false, forceFull = false } = {}) {
     return false;
   }
   const runtime = partyOcrRuntime();
-  if (!runtime.capture || !runtime.ocr?.findReadLine || !runtime.font?.chars) {
+  // The sprite-anchor reader needs only the chatbox font + OCR; the divider
+  // reader needs an aa_* font. Only bail when neither path can run, so a partial
+  // OCR-bundle load (aa_* font missing) still leaves the anchor reader working.
+  const anchorReady = Boolean(state.chatboxFont) && Boolean(runtime.capture) && Boolean(runtime.ocr?.findReadLine);
+  if (!runtime.capture || !runtime.ocr?.findReadLine || (!anchorReady && !runtime.font?.chars)) {
     state.partyAutoScan = false;
     elements.partyScanStatus.textContent = state.observedParty.length
       ? `Alt1 OCR unavailable; cached ${state.observedParty.length} party names retained`
@@ -1495,6 +1526,25 @@ async function scanPartyInterface({ manual = false, forceFull = false } = {}) {
   state.partyScanBusy = true;
   elements.partyScan.disabled = true;
   try {
+    // Preferred path: deterministic sprite-anchor read ported from dg-map. It
+    // locates the panel from the DG skill icon and reads each row with the
+    // chatbox font. Needs 100% RuneScape UI scale; otherwise it returns null and
+    // we fall back to the scale-tolerant divider detector below.
+    const anchorResult = state.chatboxFont
+      ? readPartyByAnchor({ api: window.alt1, capture: captureRegion, ocr: runtime.ocr, font: state.chatboxFont })
+      : null;
+    if (anchorResult && anchorResult.members.some((member) => member.occupied)) {
+      state.partyPanel = null;
+      const reconciled = reconcileObservedParty(anchorResult.members, expectedPartyNames());
+      applyObservedParty(reconciled, "scan");
+      state.partyAutoScan = true;
+      elements.partyScanStatus.textContent = formatPartyScanStatus(anchorResult) + partyScanDebugSuffix("sprite anchor");
+      renderParty();
+      render();
+      maybeAutoJoinFromParty();
+      return true;
+    }
+
     const attempts = [];
     if (state.partyPanel && !forceFull) {
       const margin = 8;
@@ -1518,9 +1568,10 @@ async function scanPartyInterface({ manual = false, forceFull = false } = {}) {
       const reconciled = reconcileObservedParty(result.members, expectedPartyNames());
       applyObservedParty(reconciled, "scan");
       state.partyAutoScan = true;
-      elements.partyScanStatus.textContent = formatPartyScanStatus(result);
+      elements.partyScanStatus.textContent = formatPartyScanStatus(result) + partyScanDebugSuffix("divider scan");
       renderParty();
       render();
+      maybeAutoJoinFromParty();
       return true;
     }
     state.partyAutoScan = false;
@@ -1659,6 +1710,23 @@ function bindEvents() {
       : "Open the DG party interface to scan its player order";
     scanPartyInterface({ manual: true, forceFull: true });
   });
+  if (elements.experimentalFeatures) {
+    elements.experimentalFeatures.addEventListener("change", () => {
+      applyExperimentalState();
+      storageSet(`${STORAGE_PREFIX}:experimental`, elements.experimentalFeatures.checked ? "1" : "");
+    });
+  }
+  if (elements.experimentalAutoRoom) {
+    elements.experimentalAutoRoom.addEventListener("change", () => {
+      storageSet(`${STORAGE_PREFIX}:auto-room`, elements.experimentalAutoRoom.checked ? "1" : "");
+      if (elements.experimentalAutoRoom.checked) maybeAutoJoinFromParty();
+    });
+  }
+  if (elements.debugMode) {
+    elements.debugMode.addEventListener("change", () => {
+      storageSet(`${STORAGE_PREFIX}:debug`, elements.debugMode.checked ? "1" : "");
+    });
+  }
   for (const row of elements.partySlots) {
     row.addEventListener("contextmenu", (event) => showPartyContextMenu(event, row));
   }
@@ -1760,11 +1828,28 @@ async function scanLoop() {
 }
 
 async function partyScanLoop() {
-  if (elements.partyInterface.checked && state.partyAutoScan
+  if (state.experimentalEnabled && elements.partyInterface.checked && state.partyAutoScan
     && Date.now() - state.lastPartyScan >= PARTY_SCAN_INTERVAL) {
     await scanPartyInterface();
   }
   setTimeout(partyScanLoop, 1000);
+}
+
+function applyExperimentalState() {
+  state.experimentalEnabled = Boolean(elements.experimentalFeatures?.checked);
+  if (elements.experimentalTools) elements.experimentalTools.hidden = !state.experimentalEnabled;
+  if (!state.experimentalEnabled) state.partyAutoScan = false;
+}
+
+// Load the RuneScape chatbox font for the sprite-anchor party reader once Alt1's
+// OCR runtime is ready. Failure is non-fatal: the divider reader still works.
+async function initPartyOcrFont() {
+  try {
+    if (window.__dungeonsOcrReady) await window.__dungeonsOcrReady;
+    state.chatboxFont = await loadChatboxFont(window);
+  } catch {
+    state.chatboxFont = null;
+  }
 }
 
 async function scanOnce() {
@@ -1786,6 +1871,11 @@ function initialize() {
   renderParty();
   drawEmptyState();
   updateStats();
+  // Restore the experimental opt-ins (all default off) before first render.
+  if (elements.experimentalFeatures) elements.experimentalFeatures.checked = storageGet(`${STORAGE_PREFIX}:experimental`) === "1";
+  if (elements.experimentalAutoRoom) elements.experimentalAutoRoom.checked = storageGet(`${STORAGE_PREFIX}:auto-room`) === "1";
+  if (elements.debugMode) elements.debugMode.checked = storageGet(`${STORAGE_PREFIX}:debug`) === "1";
+  applyExperimentalState();
   window.__dungeonsAppReady = true;
   elements.teamRoom.value = createRoomCode();
   elements.teamName.value = storageGet(`${STORAGE_PREFIX}:name`) || "";
@@ -1806,6 +1896,7 @@ function initialize() {
       // Alt1 identification is useful for permissions, but it must not block the UI.
     }
     elements.environment.textContent = `Alt1 ${window.alt1.version || ""}`.trim();
+    initPartyOcrFont();
     if (state.calibration) setStatus(`Loading saved ${state.calibration.floor.name} calibration…`);
     else setStatus("Waiting for a Dungeoneering map to appear…", "warn");
   } else {

@@ -4,7 +4,7 @@ import {
   normalizePartyRoster,
   parsePartyRoster,
   removePartyMember,
-} from "./party-core.js?v=20260625-4";
+} from "./party-core.js?v=20260625-5";
 
 const DEFAULT_RELAY = "wss://dungeons-master.onrender.com/team-sync";
 const HEARTBEAT_INTERVAL = 5_000;
@@ -75,6 +75,10 @@ export class TeamSync extends EventTarget {
 
   get connected() {
     return this.socket?.readyState === WebSocket.OPEN;
+  }
+
+  get connecting() {
+    return this.socket?.readyState === WebSocket.CONNECTING;
   }
 
   get members() {

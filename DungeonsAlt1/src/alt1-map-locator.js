@@ -4,7 +4,7 @@ import {
   isValidInGameMapFrame,
   isValidMap,
   readGameMap,
-} from "./map-core.js?v=20260625-4";
+} from "./map-core.js?v=20260625-5";
 
 // Anchor-based map location adapted from Sleepy-meh-alt-1/dg-map with
 // permission relayed by this project's maintainer. The anchor is the fixed
