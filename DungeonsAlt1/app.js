@@ -8,21 +8,21 @@ import {
   isOpened,
   mapToImage,
   toChess,
-} from "./src/map-core.js?v=20260625-8";
+} from "./src/map-core.js?v=20260625-9";
 import {
   MAP_SCALE_CANDIDATES,
   findMapByAlt1Anchor,
   findMapByScaledCorners,
   readMapAtCalibration,
   scaledFloorDimensions,
-} from "./src/alt1-map-locator.js?v=20260625-8";
+} from "./src/alt1-map-locator.js?v=20260625-9";
 import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js";
 import {
   buildMapOverlayCommands,
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260625-8";
+} from "./src/alt1-overlay.js?v=20260625-9";
 import {
   elapsedFloorMinutes,
   elapsedFloorSeconds,
@@ -30,8 +30,8 @@ import {
   floorStartForDetectedMap,
   formatElapsedClock,
   rpmValue,
-} from "./src/rpm-state.js?v=20260625-8";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-8";
+} from "./src/rpm-state.js?v=20260625-9";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-9";
 import {
   PARTY_COLORS,
   automaticPartyRoomStatus,
@@ -39,9 +39,9 @@ import {
   observedPartySlot,
   partyColor,
   reconcileObservedParty,
-} from "./src/party-core.js?v=20260625-8";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-8";
-import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-8";
+} from "./src/party-core.js?v=20260625-9";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-9";
+import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-9";
 import {
   RESULT_COLUMNS,
   RESULT_BATCH_MODES,
@@ -54,7 +54,7 @@ import {
   normalizeResultBatchTarget,
   safeFilePart,
   safeTimestampForFilename,
-} from "./src/results-core.js?v=20260625-8";
+} from "./src/results-core.js?v=20260625-9";
 import {
   chooseSaveFolder,
   clearStoredSaveFolder,
@@ -62,9 +62,9 @@ import {
   querySaveFolderPermission,
   supportsFolderSaving,
   writeDataUrlToFolder,
-} from "./src/file-saver.js?v=20260625-8";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-8";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-8";
+} from "./src/file-saver.js?v=20260625-9";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-9";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-9";
 import { WinterfaceReader } from "./src/winterface.js";
 
 const SCAN_INTERVAL = 600;
@@ -1923,9 +1923,23 @@ function applyExperimentalState() {
 async function initPartyOcrFont() {
   try {
     if (window.__dungeonsOcrReady) await window.__dungeonsOcrReady;
-    state.chatboxFont = await loadChatboxFont(window);
   } catch {
-    state.chatboxFont = null;
+    // OCR bundle load failed; loadChatboxFont will just return null below.
+  }
+  // Retry a few times: the Alt1 OCR globals can attach a moment after the
+  // bundle scripts resolve.
+  for (let attempt = 0; attempt < 5 && !state.chatboxFont; attempt += 1) {
+    try {
+      state.chatboxFont = await loadChatboxFont(window);
+    } catch {
+      state.chatboxFont = null;
+    }
+    if (!state.chatboxFont) await new Promise((resolve) => setTimeout(resolve, 800));
+  }
+  if (state.experimentalEnabled && elements.partyScanStatus) {
+    elements.partyScanStatus.textContent = state.chatboxFont
+      ? "Chatbox OCR font ready — scan the DG party"
+      : "Chatbox OCR font unavailable; party names use a fallback font";
   }
 }
 

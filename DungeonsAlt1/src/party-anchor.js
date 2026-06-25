@@ -1,4 +1,5 @@
-import { nearestPartySlot, normalizeOcrPartyName } from "./party-interface.js?v=20260625-8";
+import { nearestPartySlot, normalizeOcrPartyName } from "./party-interface.js?v=20260625-9";
+import { CHATBOX_FONT_PNG_BASE64 } from "./chatbox-font-data.js?v=20260625-9";
 
 // Sprite-anchor reader for the RuneScape Dungeoneering party interface, ported
 // from the working Sleepy-meh-alt-1/dg-map plugin (with the maintainer's
@@ -53,15 +54,35 @@ export const CHATBOX_FONT_CONFIG = Object.freeze({
 export async function loadChatboxFont(runtime = globalThis) {
   const a1lib = runtime?.A1lib ?? runtime?.a1lib;
   const ocr = runtime?.OCR ?? runtime?.ocr;
-  if (typeof a1lib?.ImageDetect?.imageDataFromUrl !== "function" || typeof ocr?.loadFontImage !== "function") {
-    return null;
+  const imageDetect = a1lib?.ImageDetect;
+  if (typeof ocr?.loadFontImage !== "function" || !imageDetect) return null;
+
+  // Try several ways to obtain the font ImageData, most robust first. The
+  // embedded base64 needs no network fetch (the previous URL-only path silently
+  // left party names on a mono fallback font whenever the fetch did not return
+  // usable pixels); the asset URL stays as a last resort.
+  const sources = [];
+  if (typeof imageDetect.imageDataFromUrl === "function") {
+    sources.push(() => imageDetect.imageDataFromUrl(`data:image/png;base64,${CHATBOX_FONT_PNG_BASE64}`));
   }
-  try {
-    const image = await a1lib.ImageDetect.imageDataFromUrl(CHATBOX_FONT_URL);
-    return ocr.loadFontImage(image, { ...CHATBOX_FONT_CONFIG });
-  } catch {
-    return null;
+  if (typeof imageDetect.imageDataFromBase64 === "function") {
+    sources.push(() => imageDetect.imageDataFromBase64(CHATBOX_FONT_PNG_BASE64));
   }
+  if (typeof imageDetect.imageDataFromUrl === "function") {
+    sources.push(() => imageDetect.imageDataFromUrl(CHATBOX_FONT_URL));
+  }
+
+  for (const load of sources) {
+    try {
+      const image = await load();
+      if (!image || !image.width || !image.height) continue;
+      const font = ocr.loadFontImage(image, { ...CHATBOX_FONT_CONFIG });
+      if (font?.chars?.length) return font;
+    } catch {
+      // Try the next source.
+    }
+  }
+  return null;
 }
 
 function parseMatches(value) {
