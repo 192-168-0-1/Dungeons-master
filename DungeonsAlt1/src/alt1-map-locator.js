@@ -4,7 +4,7 @@ import {
   isValidInGameMapFrame,
   isValidMap,
   readGameMap,
-} from "./map-core.js?v=20260625-3";
+} from "./map-core.js?v=20260625-4";
 
 // Anchor-based map location adapted from Sleepy-meh-alt-1/dg-map with
 // permission relayed by this project's maintainer. The anchor is the fixed
@@ -153,6 +153,54 @@ export function findMapByScaledCorners(fullClient, captureRegion, {
       score: scored.score,
     };
     if (!best || match.score > best.score) best = match;
+  }
+  return best;
+}
+
+// Re-read the map at an already calibrated location, re-detecting the floor
+// size in place exactly like the desktop EXE (MapForm.UpdateMap loops the floor
+// sizes at a fixed MapLocation and keeps the first that frames correctly). The
+// map's top-left corner stays put across floors, so only the size needs to be
+// re-evaluated each frame. Keeping x/y/scale fixed prevents the base room from
+// shifting between candidate interpretations, which is what made the rpm timer
+// jump whenever a transient miss forced a full relocation.
+export function readMapAtCalibration(captureRegion, calibration, { floors = FLOOR_SIZES } = {}) {
+  if (typeof captureRegion !== "function" || !calibration) return null;
+  const scale = Number(calibration.scale) > 0 ? Number(calibration.scale) : 1;
+  const x = Math.round(Number(calibration.x) || 0);
+  const y = Math.round(Number(calibration.y) || 0);
+  const currentName = calibration.floor?.name;
+  let best = null;
+  for (const floor of floors) {
+    const dimensions = scaledFloorDimensions(floor, scale);
+    let image;
+    try {
+      const raw = captureRegion(x, y, dimensions.width, dimensions.height);
+      image = normalizeMapCapture(raw, floor, dimensions.scale);
+    } catch {
+      continue;
+    }
+    const scored = scoreMapCandidate(image, floor);
+    if (!scored) continue;
+    // A tiny bias toward the floor we are already locked onto keeps a still
+    // valid read from flip-flopping to another size on a near tie. It is far
+    // too small to override a genuinely better read of a new floor size.
+    const stabilityBonus = currentName && floor.name === currentName ? 1 : 0;
+    const total = scored.score + stabilityBonus;
+    if (!best || total > best.total) {
+      best = {
+        total,
+        x,
+        y,
+        floor,
+        scale: dimensions.scale,
+        captureWidth: dimensions.width,
+        captureHeight: dimensions.height,
+        image,
+        scoredMap: scored,
+        gameMap: scored.gameMap,
+      };
+    }
   }
   return best;
 }

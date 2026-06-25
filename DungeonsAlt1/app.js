@@ -8,22 +8,21 @@ import {
   isOpened,
   mapToImage,
   toChess,
-} from "./src/map-core.js?v=20260625-3";
+} from "./src/map-core.js?v=20260625-4";
 import {
   MAP_SCALE_CANDIDATES,
   findMapByAlt1Anchor,
   findMapByScaledCorners,
-  normalizeMapCapture,
+  readMapAtCalibration,
   scaledFloorDimensions,
-  scoreMapCandidate,
-} from "./src/alt1-map-locator.js?v=20260625-3";
+} from "./src/alt1-map-locator.js?v=20260625-4";
 import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js";
 import {
   buildMapOverlayCommands,
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260625-3";
+} from "./src/alt1-overlay.js?v=20260625-4";
 import {
   elapsedFloorMinutes,
   elapsedFloorSeconds,
@@ -31,16 +30,16 @@ import {
   floorStartForDetectedMap,
   formatElapsedClock,
   rpmValue,
-} from "./src/rpm-state.js?v=20260625-3";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-3";
+} from "./src/rpm-state.js?v=20260625-4";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-4";
 import {
   PARTY_COLORS,
   mergeObservedPartyCache,
   observedPartySlot,
   partyColor,
   reconcileObservedParty,
-} from "./src/party-core.js?v=20260625-3";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-3";
+} from "./src/party-core.js?v=20260625-4";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-4";
 import {
   RESULT_COLUMNS,
   RESULT_BATCH_MODES,
@@ -53,7 +52,7 @@ import {
   normalizeResultBatchTarget,
   safeFilePart,
   safeTimestampForFilename,
-} from "./src/results-core.js?v=20260625-3";
+} from "./src/results-core.js?v=20260625-4";
 import {
   chooseSaveFolder,
   clearStoredSaveFolder,
@@ -61,9 +60,9 @@ import {
   querySaveFolderPermission,
   supportsFolderSaving,
   writeDataUrlToFolder,
-} from "./src/file-saver.js?v=20260625-3";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-3";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-3";
+} from "./src/file-saver.js?v=20260625-4";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-4";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-4";
 import { WinterfaceReader } from "./src/winterface.js";
 
 const SCAN_INTERVAL = 600;
@@ -301,6 +300,14 @@ function clearCalibration() {
   storageRemove(`${STORAGE_PREFIX}:calibration`);
 }
 
+function sameCalibration(left, right) {
+  return Boolean(left && right
+    && left.x === right.x
+    && left.y === right.y
+    && left.floor?.name === right.floor?.name
+    && (left.scale || 1) === (right.scale || 1));
+}
+
 function findMapInRuneScapeClient() {
   const anchored = findMapByAlt1Anchor(window.alt1, captureRegion);
   if (anchored) return anchored;
@@ -356,31 +363,34 @@ async function updateMap() {
   let shouldRecalibrate = false;
   try {
     assertAlt1Ready();
-    let nextCalibration = state.calibration;
-    let { x, y, floor } = nextCalibration;
-    let dimensions = scaledFloorDimensions(floor, nextCalibration.scale || 1);
-    let rawImage = captureRegion(x, y, dimensions.width, dimensions.height);
-    let image = normalizeMapCapture(rawImage, floor, dimensions.scale);
-    let scoredMap = scoreMapCandidate(image, floor);
-    if (!scoredMap) {
-      // Reacquire a moved map immediately so native labels, gatestones and the
-      // stats strip remain magnetically attached to its client coordinates.
+    // Re-read at the locked location, re-detecting the floor size in place the
+    // way the desktop EXE does (MapForm.UpdateMap). Only fall back to a full
+    // client search when the map can no longer be framed at its calibrated
+    // coordinates at all. This keeps x/y/scale stable so the base room — and
+    // therefore the rpm timer — does not jump on a transient read miss.
+    let read = readMapAtCalibration(captureRegion, state.calibration);
+    if (!read) {
       const relocated = findMapInRuneScapeClient();
-      if (relocated) {
-        nextCalibration = relocated;
-        ({ x, y, floor } = nextCalibration);
-        dimensions = scaledFloorDimensions(floor, relocated.scale || 1);
-        rawImage = captureRegion(x, y, dimensions.width, dimensions.height);
-        image = normalizeMapCapture(rawImage, floor, dimensions.scale);
-        scoredMap = scoreMapCandidate(image, floor);
-      }
+      if (relocated) read = readMapAtCalibration(captureRegion, relocated, { floors: [relocated.floor] });
     }
-    if (!scoredMap) {
+    if (!read) {
       state.invalidCaptures += 1;
       setStatus(`Map image lost (${state.invalidCaptures}/${INVALID_CAPTURES_BEFORE_RECALIBRATION})`, "warn");
       shouldRecalibrate = state.invalidCaptures >= INVALID_CAPTURES_BEFORE_RECALIBRATION;
       return;
     }
+
+    const nextCalibration = {
+      x: read.x,
+      y: read.y,
+      floor: read.floor,
+      scale: read.scale,
+      captureWidth: read.captureWidth,
+      captureHeight: read.captureHeight,
+    };
+    const image = read.image;
+    const scoredMap = read.scoredMap;
+    const floor = read.floor;
 
     state.invalidCaptures = 0;
     const gameMap = scoredMap.gameMap;
@@ -397,7 +407,7 @@ async function updateMap() {
       setStatus(`Possible new floor detected (${pendingReason}); waiting for confirmation`, "warn");
       return;
     }
-    if (nextCalibration !== state.calibration) {
+    if (!sameCalibration(nextCalibration, state.calibration)) {
       state.calibration = nextCalibration;
       saveCalibration();
     }

@@ -131,14 +131,20 @@ test("auto results state adds a changed screen after the previous screen disappe
   assert.notEqual(changed.key, first.key);
 });
 
-test("result fingerprints ignore timestamp but include table values", () => {
+test("result fingerprints ignore volatile fields but include the winterface values", () => {
+  // Timestamp, Roomcount and DeadEnds drift while the same results screen is
+  // open, so they must not change a floor's identity.
   assert.equal(resultFingerprint(sampleResult), resultFingerprint({ ...sampleResult, Timestamp: "later" }));
-  assert.notEqual(resultFingerprint(sampleResult), resultFingerprint({ ...sampleResult, DeadEnds: "5" }));
+  assert.equal(resultFingerprint(sampleResult), resultFingerprint({ ...sampleResult, Roomcount: "99", DeadEnds: "5" }));
+  assert.notEqual(resultFingerprint(sampleResult), resultFingerprint({ ...sampleResult, FinalXP: "999" }));
+  assert.notEqual(resultFingerprint(sampleResult), resultFingerprint({ ...sampleResult, Floor: "55" }));
 });
 
-test("result table dedupe ignores timestamp-only changes but allows real result changes", () => {
+test("result table dedupe ignores volatile map fields but allows real result changes", () => {
   const existing = [{ ...sampleResult, Timestamp: "first read" }];
   assert.equal(resultAlreadyRecorded(existing, { ...sampleResult, Timestamp: "second read" }), true);
+  // The same screen read again with a different live room count stays a dupe.
+  assert.equal(resultAlreadyRecorded(existing, { ...sampleResult, Roomcount: "1", DeadEnds: "0" }), true);
   assert.equal(resultAlreadyRecorded(existing, { ...sampleResult, FinalXP: "54321" }), false);
   assert.equal(resultAlreadyRecorded([], sampleResult), false);
 });

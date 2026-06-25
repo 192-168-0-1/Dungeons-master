@@ -23,17 +23,18 @@ function paintPartyPanel(target) {
   for (const y of [50, 72, 94, 116]) {
     for (let x = 40; x <= 220; x += 1) setPixel(target, x, y, [80, 70, 55, 255]);
   }
-  for (let x = 118; x <= 132; x += 1) setPixel(target, x, 39, [231, 80, 43, 255]);
-  for (let x = 115; x <= 135; x += 1) setPixel(target, x, 61, [53, 183, 232, 255]);
+  for (let x = 118; x <= 132; x += 1) setPixel(target, x, 39, [210, 53, 0, 255]);
+  for (let x = 115; x <= 135; x += 1) setPixel(target, x, 61, [0, 137, 133, 255]);
 }
 
 test("party row color classification follows the five RuneScape slots", () => {
-  assert.equal(isPartySlotPixel([231, 80, 43, 255], 1), true);
-  assert.equal(isPartySlotPixel([53, 183, 232, 255], 2), true);
-  assert.equal(isPartySlotPixel([82, 190, 76, 255], 3), true);
-  assert.equal(isPartySlotPixel([238, 211, 64, 255], 4), true);
-  assert.equal(isPartySlotPixel([170, 174, 178, 255], 5), true);
-  assert.equal(isPartySlotPixel([53, 183, 232, 255], 1), false);
+  assert.equal(isPartySlotPixel([210, 53, 0, 255], 1), true);
+  assert.equal(isPartySlotPixel([0, 137, 133, 255], 2), true);
+  assert.equal(isPartySlotPixel([72, 129, 0, 255], 3), true);
+  assert.equal(isPartySlotPixel([145, 150, 0, 255], 4), true);
+  assert.equal(isPartySlotPixel([109, 134, 95, 255], 5), true);
+  assert.equal(isPartySlotPixel([0, 137, 133, 255], 1), false);
+  assert.equal(isPartySlotPixel([80, 70, 55, 255], 1), false);
 });
 
 test("OCR runtime resolves the globals exported by the Alt1 browser bundles", () => {
@@ -80,7 +81,7 @@ test("the wider three-divider party layout from RuneScape is detected", () => {
     }
   }
   for (let y = 49; y <= 58; y += 1) {
-    for (let x = 118; x <= 132; x += 1) setPixel(target, x, y, [231, 80, 43, 255]);
+    for (let x = 118; x <= 132; x += 1) setPixel(target, x, y, [210, 53, 0, 255]);
   }
 
   const panel = findPartyPanel(target);
@@ -109,8 +110,8 @@ test("OCR results are attached to their detected RuneScape row", () => {
 test("occupied party rows must be contiguous from player one", () => {
   const target = image(320, 230);
   paintPartyPanel(target);
-  for (let x = 118; x <= 132; x += 1) setPixel(target, x, 105, [238, 211, 64, 255]);
-  for (let x = 118; x <= 132; x += 1) setPixel(target, x, 127, [170, 174, 178, 255]);
+  for (let x = 118; x <= 132; x += 1) setPixel(target, x, 105, [145, 150, 0, 255]);
+  for (let x = 118; x <= 132; x += 1) setPixel(target, x, 127, [109, 134, 95, 255]);
 
   const result = readPartyInterface(target);
   assert.deepEqual(result.members.map((member) => member.occupied), [true, true, false, false, false]);
@@ -143,8 +144,8 @@ test("occupied DG rows can appear above the first visible empty-row divider", ()
   for (const y of [92, 116, 140]) {
     for (let x = 50; x <= 250; x += 1) setPixel(target, x, y, [80, 70, 55, 255]);
   }
-  for (let x = 130; x <= 150; x += 1) setPixel(target, x, 58, [231, 80, 43, 255]);
-  for (let x = 130; x <= 150; x += 1) setPixel(target, x, 82, [53, 183, 232, 255]);
+  for (let x = 130; x <= 150; x += 1) setPixel(target, x, 58, [210, 53, 0, 255]);
+  for (let x = 130; x <= 150; x += 1) setPixel(target, x, 82, [0, 137, 133, 255]);
 
   const panel = findPartyPanel(target);
   assert.ok(panel);

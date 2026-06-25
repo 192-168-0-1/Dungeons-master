@@ -5,13 +5,41 @@ const MAX_DIVIDER_PIXEL_GAP = 6;
 const MIN_DIVIDER_DENSITY = 0.32;
 const MIN_OCCUPIED_PIXELS = 6;
 
+// The colours the RuneScape Dungeoneering party interface actually renders each
+// player's RSN in. These are NOT the bright colours the app draws on the map
+// (those live in PARTY_COLORS) — reading the interface needs the muted in-game
+// text colours. Values taken from the working Sleepy-meh-alt-1/dg-map plugin,
+// which the project maintainer confirmed reads this interface reliably. The
+// previous values here were the overlay colours, so name rows were never matched
+// against the right colour and the panel often went undetected.
 const SLOT_RGB = Object.freeze([
-  [231, 80, 43],
-  [53, 183, 232],
-  [82, 190, 76],
-  [238, 211, 64],
-  [170, 174, 178],
+  [210, 53, 0],    // Player 1 — orange-red
+  [0, 137, 133],   // Player 2 — teal
+  [72, 129, 0],    // Player 3 — green
+  [145, 150, 0],   // Player 4 — yellow / olive
+  [109, 134, 95],  // Player 5 — sage / grey-green
 ]);
+
+// Squared RGB radius around each reference colour. The four green-ish slots
+// (3/4/5) sit close together, so a pixel is only credited to a slot when that
+// slot is also its nearest reference — preventing cross-contamination.
+const SLOT_MATCH_DISTANCE = 60 * 60;
+
+export function nearestPartySlot(color) {
+  const [r, g, b, a] = color;
+  if (a < 180) return 0;
+  let bestSlot = 0;
+  let bestDistance = Infinity;
+  for (let index = 0; index < SLOT_RGB.length; index += 1) {
+    const [sr, sg, sb] = SLOT_RGB[index];
+    const distance = (r - sr) ** 2 + (g - sg) ** 2 + (b - sb) ** 2;
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestSlot = index + 1;
+    }
+  }
+  return bestDistance <= SLOT_MATCH_DISTANCE ? bestSlot : 0;
+}
 
 export function resolvePartyOcrRuntime(root = globalThis) {
   const base = root?.A1lib ?? root?.a1lib;
@@ -58,14 +86,7 @@ function isDividerPixel(color) {
 }
 
 export function isPartySlotPixel(color, slot) {
-  const [r, g, b, a] = color;
-  if (a < 180 || Math.max(r, g, b) < 55) return false;
-  if (slot === 1) return r >= 75 && r >= g * 1.45 && r >= b * 1.35;
-  if (slot === 2) return g >= 70 && b >= 70 && r + 25 <= Math.max(g, b) && Math.abs(g - b) <= 90;
-  if (slot === 3) return g >= 70 && g >= r + 18 && g >= b + 12;
-  if (slot === 4) return r >= 90 && g >= 75 && b + 22 <= Math.min(r, g);
-  if (slot === 5) return Math.max(r, g, b) - Math.min(r, g, b) <= 35 && r >= 85;
-  return false;
+  return nearestPartySlot(color) === slot;
 }
 
 function dividerRuns(image) {

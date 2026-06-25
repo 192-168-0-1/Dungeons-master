@@ -294,21 +294,21 @@ if (($rpmState -notmatch 'function evaluateMapTransition') -or
     ($overlay -notmatch 'rpmValue')) {
     throw 'RPM state must be centralized and must gate suspicious floor resets before updating visible stats.'
 }
-if (($app -notmatch 'map-core\.js\?v=20260625-3') -or
-    ($app -notmatch 'alt1-map-locator\.js\?v=20260625-3') -or
-    ($app -notmatch 'rpm-state\.js\?v=20260625-3') -or
-    ($app -notmatch 'team-sync\.js\?v=20260625-3') -or
-    ($app -notmatch 'party-core\.js\?v=20260625-3') -or
-    ($app -notmatch 'results-core\.js\?v=20260625-3') -or
-    ($app -notmatch 'party-menu\.js\?v=20260625-3') -or
-    ($app -notmatch 'team-gates\.js\?v=20260625-3') -or
-    ($app -notmatch 'file-saver\.js\?v=20260625-3') -or
-    ($overlay -notmatch 'map-core\.js\?v=20260625-3') -or
-    ($overlay -notmatch 'rpm-state\.js\?v=20260625-3') -or
-    ($teamSync -notmatch 'party-core\.js\?v=20260625-3') -or
-    ($teamGates -notmatch 'party-core\.js\?v=20260625-3') -or
-    ($teamGates -notmatch 'alt1-overlay\.js\?v=20260625-3') -or
-    ($mapLocator -notmatch 'map-core\.js\?v=20260625-3')) {
+if (($app -notmatch 'map-core\.js\?v=20260625-4') -or
+    ($app -notmatch 'alt1-map-locator\.js\?v=20260625-4') -or
+    ($app -notmatch 'rpm-state\.js\?v=20260625-4') -or
+    ($app -notmatch 'team-sync\.js\?v=20260625-4') -or
+    ($app -notmatch 'party-core\.js\?v=20260625-4') -or
+    ($app -notmatch 'results-core\.js\?v=20260625-4') -or
+    ($app -notmatch 'party-menu\.js\?v=20260625-4') -or
+    ($app -notmatch 'team-gates\.js\?v=20260625-4') -or
+    ($app -notmatch 'file-saver\.js\?v=20260625-4') -or
+    ($overlay -notmatch 'map-core\.js\?v=20260625-4') -or
+    ($overlay -notmatch 'rpm-state\.js\?v=20260625-4') -or
+    ($teamSync -notmatch 'party-core\.js\?v=20260625-4') -or
+    ($teamGates -notmatch 'party-core\.js\?v=20260625-4') -or
+    ($teamGates -notmatch 'alt1-overlay\.js\?v=20260625-4') -or
+    ($mapLocator -notmatch 'map-core\.js\?v=20260625-4')) {
     throw 'Changed Alt1 runtime modules must be cache-busted for existing Alt1 installations.'
 }
 if (($app -notmatch 'buildVisibleRemoteGatestones') -or
@@ -365,8 +365,9 @@ if ($runtimeSource -match '\.replaceAll\(' -or
 }
 if (($app -notmatch 'findMapByAlt1Anchor') -or
     ($app -notmatch 'findMapByScaledCorners') -or
-    ($app -notmatch 'scoreMapCandidate') -or
-    ($app -notmatch 'normalizeMapCapture') -or
+    ($app -notmatch 'readMapAtCalibration') -or
+    ($mapLocator -notmatch 'scoreMapCandidate') -or
+    ($mapLocator -notmatch 'function readMapAtCalibration') -or
     ($app -notmatch 'MAP_SCALE_CANDIDATES') -or
     ($app -notmatch 'function findMapInRuneScapeClient') -or
     ($mapLocator -notmatch 'MAP_ANCHOR') -or

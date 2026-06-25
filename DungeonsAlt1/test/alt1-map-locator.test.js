@@ -15,6 +15,7 @@ import {
   findMapByScaledCorners,
   mapCandidateFromAnchor,
   normalizeMapCapture,
+  readMapAtCalibration,
   scoreMapCandidate,
   scaledFloorDimensions,
 } from "../src/alt1-map-locator.js";
@@ -281,6 +282,49 @@ test("scaled corner locator does not stop before the real map after many earlier
   assert.equal(match.y, largeY);
   assert.equal(match.floor.name, "Large");
   assert.equal(match.readableRooms, 5);
+});
+
+test("readMapAtCalibration re-detects the floor size in place at the locked location", () => {
+  const small = FLOOR_SIZES.find((candidate) => candidate.name === "Small");
+  const large = FLOOR_SIZES.find((candidate) => candidate.name === "Large");
+  const mapX = 60;
+  const mapY = 40;
+
+  // The map at the calibrated top-left is really Large, but the stored
+  // calibration still believes it is Small. The desktop EXE recovers from this
+  // by re-detecting the size at the same location every frame.
+  const realLarge = image(large.imageWidth, large.imageHeight);
+  paintValidMapCorners(realLarge);
+  paintOpenedRoom(realLarge, large, { x: 0, y: 0 }, { base: true });
+  paintOpenedRoom(realLarge, large, { x: 1, y: 0 });
+  paintOpenedRoom(realLarge, large, { x: 2, y: 0 });
+
+  const captureRegion = (x, y, width, height) =>
+    (x === mapX && y === mapY && width === large.imageWidth && height === large.imageHeight
+      ? realLarge
+      : image(width, height));
+
+  const read = readMapAtCalibration(captureRegion, { x: mapX, y: mapY, floor: small, scale: 1 });
+  assert.ok(read);
+  assert.equal(read.x, mapX);
+  assert.equal(read.y, mapY);
+  assert.equal(read.floor.name, "Large");
+  assert.equal(read.gameMap.openedRoomCount, 3);
+});
+
+test("readMapAtCalibration keeps the locked floor when valid and returns null off the map", () => {
+  const small = FLOOR_SIZES.find((candidate) => candidate.name === "Small");
+  const valid = image(small.imageWidth, small.imageHeight);
+  paintValidMapCorners(valid);
+  paintOpenedRoom(valid, small, { x: 0, y: 0 }, { base: true });
+
+  const captureRegion = (x, y, width, height) =>
+    (width === small.imageWidth && height === small.imageHeight ? valid : image(width, height));
+  const read = readMapAtCalibration(captureRegion, { x: 10, y: 10, floor: small, scale: 1 });
+  assert.ok(read);
+  assert.equal(read.floor.name, "Small");
+
+  assert.equal(readMapAtCalibration(() => image(2, 2), { x: 0, y: 0, floor: small, scale: 1 }), null);
 });
 
 test("findMapByAlt1Anchor uses Alt1 template matching and validates the captured map", () => {

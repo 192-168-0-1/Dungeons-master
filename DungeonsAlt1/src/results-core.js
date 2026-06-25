@@ -18,7 +18,15 @@ export const RESULT_THEME_RANGES = Object.freeze({
   warped: [[48, 60]],
 });
 
-const RESULT_ID_COLUMNS = RESULT_COLUMNS.filter((column) => column !== "Timestamp");
+// A result's identity is the winterface (results screen) content only. Timestamp
+// changes on every read, and Roomcount/DeadEnds are taken from the live map,
+// which keeps updating (or is briefly lost) while the static results screen stays
+// open. Including those volatile fields gave the same screen different
+// fingerprints between auto-scans, which slipped past every dedupe layer and
+// added the floor to the table twice. The winterface OCR fields are deterministic
+// for a given screen, so they alone identify a completed floor.
+const RESULT_VOLATILE_COLUMNS = new Set(["Timestamp", "Roomcount", "DeadEnds"]);
+const RESULT_ID_COLUMNS = RESULT_COLUMNS.filter((column) => !RESULT_VOLATILE_COLUMNS.has(column));
 export const AUTO_RESULT_MISSES_BEFORE_HIDDEN = 2;
 
 export function resultFingerprint(result) {
