@@ -1,9 +1,14 @@
 export const FLOOR_START_OFFSET_MS = 2000;
 export const MIN_RPM_MINUTES = 1 / 60;
+export const MAX_RESET_RPM = 8;
 
-export function floorStartForDetectedMap(now = Date.now()) {
+export function floorStartForDetectedMap(now = Date.now(), openedRooms = 1) {
   const timestamp = Number(now);
-  return (Number.isFinite(timestamp) ? timestamp : Date.now()) - FLOOR_START_OFFSET_MS;
+  const roomCount = Math.max(0, Number(openedRooms) || 0);
+  const minimumElapsedByRooms = roomCount > 1
+    ? ((Math.max(0, roomCount - 0.8) / MAX_RESET_RPM) * 60_000)
+    : 0;
+  return (Number.isFinite(timestamp) ? timestamp : Date.now()) - Math.max(FLOOR_START_OFFSET_MS, minimumElapsedByRooms);
 }
 
 export function elapsedFloorMinutes(floorStart, now = Date.now()) {

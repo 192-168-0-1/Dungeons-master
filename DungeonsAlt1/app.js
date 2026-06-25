@@ -8,7 +8,7 @@ import {
   isOpened,
   mapToImage,
   toChess,
-} from "./src/map-core.js?v=20260624-6";
+} from "./src/map-core.js?v=20260625-1";
 import {
   MAP_SCALE_CANDIDATES,
   findMapByAlt1Anchor,
@@ -16,14 +16,14 @@ import {
   normalizeMapCapture,
   scaledFloorDimensions,
   scoreMapCandidate,
-} from "./src/alt1-map-locator.js?v=20260624-6";
+} from "./src/alt1-map-locator.js?v=20260625-1";
 import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js";
 import {
   buildMapOverlayCommands,
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260624-6";
+} from "./src/alt1-overlay.js?v=20260625-1";
 import {
   elapsedFloorMinutes,
   elapsedFloorSeconds,
@@ -31,16 +31,16 @@ import {
   floorStartForDetectedMap,
   formatElapsedClock,
   rpmValue,
-} from "./src/rpm-state.js?v=20260624-6";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260624-6";
+} from "./src/rpm-state.js?v=20260625-1";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-1";
 import {
   PARTY_COLORS,
   mergeObservedPartyCache,
   observedPartySlot,
   partyColor,
   reconcileObservedParty,
-} from "./src/party-core.js?v=20260624-6";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260624-6";
+} from "./src/party-core.js?v=20260625-1";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-1";
 import {
   RESULT_COLUMNS,
   RESULT_BATCH_MODES,
@@ -52,7 +52,7 @@ import {
   normalizeResultBatchTarget,
   safeFilePart,
   safeTimestampForFilename,
-} from "./src/results-core.js?v=20260624-6";
+} from "./src/results-core.js?v=20260625-1";
 import {
   chooseSaveFolder,
   clearStoredSaveFolder,
@@ -60,9 +60,9 @@ import {
   querySaveFolderPermission,
   supportsFolderSaving,
   writeDataUrlToFolder,
-} from "./src/file-saver.js?v=20260624-6";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260624-6";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260624-6";
+} from "./src/file-saver.js?v=20260625-1";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-1";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-1";
 import { WinterfaceReader } from "./src/winterface.js";
 
 const SCAN_INTERVAL = 600;
@@ -148,7 +148,7 @@ const state = {
   lastOverlayReport: null,
   results: [],
   resultsBusy: false,
-  autoResultState: { visible: false, key: "" },
+  autoResultState: { visible: false, key: "", handled: false },
   autoResultKeys: new Set(),
   lastAutoResultScan: 0,
   pendingFloorReset: null,
@@ -284,8 +284,8 @@ function pointInFloor(point, floor = state.gameMap?.floor) {
   return Boolean(point && floor && point.x >= 0 && point.x < floor.width && point.y >= 0 && point.y < floor.height);
 }
 
-function resetFloor(now = Date.now()) {
-  state.floorStart = floorStartForDetectedMap(now);
+function resetFloor(now = Date.now(), openedRooms = 1) {
+  state.floorStart = floorStartForDetectedMap(now, openedRooms);
   state.pendingFloorReset = null;
   state.annotations.clear();
   state.manualCritical.clear();
@@ -400,7 +400,7 @@ async function updateMap() {
       state.calibration = nextCalibration;
       saveCalibration();
     }
-    if (transition.reset) resetFloor(transition.resetAt ?? now);
+    if (transition.reset) resetFloor(transition.resetAt ?? now, gameMap.openedRoomCount);
 
     state.image = image;
     state.gameMap = gameMap;
@@ -1178,7 +1178,7 @@ async function autoCaptureDungeonResults() {
   try {
     const capture = await readDungeonResultsCapture(new Date());
     const next = nextAutoResultState(state.autoResultState, capture?.result ?? null);
-    state.autoResultState = { visible: next.visible, key: next.key };
+    state.autoResultState = { visible: next.visible, key: next.key, handled: next.handled };
     if (!capture || !next.shouldAdd || state.autoResultKeys.has(next.key)) return;
     const committed = await commitDungeonResultsCapture(capture, "auto");
     const complete = committed.status.includes("complete");

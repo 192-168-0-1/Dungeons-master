@@ -54,6 +54,7 @@ test("auto results state does nothing when no results screen is visible", () => 
   assert.deepEqual(nextAutoResultState({ visible: true, key: "old" }, null), {
     visible: false,
     key: "",
+    handled: false,
     shouldAdd: false,
   });
 });
@@ -62,10 +63,22 @@ test("auto results state adds a new screen once but not while the same screen st
   const first = nextAutoResultState({ visible: false, key: "" }, sampleResult);
   assert.equal(first.shouldAdd, true);
   assert.equal(first.visible, true);
+  assert.equal(first.handled, true);
 
   const duplicate = nextAutoResultState(first, { ...sampleResult, Timestamp: "later" });
   assert.equal(duplicate.shouldAdd, false);
   assert.equal(duplicate.key, first.key);
+  assert.equal(duplicate.handled, true);
+});
+
+test("auto results state ignores OCR changes while the same results screen remains visible", () => {
+  const first = nextAutoResultState({ visible: false, key: "", handled: false }, sampleResult);
+  const changedWhileVisible = nextAutoResultState(first, { ...sampleResult, FinalXP: "54321" });
+
+  assert.equal(changedWhileVisible.visible, true);
+  assert.equal(changedWhileVisible.shouldAdd, false);
+  assert.equal(changedWhileVisible.handled, true);
+  assert.notEqual(changedWhileVisible.key, first.key);
 });
 
 test("auto results state adds a changed screen after the previous screen disappears", () => {

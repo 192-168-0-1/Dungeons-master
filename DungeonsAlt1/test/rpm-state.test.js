@@ -33,6 +33,17 @@ test("floor timer and rpm formatting match the desktop counter baseline", () => 
   assert.equal(elapsedFloorMinutes(now, now), 1 / 60);
 });
 
+test("late map resets are backdated enough to avoid impossible initial rpm spikes", () => {
+  const now = 300_000;
+  const singleRoomStart = floorStartForDetectedMap(now, 1);
+  assert.equal(singleRoomStart, now - 2_000);
+
+  const lateStart = floorStartForDetectedMap(now, 20);
+  const minutes = elapsedFloorMinutes(lateStart, now);
+  assert.equal(rpmValue(20, minutes), "8.0");
+  assert.ok(now - lateStart > 120_000);
+});
+
 test("first valid map starts a new floor immediately", () => {
   const result = evaluateMapTransition({
     floorStart: null,

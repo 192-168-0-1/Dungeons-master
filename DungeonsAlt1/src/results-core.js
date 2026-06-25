@@ -26,13 +26,16 @@ export function resultFingerprint(result) {
 }
 
 export function nextAutoResultState(previous, result) {
-  if (!result) return { visible: false, key: "", shouldAdd: false };
+  if (!result) return { visible: false, key: "", handled: false, shouldAdd: false };
   const key = resultFingerprint(result);
   const visible = Boolean(previous?.visible);
+  const handled = visible ? Boolean(previous?.handled) : false;
+  const shouldAdd = Boolean(key) && !handled;
   return {
     visible: true,
     key,
-    shouldAdd: Boolean(key) && (!visible || previous?.key !== key),
+    handled: handled || shouldAdd,
+    shouldAdd,
   };
 }
 
