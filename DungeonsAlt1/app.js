@@ -8,21 +8,21 @@ import {
   isOpened,
   mapToImage,
   toChess,
-} from "./src/map-core.js?v=20260625-7";
+} from "./src/map-core.js?v=20260625-8";
 import {
   MAP_SCALE_CANDIDATES,
   findMapByAlt1Anchor,
   findMapByScaledCorners,
   readMapAtCalibration,
   scaledFloorDimensions,
-} from "./src/alt1-map-locator.js?v=20260625-7";
+} from "./src/alt1-map-locator.js?v=20260625-8";
 import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js";
 import {
   buildMapOverlayCommands,
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260625-7";
+} from "./src/alt1-overlay.js?v=20260625-8";
 import {
   elapsedFloorMinutes,
   elapsedFloorSeconds,
@@ -30,8 +30,8 @@ import {
   floorStartForDetectedMap,
   formatElapsedClock,
   rpmValue,
-} from "./src/rpm-state.js?v=20260625-7";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-7";
+} from "./src/rpm-state.js?v=20260625-8";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-8";
 import {
   PARTY_COLORS,
   automaticPartyRoomStatus,
@@ -39,9 +39,9 @@ import {
   observedPartySlot,
   partyColor,
   reconcileObservedParty,
-} from "./src/party-core.js?v=20260625-7";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-7";
-import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-7";
+} from "./src/party-core.js?v=20260625-8";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-8";
+import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-8";
 import {
   RESULT_COLUMNS,
   RESULT_BATCH_MODES,
@@ -54,7 +54,7 @@ import {
   normalizeResultBatchTarget,
   safeFilePart,
   safeTimestampForFilename,
-} from "./src/results-core.js?v=20260625-7";
+} from "./src/results-core.js?v=20260625-8";
 import {
   chooseSaveFolder,
   clearStoredSaveFolder,
@@ -62,9 +62,9 @@ import {
   querySaveFolderPermission,
   supportsFolderSaving,
   writeDataUrlToFolder,
-} from "./src/file-saver.js?v=20260625-7";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-7";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-7";
+} from "./src/file-saver.js?v=20260625-8";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-8";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-8";
 import { WinterfaceReader } from "./src/winterface.js";
 
 const SCAN_INTERVAL = 600;
@@ -1481,7 +1481,11 @@ function formatPartyScanStatus(result) {
 }
 
 function partyScanDebugSuffix(method) {
-  return elements.debugMode?.checked ? ` · ${method}` : "";
+  if (!elements.debugMode?.checked) return "";
+  const font = method === "sprite anchor"
+    ? state.chatboxFont ? "chatbox font" : "FALLBACK font — chatbox font failed to load"
+    : "aa font";
+  return ` · ${method} · ${font}`;
 }
 
 const PARTY_DEBUG_GROUP = "dungeons-alt1-party-debug";
@@ -1523,17 +1527,23 @@ function drawPartyDebugOverlay(panel, members = []) {
 }
 
 function maybeAutoJoinFromParty() {
-  if (!elements.experimentalAutoRoom?.checked) return;
+  const localName = elements.teamName.value.trim() || teamSync.name;
+  const status = automaticPartyRoomStatus(state.observedParty, localName);
+  const haveRoom = Boolean(status.roomCode) && status.members.length >= 2;
+  if (!elements.experimentalAutoRoom?.checked) {
+    // The scan works but auto-join is off — tell the user how to start a room.
+    if (haveRoom && !teamSync.connected) {
+      elements.partyScanStatus.textContent += " · tick “Auto-join” to start a room";
+    }
+    return;
+  }
   // Only ever auto-join from a clean state. While a socket is OPEN or still
   // CONNECTING we leave it alone: this stops a 5s rescan from tearing down an
   // in-flight handshake (the relay can cold-start for ~30s) and never silently
   // overrides a room the user joined by hand.
   if (teamSync.connected || teamSync.connecting) return;
-  const localName = elements.teamName.value.trim() || teamSync.name;
-  const status = automaticPartyRoomStatus(state.observedParty, localName);
-  // Need a scanned leader and at least one more named member to form a room.
-  if (!status.roomCode || status.members.length < 2) {
-    if (elements.debugMode?.checked) elements.teamStatus.textContent = `Auto-room waiting: ${status.message}`;
+  if (!haveRoom) {
+    elements.teamStatus.textContent = `Auto-room waiting: ${status.message}`;
     return;
   }
   clearRemoteTeamState();
@@ -1543,8 +1553,8 @@ function maybeAutoJoinFromParty() {
   const isLeader = status.localSlot === 1;
   elements.teamRoom.value = teamSync.connect(status.roomCode, localName, undefined, { create: isLeader });
   elements.teamStatus.textContent = status.localSlot
-    ? `Experimental: auto-joined ${status.roomCode} (leader ${status.leaderName}, you are slot ${status.localSlot})`
-    : `Experimental: auto-joined ${status.roomCode} (leader ${status.leaderName}); set your RSN to claim a slot`;
+    ? `Experimental: auto-joining ${status.roomCode} (leader ${status.leaderName}, you are slot ${status.localSlot})…`
+    : `Experimental: auto-joining ${status.roomCode} (leader ${status.leaderName}); set your RSN to claim a slot…`;
 }
 
 async function scanPartyInterface({ manual = false, forceFull = false } = {}) {

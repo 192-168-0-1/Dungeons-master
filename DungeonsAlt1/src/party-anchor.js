@@ -1,4 +1,4 @@
-import { nearestPartySlot, normalizeOcrPartyName } from "./party-interface.js?v=20260625-7";
+import { nearestPartySlot, normalizeOcrPartyName } from "./party-interface.js?v=20260625-8";
 
 // Sprite-anchor reader for the RuneScape Dungeoneering party interface, ported
 // from the working Sleepy-meh-alt-1/dg-map plugin (with the maintainer's
@@ -204,17 +204,26 @@ export function readPartyByAnchor({ api, capture, ocr, font, fonts } = {}) {
       capturedAny = true;
       pixelCount = countSlotPixels(captured, row.slot);
       if (canOcr) {
-        const cleaned = removeDgInterfaceBackground(cloneImage(captured), 5);
-        const probeX = Math.max(0, Math.round(captured.width / 2) - 10);
         const probeY = Math.round(captured.height / 2);
+        const probeXs = [Math.max(0, Math.round(captured.width / 2) - 10), 2];
+        // Read both the background-cleaned crop and the raw crop. Cleaning helps
+        // the OCR lock onto the colour, but blanking the top band can clip the
+        // dots of thin glyphs (i, j); the raw crop keeps them. We keep whichever
+        // read produces the longest valid name.
+        const variants = [removeDgInterfaceBackground(cloneImage(captured), 5), captured];
         for (const candidateFont of fontList) {
-          try {
-            const result = ocr.findReadLine(cleaned, candidateFont, [row.color], probeX, probeY);
-            const candidate = normalizeOcrPartyName(result?.text);
-            if (candidate) { name = candidate; break; }
-          } catch {
-            // Try the next font.
+          for (const variant of variants) {
+            for (const probeX of probeXs) {
+              try {
+                const result = ocr.findReadLine(variant, candidateFont, [row.color], probeX, probeY);
+                const candidate = normalizeOcrPartyName(result?.text);
+                if (candidate.length > name.length) name = candidate;
+              } catch {
+                // Try the next probe/variant/font.
+              }
+            }
           }
+          if (name) break;
         }
       }
     }
