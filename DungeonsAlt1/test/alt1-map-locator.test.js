@@ -368,6 +368,30 @@ test("findMapByAlt1Anchor uses Alt1 template matching and validates the captured
   assert.equal(calls[1][2], MAP_ANCHOR.icon);
 });
 
+test("findMapByAlt1Anchor rejects a marker-less three-corner candidate by default", () => {
+  const floor = FLOOR_SIZES.find((candidate) => candidate.name === "Large");
+  const mapX = 35;
+  const mapY = 20;
+  const anchor = { x: mapX + floor.imageWidth - MAP_ANCHOR.width, y: mapY };
+  const target = image(floor.imageWidth, floor.imageHeight);
+  paintExeMapFrame(target); // three brown corners but NO top-right map marker
+  paintReadableRoom(target, floor);
+  const api = {
+    rsWidth: 900,
+    rsHeight: 600,
+    bindRegion: () => "bind",
+    bindFindSubImg: () => JSON.stringify([anchor]),
+  };
+  const captureRegion = (x, y, width, height) =>
+    (x === mapX && y === mapY && width === floor.imageWidth && height === floor.imageHeight ? target : image(width, height));
+
+  // Calibration must reject scenery that only shares the brown corner colour.
+  assert.equal(findMapByAlt1Anchor(api, captureRegion), null);
+  const relaxed = findMapByAlt1Anchor(api, captureRegion, { requireMarker: false });
+  assert.ok(relaxed);
+  assert.equal(relaxed.validCorners, false);
+});
+
 test("findMapByAlt1Anchor safely falls back when the Alt1 bind API is missing or invalid", () => {
   assert.equal(findMapByAlt1Anchor({}, () => image(1, 1)), null);
   assert.equal(findMapByAlt1Anchor({

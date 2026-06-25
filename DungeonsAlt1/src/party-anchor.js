@@ -1,4 +1,4 @@
-import { nearestPartySlot, normalizeOcrPartyName } from "./party-interface.js?v=20260625-5";
+import { nearestPartySlot, normalizeOcrPartyName } from "./party-interface.js?v=20260625-6";
 
 // Sprite-anchor reader for the RuneScape Dungeoneering party interface, ported
 // from the working Sleepy-meh-alt-1/dg-map plugin (with the maintainer's
@@ -174,13 +174,20 @@ function cloneImage(image) {
 
 // Read the whole party panel via the icon anchor. Returns the same member shape
 // as the divider reader ({ slot, occupied, name, pixelCount }) so the app can
-// reconcile it identically, or null when the icon is not on screen.
-export function readPartyByAnchor({ api, capture, ocr, font } = {}) {
-  if (!api || typeof capture !== "function" || typeof ocr?.findReadLine !== "function" || !font?.chars) return null;
+// reconcile it identically, or null when the icon is not on screen. The font is
+// optional: locating the panel and per-row occupancy (by player-colour pixels)
+// work without OCR, so the panel is still found when the chatbox font failed to
+// load — names are just read with whatever fonts are available.
+export function readPartyByAnchor({ api, capture, ocr, font, fonts } = {}) {
+  if (!api || typeof capture !== "function") return null;
   const dgIcon = findDgIcon(api);
   if (!dgIcon) return null;
   const layout = locatePartyRows(api, dgIcon);
   if (!layout) return null;
+
+  const fontList = [font, ...(Array.isArray(fonts) ? fonts : [])]
+    .filter((candidate, index, list) => candidate?.chars && list.indexOf(candidate) === index);
+  const canOcr = typeof ocr?.findReadLine === "function" && fontList.length > 0;
 
   let foundEmptyRow = false;
   let capturedAny = false;
@@ -196,18 +203,19 @@ export function readPartyByAnchor({ api, capture, ocr, font } = {}) {
     if (captured?.data) {
       capturedAny = true;
       pixelCount = countSlotPixels(captured, row.slot);
-      const cleaned = removeDgInterfaceBackground(cloneImage(captured), 5);
-      try {
-        const result = ocr.findReadLine(
-          cleaned,
-          font,
-          [row.color],
-          Math.max(0, Math.round(captured.width / 2) - 10),
-          Math.round(captured.height / 2),
-        );
-        name = normalizeOcrPartyName(result?.text);
-      } catch {
-        name = "";
+      if (canOcr) {
+        const cleaned = removeDgInterfaceBackground(cloneImage(captured), 5);
+        const probeX = Math.max(0, Math.round(captured.width / 2) - 10);
+        const probeY = Math.round(captured.height / 2);
+        for (const candidateFont of fontList) {
+          try {
+            const result = ocr.findReadLine(cleaned, candidateFont, [row.color], probeX, probeY);
+            const candidate = normalizeOcrPartyName(result?.text);
+            if (candidate) { name = candidate; break; }
+          } catch {
+            // Try the next font.
+          }
+        }
       }
     }
     // PARITY: same occupancy gate as the divider reader's MIN_OCCUPIED_PIXELS.

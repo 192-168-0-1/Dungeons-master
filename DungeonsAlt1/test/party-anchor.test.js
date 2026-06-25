@@ -124,3 +124,23 @@ test("readPartyByAnchor returns null when the DG icon is not on screen", () => {
   const result = readPartyByAnchor({ api, capture: () => image(120, 20), ocr: { findReadLine: () => ({ text: "" }) }, font: { chars: "a" } });
   assert.equal(result, null);
 });
+
+test("readPartyByAnchor still locates the panel and flags occupancy without any OCR font", () => {
+  const api = fakeApi({ dgIconHit: { x: 100, y: 50 }, rowEndOffset: 130 });
+  const capture = (x, y, width, height) => {
+    const img = image(width, height, [50, 46, 40, 255]);
+    if (y === 47) {
+      const color = PARTY_SLOT_COLORS[0];
+      for (let px = 8; px < 24; px += 1) setPixel(img, px, Math.floor(height / 2), [...color, 255]);
+    }
+    return img;
+  };
+  // No ocr / no font: names cannot be read, but the panel is found and the
+  // coloured row is still marked occupied by its pixel evidence.
+  const result = readPartyByAnchor({ api, capture });
+  assert.ok(result);
+  assert.equal(result.panel.method, "anchor");
+  assert.equal(result.members[0].occupied, true);
+  assert.equal(result.members[0].name, "");
+  assert.deepEqual(result.members.slice(1).map((m) => m.occupied), [false, false, false, false]);
+});

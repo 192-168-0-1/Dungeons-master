@@ -4,7 +4,7 @@ import {
   isValidInGameMapFrame,
   isValidMap,
   readGameMap,
-} from "./map-core.js?v=20260625-5";
+} from "./map-core.js?v=20260625-6";
 
 // Anchor-based map location adapted from Sleepy-meh-alt-1/dg-map with
 // permission relayed by this project's maintainer. The anchor is the fixed
@@ -125,6 +125,7 @@ export function findMapByScaledCorners(fullClient, captureRegion, {
   floors = FLOOR_SIZES,
   scales = MAP_SCALE_CANDIDATES,
   limit = Number.POSITIVE_INFINITY,
+  requireMarker = true,
 } = {}) {
   if (!fullClient || typeof captureRegion !== "function") return null;
   const candidates = findMapCandidatesByCorners(fullClient, { floors, scales, limit });
@@ -139,6 +140,10 @@ export function findMapByScaledCorners(fullClient, captureRegion, {
     const normalized = normalizeMapCapture(image, candidate.floor, candidate.scale);
     const scored = scoreMapCandidate(normalized, candidate.floor);
     if (!scored) continue;
+    // Calibration must see the rare top-right map marker, not just three brown
+    // corners. This is what stops scenery (banners, flags) from being locked
+    // onto as a map, and mirrors the desktop EXE's marker-seeded FindMap.
+    if (requireMarker && !scored.validCorners) continue;
     const match = {
       x: candidate.x,
       y: candidate.y,
@@ -210,6 +215,7 @@ export function findMapByAlt1Anchor(api, captureRegion, {
   scales = MAP_SCALE_CANDIDATES,
   clientWidth = Number(api?.rsWidth) || 0,
   clientHeight = Number(api?.rsHeight) || 0,
+  requireMarker = true,
 } = {}) {
   if (!api || typeof captureRegion !== "function"
     || typeof api.bindRegion !== "function"
@@ -254,6 +260,10 @@ export function findMapByAlt1Anchor(api, captureRegion, {
         const normalized = normalizeMapCapture(image, floor, candidate.scale);
         const scored = scoreMapCandidate(normalized, floor);
         if (!scored) continue;
+        // Require the rare top-right map marker for calibration so the anchor
+        // cannot lock onto scenery (banners/flags) that merely shares the brown
+        // corner colour. Live re-reads stay lenient (readMapAtCalibration).
+        if (requireMarker && !scored.validCorners) continue;
         const match = {
           x: candidate.x,
           y: candidate.y,

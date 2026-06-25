@@ -8,21 +8,21 @@ import {
   isOpened,
   mapToImage,
   toChess,
-} from "./src/map-core.js?v=20260625-5";
+} from "./src/map-core.js?v=20260625-6";
 import {
   MAP_SCALE_CANDIDATES,
   findMapByAlt1Anchor,
   findMapByScaledCorners,
   readMapAtCalibration,
   scaledFloorDimensions,
-} from "./src/alt1-map-locator.js?v=20260625-5";
+} from "./src/alt1-map-locator.js?v=20260625-6";
 import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js";
 import {
   buildMapOverlayCommands,
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260625-5";
+} from "./src/alt1-overlay.js?v=20260625-6";
 import {
   elapsedFloorMinutes,
   elapsedFloorSeconds,
@@ -30,18 +30,18 @@ import {
   floorStartForDetectedMap,
   formatElapsedClock,
   rpmValue,
-} from "./src/rpm-state.js?v=20260625-5";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-5";
+} from "./src/rpm-state.js?v=20260625-6";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-6";
 import {
   PARTY_COLORS,
-  automaticPartyRoom,
+  automaticPartyRoomStatus,
   mergeObservedPartyCache,
   observedPartySlot,
   partyColor,
   reconcileObservedParty,
-} from "./src/party-core.js?v=20260625-5";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-5";
-import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-5";
+} from "./src/party-core.js?v=20260625-6";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-6";
+import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-6";
 import {
   RESULT_COLUMNS,
   RESULT_BATCH_MODES,
@@ -54,7 +54,7 @@ import {
   normalizeResultBatchTarget,
   safeFilePart,
   safeTimestampForFilename,
-} from "./src/results-core.js?v=20260625-5";
+} from "./src/results-core.js?v=20260625-6";
 import {
   chooseSaveFolder,
   clearStoredSaveFolder,
@@ -62,9 +62,9 @@ import {
   querySaveFolderPermission,
   supportsFolderSaving,
   writeDataUrlToFolder,
-} from "./src/file-saver.js?v=20260625-5";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-5";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-5";
+} from "./src/file-saver.js?v=20260625-6";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-6";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-6";
 import { WinterfaceReader } from "./src/winterface.js";
 
 const SCAN_INTERVAL = 600;
@@ -672,7 +672,7 @@ function drawSelection(floor) {
 
 function clearGameOverlay() {
   if (hasAlt1() && typeof window.alt1.overLayClearGroup === "function") {
-    for (const group of ["dungeons-alt1", "dungeons-alt1-test"]) {
+    for (const group of ["dungeons-alt1", "dungeons-alt1-test", PARTY_DEBUG_GROUP]) {
       window.alt1.overLayClearGroup(group);
       if (typeof window.alt1.overLayRefreshGroup === "function") window.alt1.overLayRefreshGroup(group);
     }
@@ -1482,6 +1482,44 @@ function partyScanDebugSuffix(method) {
   return elements.debugMode?.checked ? ` · ${method}` : "";
 }
 
+const PARTY_DEBUG_GROUP = "dungeons-alt1-party-debug";
+
+function overlayArgb(r, g, b, a = 255) {
+  return (a << 24) | (r << 16) | (g << 8) | b;
+}
+
+function clearPartyDebugOverlay() {
+  if (!hasAlt1() || typeof window.alt1.overLayClearGroup !== "function") return;
+  window.alt1.overLayClearGroup(PARTY_DEBUG_GROUP);
+  if (typeof window.alt1.overLayRefreshGroup === "function") window.alt1.overLayRefreshGroup(PARTY_DEBUG_GROUP);
+}
+
+// Draw the detected DG icon, the five row crops and the read names directly on
+// the RuneScape screen so a misdetection is visible in game. Uses client capture
+// coordinates only (never screen rsX/rsY), matching the native overlay contract.
+function drawPartyDebugOverlay(panel, members = []) {
+  if (!hasAlt1() || !elements.debugMode?.checked || !panel) return;
+  const api = window.alt1;
+  if (typeof api.overLaySetGroup !== "function" || typeof api.overLayRect !== "function") return;
+  const duration = 6000;
+  api.overLaySetGroup(PARTY_DEBUG_GROUP);
+  if (typeof api.overLayClearGroup === "function") api.overLayClearGroup(PARTY_DEBUG_GROUP);
+  if (panel.anchor) {
+    api.overLayRect(overlayArgb(255, 230, 60), panel.anchor.x, panel.anchor.y, 14, 19, duration, 1);
+  }
+  for (const row of panel.rows ?? []) {
+    const member = members.find((candidate) => candidate.slot === row.slot);
+    const color = overlayArgb(row.color[0], row.color[1], row.color[2]);
+    api.overLayRect(color, row.x, row.y, row.width, row.height, duration, 1);
+    if (typeof api.overLayTextEx === "function") {
+      const label = `${row.slot}:${member?.name || (member?.occupied ? "?" : "-")}`;
+      api.overLayTextEx(label, color, 10, row.x, Math.max(0, row.y - 11), duration, "", true, false);
+    }
+  }
+  if (typeof api.overLayRefreshGroup === "function") api.overLayRefreshGroup(PARTY_DEBUG_GROUP);
+  api.overLaySetGroup("");
+}
+
 function maybeAutoJoinFromParty() {
   if (!elements.experimentalAutoRoom?.checked) return;
   // Only ever auto-join from a clean state. While a socket is OPEN or still
@@ -1490,11 +1528,21 @@ function maybeAutoJoinFromParty() {
   // overrides a room the user joined by hand.
   if (teamSync.connected || teamSync.connecting) return;
   const localName = elements.teamName.value.trim() || teamSync.name;
-  const auto = automaticPartyRoom(state.observedParty, localName);
-  if (!auto) return;
+  const status = automaticPartyRoomStatus(state.observedParty, localName);
+  // Need a scanned leader and at least one more named member to form a room.
+  if (!status.roomCode || status.members.length < 2) {
+    if (elements.debugMode?.checked) elements.teamStatus.textContent = `Auto-room waiting: ${status.message}`;
+    return;
+  }
   clearRemoteTeamState();
-  elements.teamRoom.value = teamSync.connect(auto.roomCode, localName, undefined, { create: auto.localSlot === 1 });
-  elements.teamStatus.textContent = `Experimental: auto-joined room ${auto.roomCode} from party leader ${auto.leaderName}`;
+  // Join the leader's deterministic room. Only create/host it when the scan
+  // placed us in slot 1; otherwise join (the relay forms the room on join), so a
+  // missed local RSN no longer blocks the room from starting.
+  const isLeader = status.localSlot === 1;
+  elements.teamRoom.value = teamSync.connect(status.roomCode, localName, undefined, { create: isLeader });
+  elements.teamStatus.textContent = status.localSlot
+    ? `Experimental: auto-joined ${status.roomCode} (leader ${status.leaderName}, you are slot ${status.localSlot})`
+    : `Experimental: auto-joined ${status.roomCode} (leader ${status.leaderName}); set your RSN to claim a slot`;
 }
 
 async function scanPartyInterface({ manual = false, forceFull = false } = {}) {
@@ -1502,7 +1550,7 @@ async function scanPartyInterface({ manual = false, forceFull = false } = {}) {
   state.lastPartyScan = Date.now();
   if (manual) state.partyAutoScan = true;
   if (!hasAlt1() || !window.alt1.rsLinked) {
-    state.partyAutoScan = false;
+    // Keep auto-scan armed: Alt1 may relink. The loop simply retries.
     if (manual) {
       elements.partyScanStatus.textContent = state.observedParty.length
         ? `RuneScape unavailable; cached ${state.observedParty.length} party names retained`
@@ -1516,7 +1564,6 @@ async function scanPartyInterface({ manual = false, forceFull = false } = {}) {
   // OCR-bundle load (aa_* font missing) still leaves the anchor reader working.
   const anchorReady = Boolean(state.chatboxFont) && Boolean(runtime.capture) && Boolean(runtime.ocr?.findReadLine);
   if (!runtime.capture || !runtime.ocr?.findReadLine || (!anchorReady && !runtime.font?.chars)) {
-    state.partyAutoScan = false;
     elements.partyScanStatus.textContent = state.observedParty.length
       ? `Alt1 OCR unavailable; cached ${state.observedParty.length} party names retained`
       : "Alt1 OCR runtime unavailable; using team join order";
@@ -1526,14 +1573,19 @@ async function scanPartyInterface({ manual = false, forceFull = false } = {}) {
   state.partyScanBusy = true;
   elements.partyScan.disabled = true;
   try {
-    // Preferred path: deterministic sprite-anchor read ported from dg-map. It
-    // locates the panel from the DG skill icon and reads each row with the
-    // chatbox font. Needs 100% RuneScape UI scale; otherwise it returns null and
-    // we fall back to the scale-tolerant divider detector below.
-    const anchorResult = state.chatboxFont
-      ? readPartyByAnchor({ api: window.alt1, capture: captureRegion, ocr: runtime.ocr, font: state.chatboxFont })
-      : null;
-    if (anchorResult && anchorResult.members.some((member) => member.occupied)) {
+    // Fast path: locate the panel from the DG skill icon via Alt1's native
+    // sub-image search, then read each row. Cheap enough to run on every scan
+    // (including the 5s auto loop) and works even when the chatbox font failed
+    // to load — names then come from the aa_* fonts and occupancy from pixels.
+    const anchorResult = readPartyByAnchor({
+      api: window.alt1,
+      capture: captureRegion,
+      ocr: runtime.ocr,
+      font: state.chatboxFont,
+      fonts: runtime.fonts,
+    });
+    if (anchorResult) {
+      drawPartyDebugOverlay(anchorResult.panel, anchorResult.members);
       state.partyPanel = null;
       const reconciled = reconcileObservedParty(anchorResult.members, expectedPartyNames());
       applyObservedParty(reconciled, "scan");
@@ -1545,44 +1597,38 @@ async function scanPartyInterface({ manual = false, forceFull = false } = {}) {
       return true;
     }
 
-    const attempts = [];
-    if (state.partyPanel && !forceFull) {
-      const margin = 8;
-      attempts.push({
-        x: Math.max(0, state.partyPanel.x - margin),
-        y: Math.max(0, state.partyPanel.y - margin),
-        width: 0,
-        height: 0,
-      });
-      const cached = attempts[attempts.length - 1];
-      cached.width = Math.min(window.alt1.rsWidth - cached.x, state.partyPanel.width + margin * 2);
-      cached.height = Math.min(window.alt1.rsHeight - cached.y, state.partyPanel.height + margin * 2);
-    }
-    attempts.push({ x: 0, y: 0, width: window.alt1.rsWidth, height: window.alt1.rsHeight });
-
-    for (const area of attempts) {
+    // The DG icon was not found (non-100% UI scale or a themed interface). The
+    // divider detector captures and scans the WHOLE screen and is far heavier,
+    // so it only runs on an explicit manual scan — never on the 5s auto loop,
+    // which is what used to make the app hang.
+    if (forceFull) {
+      const area = { x: 0, y: 0, width: window.alt1.rsWidth, height: window.alt1.rsHeight };
       const image = runtime.capture(area.x, area.y, area.width, area.height);
       const result = readPartyInterface(image, { ...runtime, expectedNames: expectedPartyNames() });
-      if (!result) continue;
-      state.partyPanel = globalPartyPanel(result.panel, area);
-      const reconciled = reconcileObservedParty(result.members, expectedPartyNames());
-      applyObservedParty(reconciled, "scan");
-      state.partyAutoScan = true;
-      elements.partyScanStatus.textContent = formatPartyScanStatus(result) + partyScanDebugSuffix("divider scan");
-      renderParty();
-      render();
-      maybeAutoJoinFromParty();
-      return true;
+      if (result) {
+        state.partyPanel = globalPartyPanel(result.panel, area);
+        const reconciled = reconcileObservedParty(result.members, expectedPartyNames());
+        applyObservedParty(reconciled, "scan");
+        state.partyAutoScan = true;
+        elements.partyScanStatus.textContent = formatPartyScanStatus(result) + partyScanDebugSuffix("divider scan");
+        renderParty();
+        render();
+        maybeAutoJoinFromParty();
+        return true;
+      }
     }
-    state.partyAutoScan = false;
+
+    // A miss is usually just the interface being closed or briefly occluded.
+    // Keep auto-scan armed so the loop picks the party back up when it reappears.
     state.partyPanel = null;
     elements.partyScanStatus.textContent = state.observedParty.length
-      ? `DG party interface closed; cached ${state.observedParty.length} names`
-      : "DG party interface not found; open it and try again";
+      ? `DG party interface not visible; tracking ${state.observedParty.length} cached names`
+      : forceFull
+        ? "DG party interface not found — open it in game (reads best at 100% UI scale)"
+        : "Waiting for the DG party interface — open it in game";
     return false;
   } catch (error) {
-    state.partyAutoScan = false;
-    elements.partyScanStatus.textContent = `Party scan failed: ${error.message || error}`;
+    elements.partyScanStatus.textContent = `Party scan retrying after: ${error.message || error}`;
     return false;
   } finally {
     state.partyScanBusy = false;
@@ -1714,6 +1760,10 @@ function bindEvents() {
     elements.experimentalFeatures.addEventListener("change", () => {
       applyExperimentalState();
       storageSet(`${STORAGE_PREFIX}:experimental`, elements.experimentalFeatures.checked ? "1" : "");
+      if (state.experimentalEnabled) {
+        elements.partyScanStatus.textContent = "Party tracking on — open the DG party interface in game";
+        scanPartyInterface({ manual: true });
+      }
     });
   }
   if (elements.experimentalAutoRoom) {
@@ -1725,6 +1775,7 @@ function bindEvents() {
   if (elements.debugMode) {
     elements.debugMode.addEventListener("change", () => {
       storageSet(`${STORAGE_PREFIX}:debug`, elements.debugMode.checked ? "1" : "");
+      if (!elements.debugMode.checked) clearPartyDebugOverlay();
     });
   }
   for (const row of elements.partySlots) {
@@ -1828,9 +1879,14 @@ async function scanLoop() {
 }
 
 async function partyScanLoop() {
-  if (state.experimentalEnabled && elements.partyInterface.checked && state.partyAutoScan
-    && Date.now() - state.lastPartyScan >= PARTY_SCAN_INTERVAL) {
-    await scanPartyInterface();
+  try {
+    if (state.experimentalEnabled && elements.partyInterface.checked && state.partyAutoScan
+      && Date.now() - state.lastPartyScan >= PARTY_SCAN_INTERVAL) {
+      await scanPartyInterface();
+    }
+  } catch (error) {
+    // Never let a scan error kill the loop.
+    if (elements.debugMode?.checked) elements.partyScanStatus.textContent = `Party scan loop error: ${error.message || error}`;
   }
   setTimeout(partyScanLoop, 1000);
 }
@@ -1838,7 +1894,9 @@ async function partyScanLoop() {
 function applyExperimentalState() {
   state.experimentalEnabled = Boolean(elements.experimentalFeatures?.checked);
   if (elements.experimentalTools) elements.experimentalTools.hidden = !state.experimentalEnabled;
-  if (!state.experimentalEnabled) state.partyAutoScan = false;
+  // Arm continuous party tracking while experimental is on; the scan loop only
+  // acts when the DG interface is actually on screen.
+  state.partyAutoScan = state.experimentalEnabled && Boolean(elements.partyInterface?.checked);
 }
 
 // Load the RuneScape chatbox font for the sprite-anchor party reader once Alt1's
