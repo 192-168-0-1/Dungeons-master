@@ -8,21 +8,21 @@ import {
   isOpened,
   mapToImage,
   toChess,
-} from "./src/map-core.js?v=20260625-6";
+} from "./src/map-core.js?v=20260625-7";
 import {
   MAP_SCALE_CANDIDATES,
   findMapByAlt1Anchor,
   findMapByScaledCorners,
   readMapAtCalibration,
   scaledFloorDimensions,
-} from "./src/alt1-map-locator.js?v=20260625-6";
+} from "./src/alt1-map-locator.js?v=20260625-7";
 import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js";
 import {
   buildMapOverlayCommands,
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260625-6";
+} from "./src/alt1-overlay.js?v=20260625-7";
 import {
   elapsedFloorMinutes,
   elapsedFloorSeconds,
@@ -30,8 +30,8 @@ import {
   floorStartForDetectedMap,
   formatElapsedClock,
   rpmValue,
-} from "./src/rpm-state.js?v=20260625-6";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-6";
+} from "./src/rpm-state.js?v=20260625-7";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-7";
 import {
   PARTY_COLORS,
   automaticPartyRoomStatus,
@@ -39,9 +39,9 @@ import {
   observedPartySlot,
   partyColor,
   reconcileObservedParty,
-} from "./src/party-core.js?v=20260625-6";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-6";
-import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-6";
+} from "./src/party-core.js?v=20260625-7";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-7";
+import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-7";
 import {
   RESULT_COLUMNS,
   RESULT_BATCH_MODES,
@@ -54,7 +54,7 @@ import {
   normalizeResultBatchTarget,
   safeFilePart,
   safeTimestampForFilename,
-} from "./src/results-core.js?v=20260625-6";
+} from "./src/results-core.js?v=20260625-7";
 import {
   chooseSaveFolder,
   clearStoredSaveFolder,
@@ -62,9 +62,9 @@ import {
   querySaveFolderPermission,
   supportsFolderSaving,
   writeDataUrlToFolder,
-} from "./src/file-saver.js?v=20260625-6";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-6";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-6";
+} from "./src/file-saver.js?v=20260625-7";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-7";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-7";
 import { WinterfaceReader } from "./src/winterface.js";
 
 const SCAN_INTERVAL = 600;
@@ -90,6 +90,7 @@ const elements = {
   showGrid: document.querySelector("#show-grid"),
   rpmOnly: document.querySelector("#rpm-only"),
   gameOverlay: document.querySelector("#game-overlay"),
+  statsPosition: document.querySelector("#stats-position"),
   testOverlay: document.querySelector("#test-overlay"),
   overlayStatus: document.querySelector("#overlay-status"),
   autoTrackResults: document.querySelector("#auto-track-results"),
@@ -746,6 +747,7 @@ function renderGameOverlay() {
     manualCritical: elements.rpmOnly.checked ? [] : [...state.manualCritical].map(pointFromKey),
     gatestones: elements.rpmOnly.checked ? [] : collectGatestoneMarkers(state.gameMap.floor),
     stats: currentOverlayStats(),
+    statsPosition: elements.statsPosition?.value || "bottom",
     duration: OVERLAY_DURATION,
   });
   state.lastOverlayReport = drawOverlayGroup(api, group, commands);
@@ -1682,6 +1684,13 @@ function bindEvents() {
   elements.showGrid.addEventListener("change", render);
   elements.rpmOnly.addEventListener("change", render);
   elements.gameOverlay.addEventListener("change", renderGameOverlay);
+  if (elements.statsPosition) {
+    elements.statsPosition.addEventListener("change", () => {
+      storageSet(`${STORAGE_PREFIX}:stats-position`, elements.statsPosition.value);
+      clearGameOverlay();
+      renderGameOverlay();
+    });
+  }
   elements.testOverlay.addEventListener("click", testGameOverlay);
   window.addEventListener("beforeunload", () => {
     clearGameOverlay();
@@ -1929,6 +1938,13 @@ function initialize() {
   renderParty();
   drawEmptyState();
   updateStats();
+  // Restore the saved in-game stats overlay position.
+  if (elements.statsPosition) {
+    const savedStatsPosition = storageGet(`${STORAGE_PREFIX}:stats-position`);
+    if (savedStatsPosition && [...elements.statsPosition.options].some((option) => option.value === savedStatsPosition)) {
+      elements.statsPosition.value = savedStatsPosition;
+    }
+  }
   // Restore the experimental opt-ins (all default off) before first render.
   if (elements.experimentalFeatures) elements.experimentalFeatures.checked = storageGet(`${STORAGE_PREFIX}:experimental`) === "1";
   if (elements.experimentalAutoRoom) elements.experimentalAutoRoom.checked = storageGet(`${STORAGE_PREFIX}:auto-room`) === "1";

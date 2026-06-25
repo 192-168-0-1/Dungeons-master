@@ -145,6 +145,23 @@ button:hover { border-color: #5d7a81; background: #1d2b2f; }
 button:active { transform: translateY(1px); }
 button:disabled { opacity: .5; cursor: wait; }
 
+select {
+  min-height: 28px;
+  padding: 3px 6px;
+  border: 1px solid #35464b;
+  border-radius: 4px;
+  color: #e4edef;
+  background: var(--panel-raised);
+  font: inherit;
+}
+
+.select-row {
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.select-row select { flex: 0 1 auto; }
+
 button.primary {
   border-color: #2f6e78;
   color: #062227;

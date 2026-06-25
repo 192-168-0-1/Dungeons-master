@@ -8,7 +8,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>Dungeons Alt1</title>
-  <link rel="stylesheet" href="./styles.css?v=20260625-6">
+  <link rel="stylesheet" href="./styles.css?v=20260625-7">
 </head>
 <body>
   <header class="titlebar">
@@ -55,6 +55,16 @@
         <label><input id="show-grid" type="checkbox" checked> Show grid</label>
         <label><input id="rpm-only" type="checkbox"> RPM counter only</label>
         <label><input id="game-overlay" type="checkbox" checked> Draw labels and gatestones in game</label>
+        <label class="select-row" for="stats-position">In-game RPM / stats position
+          <select id="stats-position" aria-label="In-game RPM and stats overlay position">
+            <option value="bottom" selected>Anchored below the map</option>
+            <option value="top">Fixed: above the map</option>
+            <option value="left">Fixed: left of the map</option>
+            <option value="right">Fixed: right of the map</option>
+            <option value="free">Free: top-left of screen</option>
+            <option value="hidden">Hidden</option>
+          </select>
+        </label>
         <div class="overlay-tools">
           <button id="test-overlay" type="button">Test native overlay</button>
           <small id="overlay-status">Checking native overlay…</small>
@@ -168,7 +178,7 @@
     (function bootstrapDungeons() {
       "use strict";
 
-      var fallbackVersion = "20260625-6";
+      var fallbackVersion = "20260625-7";
       var appStarted = false;
       var environment = document.getElementById("environment");
       var status = document.getElementById("status");

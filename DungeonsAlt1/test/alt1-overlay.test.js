@@ -104,6 +104,23 @@ test("stats panel sits below the scaled RuneScape map", () => {
   assert.equal(label.text, "1 room (1) | 0.3 rpm | 0 dead ends");
 });
 
+test("stats overlay can be placed on any side of the map, free, or hidden", () => {
+  const base = { stats: "x", mapX: 100, mapY: 50, floor }; // Small map is 152x152
+  const firstRect = (position, extra = {}) =>
+    buildStatsOverlayCommands({ ...base, position, ...extra }).find((command) => command.type === "rect");
+
+  assert.equal(firstRect("bottom").y, 50 + 152);
+  assert.equal(firstRect("top").y, 50 - 21);
+  const left = firstRect("left");
+  assert.equal(left.y, 50);
+  assert.ok(left.x < 100);
+  const right = firstRect("right");
+  assert.deepEqual({ x: right.x, y: right.y }, { x: 100 + 152, y: 50 });
+  const free = firstRect("free", { free: { x: 12, y: 34 } });
+  assert.deepEqual({ x: free.x, y: free.y }, { x: 12, y: 34 });
+  assert.deepEqual(buildStatsOverlayCommands({ ...base, position: "hidden" }), []);
+});
+
 test("map commands use client-relative coordinates and include every marker type", () => {
   const gatestones = assignGatestoneSlots([
     { source: "local", point: { x: 1, y: 1 }, text: "G1", fill: "#ffd23f", textColor: "#111111" },

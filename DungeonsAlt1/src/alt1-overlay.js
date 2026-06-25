@@ -1,5 +1,5 @@
-import { ROOM_SIZE, mapToImage } from "./map-core.js?v=20260625-6";
-import { rpmValue } from "./rpm-state.js?v=20260625-6";
+import { ROOM_SIZE, mapToImage } from "./map-core.js?v=20260625-7";
+import { rpmValue } from "./rpm-state.js?v=20260625-7";
 
 export const GATESTONE_POSITIONS = Object.freeze([
   [2, 21],
@@ -94,15 +94,35 @@ function overlayScaleValue(value = 1) {
   return Number.isFinite(scale) && scale > 0 ? scale : 1;
 }
 
-export function buildStatsOverlayCommands({ stats, mapX, mapY, floor, overlayScale = 1, duration = 30_000 }) {
-  if (!stats || !floor) return [];
+export const STATS_POSITIONS = Object.freeze(["bottom", "top", "left", "right", "free", "hidden"]);
+
+// Place the stats/rpm strip relative to the map rectangle, or free on screen.
+// Returns the top-left {x, y} for a barWidth x barHeight strip.
+export function statsBarOrigin({ position = "bottom", mapX, mapY, mapWidth, mapHeight, barWidth, barHeight, free = null }) {
+  const x = Math.round(mapX);
+  const y = Math.round(mapY);
+  switch (position) {
+    case "top": return { x, y: y - barHeight };
+    case "left": return { x: x - barWidth, y };
+    case "right": return { x: x + mapWidth, y };
+    case "free": return { x: Math.round(free?.x ?? 8), y: Math.round(free?.y ?? 8) };
+    case "bottom":
+    default: return { x, y: y + mapHeight };
+  }
+}
+
+export function buildStatsOverlayCommands({ stats, mapX, mapY, floor, overlayScale = 1, duration = 30_000, position = "bottom", free = null }) {
+  if (!stats || !floor || position === "hidden") return [];
   const scale = overlayScaleValue(overlayScale);
-  const originX = Math.round(mapX);
-  const barTop = Math.round(mapY + floor.imageHeight * scale);
   const barHeight = 21;
   const fontSize = 11;
   const value = String(stats);
-  const barWidth = Math.max(Math.round(floor.imageWidth * scale), estimateOverlayTextWidth(value, fontSize) + 8);
+  const mapWidth = Math.round(floor.imageWidth * scale);
+  const mapHeight = Math.round(floor.imageHeight * scale);
+  const barWidth = Math.max(mapWidth, estimateOverlayTextWidth(value, fontSize) + 8);
+  const origin = statsBarOrigin({ position, mapX, mapY, mapWidth, mapHeight, barWidth, barHeight, free });
+  const originX = Math.max(0, origin.x);
+  const barTop = Math.max(0, origin.y);
   const commands = [];
 
   // Alt1 rectangles are outlines rather than fills. Nested opaque-black
@@ -125,6 +145,8 @@ export function buildMapOverlayCommands({
   manualCritical = [],
   gatestones = [],
   stats = "",
+  statsPosition = "bottom",
+  statsFree = null,
   duration = 30_000,
 }) {
   const commands = [];
@@ -174,6 +196,8 @@ export function buildMapOverlayCommands({
       floor,
       overlayScale: scale,
       duration,
+      position: statsPosition,
+      free: statsFree,
     }));
   }
 
