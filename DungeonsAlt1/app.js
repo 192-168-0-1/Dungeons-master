@@ -8,21 +8,21 @@ import {
   isOpened,
   mapToImage,
   toChess,
-} from "./src/map-core.js?v=20260625-9";
+} from "./src/map-core.js?v=20260625-10";
 import {
   MAP_SCALE_CANDIDATES,
   findMapByAlt1Anchor,
   findMapByScaledCorners,
   readMapAtCalibration,
   scaledFloorDimensions,
-} from "./src/alt1-map-locator.js?v=20260625-9";
+} from "./src/alt1-map-locator.js?v=20260625-10";
 import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js";
 import {
   buildMapOverlayCommands,
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260625-9";
+} from "./src/alt1-overlay.js?v=20260625-10";
 import {
   elapsedFloorMinutes,
   elapsedFloorSeconds,
@@ -30,8 +30,8 @@ import {
   floorStartForDetectedMap,
   formatElapsedClock,
   rpmValue,
-} from "./src/rpm-state.js?v=20260625-9";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-9";
+} from "./src/rpm-state.js?v=20260625-10";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-10";
 import {
   PARTY_COLORS,
   automaticPartyRoomStatus,
@@ -39,9 +39,9 @@ import {
   observedPartySlot,
   partyColor,
   reconcileObservedParty,
-} from "./src/party-core.js?v=20260625-9";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-9";
-import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-9";
+} from "./src/party-core.js?v=20260625-10";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-10";
+import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-10";
 import {
   RESULT_COLUMNS,
   RESULT_BATCH_MODES,
@@ -54,7 +54,7 @@ import {
   normalizeResultBatchTarget,
   safeFilePart,
   safeTimestampForFilename,
-} from "./src/results-core.js?v=20260625-9";
+} from "./src/results-core.js?v=20260625-10";
 import {
   chooseSaveFolder,
   clearStoredSaveFolder,
@@ -62,9 +62,9 @@ import {
   querySaveFolderPermission,
   supportsFolderSaving,
   writeDataUrlToFolder,
-} from "./src/file-saver.js?v=20260625-9";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-9";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-9";
+} from "./src/file-saver.js?v=20260625-10";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-10";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-10";
 import { WinterfaceReader } from "./src/winterface.js";
 
 const SCAN_INTERVAL = 600;
@@ -1226,15 +1226,20 @@ async function autoCaptureDungeonResults() {
 }
 
 function renderResults() {
-  elements.resultsBody.replaceChildren(...state.results.map((result) => {
+  // Older Alt1/CEF builds (Chromium < 86) lack Element.replaceChildren, which
+  // threw a startup error for some users. Stick to DOM Level 1 methods that are
+  // supported everywhere Alt1 runs.
+  const tbody = elements.resultsBody;
+  while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
+  for (const result of state.results) {
     const row = document.createElement("tr");
     for (const column of RESULT_COLUMNS) {
       const cell = document.createElement("td");
       cell.textContent = result[column] ?? "";
-      row.append(cell);
+      row.appendChild(cell);
     }
-    return row;
-  }));
+    tbody.appendChild(row);
+  }
   renderResultBatchSummary();
 }
 
