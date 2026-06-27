@@ -274,9 +274,12 @@ if (($app -notmatch 'autoCaptureDungeonResults') -or
     ($app -notmatch 'resultAlreadyRecorded\(state\.results, result\)') -or
     ($resultsCore -notmatch 'nextAutoResultState') -or
     ($resultsCore -notmatch 'AUTO_RESULT_MISSES_BEFORE_HIDDEN') -or
+    ($resultsCore -notmatch 'AUTO_RESULT_STABLE_SCANS') -or
+    ($resultsCore -notmatch 'stableScansRequired') -or
     ($app -notmatch 'missing:\s*next\.missing') -or
+    ($app -notmatch 'stable:\s*next\.stable') -or
     ($resultsCore -notmatch 'plannedResultExports')) {
-    throw 'Automatic dungeon-results capture, dedupe and folder-based PNG export are incomplete.'
+    throw 'Automatic dungeon-results capture, dedupe, stability gate and folder-based PNG export are incomplete.'
 }
 if (($winterface -notmatch 'readWithOffset') -or
     ($winterface -notmatch 'WINTERFACE_WIDTH = 512') -or
@@ -299,23 +302,23 @@ if (($rpmState -notmatch 'function evaluateMapTransition') -or
     ($overlay -notmatch 'rpmValue')) {
     throw 'RPM state must be centralized and must gate suspicious floor resets before updating visible stats.'
 }
-if (($app -notmatch 'map-core\.js\?v=20260625-10') -or
-    ($app -notmatch 'alt1-map-locator\.js\?v=20260625-10') -or
-    ($app -notmatch 'rpm-state\.js\?v=20260625-10') -or
-    ($app -notmatch 'team-sync\.js\?v=20260625-10') -or
-    ($app -notmatch 'party-core\.js\?v=20260625-10') -or
-    ($app -notmatch 'results-core\.js\?v=20260625-10') -or
-    ($app -notmatch 'party-menu\.js\?v=20260625-10') -or
-    ($app -notmatch 'team-gates\.js\?v=20260625-10') -or
-    ($app -notmatch 'file-saver\.js\?v=20260625-10') -or
-    ($app -notmatch 'party-anchor\.js\?v=20260625-10') -or
-    ($overlay -notmatch 'map-core\.js\?v=20260625-10') -or
-    ($overlay -notmatch 'rpm-state\.js\?v=20260625-10') -or
-    ($teamSync -notmatch 'party-core\.js\?v=20260625-10') -or
-    ($teamGates -notmatch 'party-core\.js\?v=20260625-10') -or
-    ($teamGates -notmatch 'alt1-overlay\.js\?v=20260625-10') -or
-    ($partyAnchor -notmatch 'party-interface\.js\?v=20260625-10') -or
-    ($mapLocator -notmatch 'map-core\.js\?v=20260625-10')) {
+if (($app -notmatch 'map-core\.js\?v=20260625-11') -or
+    ($app -notmatch 'alt1-map-locator\.js\?v=20260625-11') -or
+    ($app -notmatch 'rpm-state\.js\?v=20260625-11') -or
+    ($app -notmatch 'team-sync\.js\?v=20260625-11') -or
+    ($app -notmatch 'party-core\.js\?v=20260625-11') -or
+    ($app -notmatch 'results-core\.js\?v=20260625-11') -or
+    ($app -notmatch 'party-menu\.js\?v=20260625-11') -or
+    ($app -notmatch 'team-gates\.js\?v=20260625-11') -or
+    ($app -notmatch 'file-saver\.js\?v=20260625-11') -or
+    ($app -notmatch 'party-anchor\.js\?v=20260625-11') -or
+    ($overlay -notmatch 'map-core\.js\?v=20260625-11') -or
+    ($overlay -notmatch 'rpm-state\.js\?v=20260625-11') -or
+    ($teamSync -notmatch 'party-core\.js\?v=20260625-11') -or
+    ($teamGates -notmatch 'party-core\.js\?v=20260625-11') -or
+    ($teamGates -notmatch 'alt1-overlay\.js\?v=20260625-11') -or
+    ($partyAnchor -notmatch 'party-interface\.js\?v=20260625-11') -or
+    ($mapLocator -notmatch 'map-core\.js\?v=20260625-11')) {
     throw 'Changed Alt1 runtime modules must be cache-busted for existing Alt1 installations.'
 }
 if (($app -notmatch 'buildVisibleRemoteGatestones') -or

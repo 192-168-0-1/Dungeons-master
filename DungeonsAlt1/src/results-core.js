@@ -28,6 +28,13 @@ export const RESULT_THEME_RANGES = Object.freeze({
 const RESULT_VOLATILE_COLUMNS = new Set(["Timestamp", "Roomcount", "DeadEnds"]);
 const RESULT_ID_COLUMNS = RESULT_COLUMNS.filter((column) => !RESULT_VOLATILE_COLUMNS.has(column));
 export const AUTO_RESULT_MISSES_BEFORE_HIDDEN = 2;
+// The Dungeoneering results screen animates its XP counters up after it opens
+// (and they jump to final the instant the player presses skip). Capturing on
+// the first sighting therefore reads half-counted, non-final numbers. Require
+// the winterface OCR to read identically across this many consecutive scans
+// before committing, so every value is final regardless of whether the player
+// waited out the animation or skipped it.
+export const AUTO_RESULT_STABLE_SCANS = 2;
 
 export function resultFingerprint(result) {
   if (!result || typeof result !== "object") return "";
@@ -39,31 +46,47 @@ export function resultAlreadyRecorded(results = [], result) {
   return Boolean(key) && (results ?? []).some((candidate) => resultFingerprint(candidate) === key);
 }
 
-export function nextAutoResultState(previous, result, { missesBeforeHidden = AUTO_RESULT_MISSES_BEFORE_HIDDEN } = {}) {
+export function nextAutoResultState(previous, result, {
+  missesBeforeHidden = AUTO_RESULT_MISSES_BEFORE_HIDDEN,
+  stableScansRequired = AUTO_RESULT_STABLE_SCANS,
+} = {}) {
   if (!result) {
     const visible = Boolean(previous?.visible);
     const threshold = Math.max(0, Number(missesBeforeHidden) || 0);
     const missing = visible ? (Math.max(0, Number(previous?.missing) || 0) + 1) : 0;
     if (visible && missing < threshold) {
+      // A one-off missed read is OCR noise, not the screen closing: keep the
+      // stability progress so a single dropped frame does not restart the wait.
       return {
         visible: true,
         key: previous?.key ?? "",
         handled: Boolean(previous?.handled),
         missing,
+        stable: Math.max(0, Number(previous?.stable) || 0),
         shouldAdd: false,
       };
     }
-    return { visible: false, key: "", handled: false, missing: 0, shouldAdd: false };
+    return { visible: false, key: "", handled: false, missing: 0, stable: 0, shouldAdd: false };
   }
   const key = resultFingerprint(result);
-  const visible = Boolean(previous?.visible);
-  const handled = visible ? Boolean(previous?.handled) : false;
-  const shouldAdd = Boolean(key) && !handled;
+  const required = Math.max(1, Number(stableScansRequired) || 1);
+  if (Boolean(previous?.visible) && Boolean(previous?.handled)) {
+    // Already committed this screen; ignore every further read (including OCR
+    // jitter that changes the fingerprint) until the screen disappears.
+    return { visible: true, key, handled: true, missing: 0, stable: required, shouldAdd: false };
+  }
+  // Count how many consecutive scans produced this exact reading. The counter
+  // only advances while the value holds steady, so a still-animating screen
+  // keeps resetting to 1 and is never added mid-count.
+  const sameAsPrevious = Boolean(previous?.visible) && Boolean(key) && previous?.key === key;
+  const stable = sameAsPrevious ? Math.max(1, Number(previous?.stable) || 0) + 1 : 1;
+  const shouldAdd = Boolean(key) && stable >= required;
   return {
     visible: true,
     key,
-    handled: handled || shouldAdd,
+    handled: shouldAdd,
     missing: 0,
+    stable,
     shouldAdd,
   };
 }

@@ -51,12 +51,15 @@ test("results auto tracking options are present and default off in the UI", () =
   }
 });
 
+const FRESH_AUTO_STATE = Object.freeze({ visible: false, key: "", handled: false, missing: 0, stable: 0 });
+
 test("auto results state does nothing when no results screen is visible", () => {
   assert.deepEqual(nextAutoResultState({ visible: true, key: "old" }, null), {
     visible: true,
     key: "old",
     handled: false,
     missing: 1,
+    stable: 0,
     shouldAdd: false,
   });
   assert.deepEqual(nextAutoResultState({ visible: true, key: "old" }, null, { missesBeforeHidden: 0 }), {
@@ -64,71 +67,103 @@ test("auto results state does nothing when no results screen is visible", () => 
     key: "",
     handled: false,
     missing: 0,
+    stable: 0,
     shouldAdd: false,
   });
 });
 
-test("auto results state adds a new screen once but not while the same screen stays visible", () => {
-  const first = nextAutoResultState({ visible: false, key: "" }, sampleResult);
-  assert.equal(first.shouldAdd, true);
-  assert.equal(first.visible, true);
-  assert.equal(first.handled, true);
-  assert.equal(first.missing, 0);
+test("auto results state waits for a stable reading before adding a screen", () => {
+  // First sighting: the XP counters may still be animating, so it is not added.
+  const seen = nextAutoResultState(FRESH_AUTO_STATE, sampleResult);
+  assert.equal(seen.shouldAdd, false);
+  assert.equal(seen.visible, true);
+  assert.equal(seen.handled, false);
+  assert.equal(seen.stable, 1);
 
-  const duplicate = nextAutoResultState(first, { ...sampleResult, Timestamp: "later" });
-  assert.equal(duplicate.shouldAdd, false);
-  assert.equal(duplicate.key, first.key);
-  assert.equal(duplicate.handled, true);
-  assert.equal(duplicate.missing, 0);
+  // An identical second read means the values are final — add it now.
+  const settled = nextAutoResultState(seen, { ...sampleResult, Timestamp: "later" });
+  assert.equal(settled.shouldAdd, true);
+  assert.equal(settled.handled, true);
+  assert.equal(settled.stable, 2);
+  assert.equal(settled.key, seen.key);
 });
 
-test("auto results state ignores OCR changes while the same results screen remains visible", () => {
-  const first = nextAutoResultState({ visible: false, key: "", handled: false }, sampleResult);
-  const changedWhileVisible = nextAutoResultState(first, { ...sampleResult, FinalXP: "54321" });
-
-  assert.equal(changedWhileVisible.visible, true);
-  assert.equal(changedWhileVisible.shouldAdd, false);
-  assert.equal(changedWhileVisible.handled, true);
-  assert.notEqual(changedWhileVisible.key, first.key);
+test("auto results state never adds while the XP counters are still animating", () => {
+  let state = FRESH_AUTO_STATE;
+  // Each scan reads a different (still counting up) FinalXP, so it never settles.
+  for (const xp of ["100", "5000", "9000", "12000"]) {
+    state = nextAutoResultState(state, { ...sampleResult, FinalXP: xp });
+    assert.equal(state.shouldAdd, false);
+    assert.equal(state.handled, false);
+    assert.equal(state.stable, 1);
+  }
+  // Once the counter holds steady, the next matching read commits it.
+  state = nextAutoResultState(state, { ...sampleResult, FinalXP: "12000" });
+  assert.equal(state.stable, 2);
+  assert.equal(state.shouldAdd, true);
 });
 
-test("auto results state tolerates a transient missed read without adding the same screen twice", () => {
-  const first = nextAutoResultState({ visible: false, key: "", handled: false, missing: 0 }, sampleResult);
-  const missedOnce = nextAutoResultState(first, null);
-  const recovered = nextAutoResultState(missedOnce, { ...sampleResult, FinalXP: "54321" });
+test("auto results state does not add the same screen twice once committed", () => {
+  const settled = nextAutoResultState(nextAutoResultState(FRESH_AUTO_STATE, sampleResult), sampleResult);
+  assert.equal(settled.shouldAdd, true);
 
-  assert.equal(missedOnce.visible, true);
-  assert.equal(missedOnce.handled, true);
-  assert.equal(missedOnce.missing, 1);
-  assert.equal(recovered.visible, true);
-  assert.equal(recovered.shouldAdd, false);
-  assert.equal(recovered.handled, true);
-  assert.equal(recovered.missing, 0);
+  // The screen stays open and the OCR even jitters; it must not be re-added.
+  const again = nextAutoResultState(settled, sampleResult);
+  assert.equal(again.shouldAdd, false);
+  assert.equal(again.handled, true);
+  const jitter = nextAutoResultState(settled, { ...sampleResult, FinalXP: "99999" });
+  assert.equal(jitter.shouldAdd, false);
+  assert.equal(jitter.handled, true);
 });
 
-test("auto results state resets after consecutive missed reads so the next visible screen can add", () => {
-  const first = nextAutoResultState({ visible: false, key: "", handled: false, missing: 0 }, sampleResult);
-  const missedOnce = nextAutoResultState(first, null);
+test("auto results state tolerates a transient missed read without losing stability progress", () => {
+  const seen = nextAutoResultState(FRESH_AUTO_STATE, sampleResult);
+  assert.equal(seen.stable, 1);
+  const missed = nextAutoResultState(seen, null);
+  assert.equal(missed.visible, true);
+  assert.equal(missed.missing, 1);
+  assert.equal(missed.stable, 1);
+  assert.equal(missed.shouldAdd, false);
+
+  const recovered = nextAutoResultState(missed, sampleResult);
+  assert.equal(recovered.stable, 2);
+  assert.equal(recovered.shouldAdd, true);
+});
+
+test("auto results state resets after consecutive missed reads so the next screen can stabilise", () => {
+  const seen = nextAutoResultState(FRESH_AUTO_STATE, sampleResult);
+  const missedOnce = nextAutoResultState(seen, null);
   const missedTwice = nextAutoResultState(missedOnce, null);
-  const nextScreen = nextAutoResultState(missedTwice, { ...sampleResult, FinalXP: "54321" });
-
   assert.deepEqual(missedTwice, {
     visible: false,
     key: "",
     handled: false,
     missing: 0,
+    stable: 0,
     shouldAdd: false,
   });
-  assert.equal(nextScreen.shouldAdd, true);
+
+  // A fresh screen still needs two stable reads before it is added.
+  const freshSeen = nextAutoResultState(missedTwice, { ...sampleResult, FinalXP: "54321" });
+  assert.equal(freshSeen.shouldAdd, false);
+  const freshSettled = nextAutoResultState(freshSeen, { ...sampleResult, FinalXP: "54321" });
+  assert.equal(freshSettled.shouldAdd, true);
 });
 
-test("auto results state adds a changed screen after the previous screen disappears", () => {
-  const first = nextAutoResultState({ visible: false, key: "" }, sampleResult);
-  const missedOnce = nextAutoResultState(first, null);
-  const gone = nextAutoResultState(missedOnce, null);
-  const changed = nextAutoResultState(gone, { ...sampleResult, FinalXP: "54321" });
-  assert.equal(changed.shouldAdd, true);
-  assert.notEqual(changed.key, first.key);
+test("auto results state adds a changed screen after the previous disappears", () => {
+  let state = nextAutoResultState(nextAutoResultState(FRESH_AUTO_STATE, sampleResult), sampleResult);
+  assert.equal(state.shouldAdd, true);
+  const firstKey = state.key;
+
+  // The screen closes (two misses), then a different floor appears and settles.
+  state = nextAutoResultState(state, null);
+  state = nextAutoResultState(state, null);
+  const other = { ...sampleResult, FinalXP: "54321" };
+  state = nextAutoResultState(state, other);
+  assert.equal(state.shouldAdd, false);
+  state = nextAutoResultState(state, other);
+  assert.equal(state.shouldAdd, true);
+  assert.notEqual(state.key, firstKey);
 });
 
 test("result fingerprints ignore volatile fields but include the winterface values", () => {
