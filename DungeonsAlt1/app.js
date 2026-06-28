@@ -8,21 +8,21 @@ import {
   isOpened,
   mapToImage,
   toChess,
-} from "./src/map-core.js?v=20260625-15";
+} from "./src/map-core.js?v=20260625-16";
 import {
   MAP_SCALE_CANDIDATES,
   findMapByAlt1Anchor,
   findMapByScaledCorners,
   readMapAtCalibration,
   scaledFloorDimensions,
-} from "./src/alt1-map-locator.js?v=20260625-15";
+} from "./src/alt1-map-locator.js?v=20260625-16";
 import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js";
 import {
   buildMapOverlayCommands,
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260625-15";
+} from "./src/alt1-overlay.js?v=20260625-16";
 import {
   elapsedFloorMinutes,
   elapsedFloorSeconds,
@@ -30,8 +30,8 @@ import {
   floorStartForDetectedMap,
   formatElapsedClock,
   rpmValue,
-} from "./src/rpm-state.js?v=20260625-15";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-15";
+} from "./src/rpm-state.js?v=20260625-16";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-16";
 import {
   PARTY_COLORS,
   automaticPartyRoomStatus,
@@ -40,9 +40,9 @@ import {
   partyColor,
   reconcileObservedParty,
   roomStatusLine,
-} from "./src/party-core.js?v=20260625-15";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-15";
-import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-15";
+} from "./src/party-core.js?v=20260625-16";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-16";
+import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-16";
 import {
   RESULT_COLUMNS,
   RESULT_DISPLAY_COLUMNS,
@@ -58,7 +58,7 @@ import {
   normalizeResultBatchTarget,
   safeFilePart,
   safeTimestampForFilename,
-} from "./src/results-core.js?v=20260625-15";
+} from "./src/results-core.js?v=20260625-16";
 import {
   chooseSaveFolder,
   clearStoredSaveFolder,
@@ -66,10 +66,10 @@ import {
   querySaveFolderPermission,
   supportsFolderSaving,
   writeDataUrlToFolder,
-} from "./src/file-saver.js?v=20260625-15";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-15";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-15";
-import { WinterfaceReader } from "./src/winterface.js?v=20260625-15";
+} from "./src/file-saver.js?v=20260625-16";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-16";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-16";
+import { WinterfaceReader } from "./src/winterface.js?v=20260625-16";
 
 const SCAN_INTERVAL = 600;
 const AUTO_CALIBRATION_INTERVAL = 2500;
@@ -387,7 +387,13 @@ async function updateMap() {
     // client search when the map can no longer be framed at its calibrated
     // coordinates at all. This keeps x/y/scale stable so the base room — and
     // therefore the rpm timer — does not jump on a transient read miss.
-    let read = readMapAtCalibration(captureRegion, state.calibration);
+    // Fast path: re-read only the floor size we are locked onto. The size never
+    // changes within a floor, so trying all three sizes every 600ms tripled the
+    // per-frame capture + map-read work (the biggest steady-state cost). Fall
+    // back to a full in-place size re-detect, then a client relocate, only when
+    // the locked size no longer reads — e.g. on the next floor.
+    let read = readMapAtCalibration(captureRegion, state.calibration, { floors: [state.calibration.floor] });
+    if (!read) read = readMapAtCalibration(captureRegion, state.calibration);
     if (!read) {
       const relocated = findMapInRuneScapeClient();
       if (relocated) read = readMapAtCalibration(captureRegion, relocated, { floors: [relocated.floor] });
