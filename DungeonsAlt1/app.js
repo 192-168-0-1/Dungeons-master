@@ -8,21 +8,21 @@ import {
   isOpened,
   mapToImage,
   toChess,
-} from "./src/map-core.js?v=20260625-17";
+} from "./src/map-core.js?v=20260625-18";
 import {
   MAP_SCALE_CANDIDATES,
   findMapByAlt1Anchor,
   findMapByScaledCorners,
   readMapAtCalibration,
   scaledFloorDimensions,
-} from "./src/alt1-map-locator.js?v=20260625-17";
+} from "./src/alt1-map-locator.js?v=20260625-18";
 import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js";
 import {
   buildMapOverlayCommands,
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260625-17";
+} from "./src/alt1-overlay.js?v=20260625-18";
 import {
   elapsedFloorMinutes,
   elapsedFloorSeconds,
@@ -30,8 +30,8 @@ import {
   floorStartForDetectedMap,
   formatElapsedClock,
   rpmValue,
-} from "./src/rpm-state.js?v=20260625-17";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-17";
+} from "./src/rpm-state.js?v=20260625-18";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-18";
 import {
   PARTY_COLORS,
   automaticPartyRoomStatus,
@@ -40,9 +40,9 @@ import {
   partyColor,
   reconcileObservedParty,
   roomStatusLine,
-} from "./src/party-core.js?v=20260625-17";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-17";
-import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-17";
+} from "./src/party-core.js?v=20260625-18";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-18";
+import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-18";
 import {
   RESULT_COLUMNS,
   RESULT_DISPLAY_COLUMNS,
@@ -58,7 +58,7 @@ import {
   normalizeResultBatchTarget,
   safeFilePart,
   safeTimestampForFilename,
-} from "./src/results-core.js?v=20260625-17";
+} from "./src/results-core.js?v=20260625-18";
 import {
   chooseSaveFolder,
   clearStoredSaveFolder,
@@ -66,10 +66,10 @@ import {
   querySaveFolderPermission,
   supportsFolderSaving,
   writeDataUrlToFolder,
-} from "./src/file-saver.js?v=20260625-17";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-17";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-17";
-import { WinterfaceReader } from "./src/winterface.js?v=20260625-17";
+} from "./src/file-saver.js?v=20260625-18";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-18";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-18";
+import { WinterfaceReader } from "./src/winterface.js?v=20260625-18";
 
 const SCAN_INTERVAL = 600;
 const AUTO_CALIBRATION_INTERVAL = 2500;
@@ -2100,7 +2100,10 @@ function initialize() {
     } catch {
       // Alt1 identification is useful for permissions, but it must not block the UI.
     }
-    elements.environment.textContent = `Alt1 ${window.alt1.version || ""}`.trim();
+    // Show the running app build next to the Alt1 version so a stale CEF cache
+    // is immediately visible (the displayed version must match the latest deploy).
+    const appBuild = window.__dungeonsVersion ? ` · app ${window.__dungeonsVersion}` : "";
+    elements.environment.textContent = `Alt1 ${window.alt1.version || ""}${appBuild}`.trim();
     initPartyOcrFont();
     if (state.calibration) setStatus(`Loading saved ${state.calibration.floor.name} calibration…`);
     else setStatus("Waiting for a Dungeoneering map to appear…", "warn");
