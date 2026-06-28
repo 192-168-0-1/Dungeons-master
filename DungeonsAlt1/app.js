@@ -8,21 +8,21 @@ import {
   isOpened,
   mapToImage,
   toChess,
-} from "./src/map-core.js?v=20260625-11";
+} from "./src/map-core.js?v=20260625-12";
 import {
   MAP_SCALE_CANDIDATES,
   findMapByAlt1Anchor,
   findMapByScaledCorners,
   readMapAtCalibration,
   scaledFloorDimensions,
-} from "./src/alt1-map-locator.js?v=20260625-11";
+} from "./src/alt1-map-locator.js?v=20260625-12";
 import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js";
 import {
   buildMapOverlayCommands,
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260625-11";
+} from "./src/alt1-overlay.js?v=20260625-12";
 import {
   elapsedFloorMinutes,
   elapsedFloorSeconds,
@@ -30,8 +30,8 @@ import {
   floorStartForDetectedMap,
   formatElapsedClock,
   rpmValue,
-} from "./src/rpm-state.js?v=20260625-11";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-11";
+} from "./src/rpm-state.js?v=20260625-12";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-12";
 import {
   PARTY_COLORS,
   automaticPartyRoomStatus,
@@ -39,9 +39,9 @@ import {
   observedPartySlot,
   partyColor,
   reconcileObservedParty,
-} from "./src/party-core.js?v=20260625-11";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-11";
-import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-11";
+} from "./src/party-core.js?v=20260625-12";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-12";
+import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-12";
 import {
   RESULT_COLUMNS,
   RESULT_BATCH_MODES,
@@ -54,7 +54,7 @@ import {
   normalizeResultBatchTarget,
   safeFilePart,
   safeTimestampForFilename,
-} from "./src/results-core.js?v=20260625-11";
+} from "./src/results-core.js?v=20260625-12";
 import {
   chooseSaveFolder,
   clearStoredSaveFolder,
@@ -62,10 +62,10 @@ import {
   querySaveFolderPermission,
   supportsFolderSaving,
   writeDataUrlToFolder,
-} from "./src/file-saver.js?v=20260625-11";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-11";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-11";
-import { WinterfaceReader } from "./src/winterface.js";
+} from "./src/file-saver.js?v=20260625-12";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-12";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-12";
+import { WinterfaceReader } from "./src/winterface.js?v=20260625-12";
 
 const SCAN_INTERVAL = 600;
 const AUTO_CALIBRATION_INTERVAL = 2500;
@@ -1033,6 +1033,9 @@ function resultExtraFields() {
   return {
     roomcount: state.gameMap?.openedRoomCount,
     deadEnds: state.gameMap?.deadEndCount,
+    // Prefer the floor size detected from map geometry over the unreliable
+    // "Dungeon Size" XP modifier text on the results screen.
+    floorSize: state.gameMap?.floor?.name ?? state.calibration?.floor?.name,
   };
 }
 

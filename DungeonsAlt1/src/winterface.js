@@ -159,6 +159,23 @@ function readBonus(image, offset) {
   return (low - begin + 1) / (end - begin);
 }
 
+// RuneScape's "Dungeon Size" XP modifier text is not a reliable size signal:
+// the value has changed over time (a Large floor reads "+500%" today, not the
+// historic "+850%" the C# reference hard-coded), and it can vary by context.
+// The live map geometry (152x152 Small / 152x280 Medium / 280x280 Large) is
+// unambiguous, so prefer the floor size detected during calibration and only
+// fall back to the modifier text when no map was tracked (e.g. a manual read
+// with no calibration). The fallback accepts both the current and historic
+// Large modifiers so it is never worse than the original.
+export function deriveFloorSize({ detected, sizeMod } = {}) {
+  const name = String(detected ?? "").trim();
+  if (name === "Small" || name === "Medium" || name === "Large") return name;
+  const mod = String(sizeMod ?? "").trim();
+  if (mod === "+850" || mod === "+500") return "Large";
+  if (mod === "+350") return "Medium";
+  return "Small";
+}
+
 export class WinterfaceReader {
   constructor(marker, fonts) {
     this.marker = marker;
@@ -178,7 +195,7 @@ export class WinterfaceReader {
     const offset = findTemplate(image, this.marker);
     if (!offset) return null;
     const result = Object.fromEntries(FIELDS.map((field) => [field.name, readField(image, offset, field, this.fonts)]));
-    result.FloorSize = result.SizeMod === "+850" ? "Large" : result.SizeMod === "+350" ? "Medium" : "Small";
+    result.FloorSize = deriveFloorSize({ detected: extra.floorSize, sizeMod: result.SizeMod });
     result.BonusMod = `${(readBonus(image, offset) * 100).toFixed(1)}%`;
     result.Roomcount = String(extra.roomcount ?? "");
     result.DeadEnds = String(extra.deadEnds ?? "");
