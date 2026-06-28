@@ -8,21 +8,21 @@ import {
   isOpened,
   mapToImage,
   toChess,
-} from "./src/map-core.js?v=20260625-18";
+} from "./src/map-core.js?v=20260625-19";
 import {
   MAP_SCALE_CANDIDATES,
   findMapByAlt1Anchor,
   findMapByScaledCorners,
   readMapAtCalibration,
   scaledFloorDimensions,
-} from "./src/alt1-map-locator.js?v=20260625-18";
+} from "./src/alt1-map-locator.js?v=20260625-19";
 import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js";
 import {
   buildMapOverlayCommands,
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260625-18";
+} from "./src/alt1-overlay.js?v=20260625-19";
 import {
   elapsedFloorMinutes,
   elapsedFloorSeconds,
@@ -30,8 +30,8 @@ import {
   floorStartForDetectedMap,
   formatElapsedClock,
   rpmValue,
-} from "./src/rpm-state.js?v=20260625-18";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-18";
+} from "./src/rpm-state.js?v=20260625-19";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-19";
 import {
   PARTY_COLORS,
   automaticPartyRoomStatus,
@@ -40,9 +40,9 @@ import {
   partyColor,
   reconcileObservedParty,
   roomStatusLine,
-} from "./src/party-core.js?v=20260625-18";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-18";
-import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-18";
+} from "./src/party-core.js?v=20260625-19";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-19";
+import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-19";
 import {
   RESULT_COLUMNS,
   RESULT_DISPLAY_COLUMNS,
@@ -58,7 +58,7 @@ import {
   normalizeResultBatchTarget,
   safeFilePart,
   safeTimestampForFilename,
-} from "./src/results-core.js?v=20260625-18";
+} from "./src/results-core.js?v=20260625-19";
 import {
   chooseSaveFolder,
   clearStoredSaveFolder,
@@ -66,18 +66,26 @@ import {
   querySaveFolderPermission,
   supportsFolderSaving,
   writeDataUrlToFolder,
-} from "./src/file-saver.js?v=20260625-18";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-18";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-18";
-import { WinterfaceReader } from "./src/winterface.js?v=20260625-18";
+} from "./src/file-saver.js?v=20260625-19";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-19";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-19";
+import { WinterfaceReader } from "./src/winterface.js?v=20260625-19";
 
 const SCAN_INTERVAL = 600;
 const AUTO_CALIBRATION_INTERVAL = 2500;
 const STORAGE_PREFIX = "dungeons-alt1";
 const INVALID_CAPTURES_BEFORE_RECALIBRATION = 3;
 const OVERLAY_DURATION = 30000;
+// Native overlays live for OVERLAY_DURATION, so re-issuing them every 600ms
+// frame is wasted native-call churn on the game screen. Only redraw when the
+// overlay content changes, or this often to refresh before it expires.
+const OVERLAY_REFRESH_INTERVAL = 20000;
 const PARTY_SCAN_INTERVAL = 5000;
 const RESULTS_AUTO_INTERVAL = 1500;
+
+// High-resolution timer for the optional in-app performance readout (debug mode).
+const perfNow = (typeof performance !== "undefined" && typeof performance.now === "function")
+  ? () => performance.now() : () => Date.now();
 
 const elements = {
   titlebar: document.querySelector(".titlebar"),
@@ -158,6 +166,9 @@ const state = {
   busy: false,
   lastCalibrationAttempt: 0,
   lastOverlayReport: null,
+  lastOverlaySignature: "",
+  lastOverlayDraw: 0,
+  perf: null,
   results: [],
   resultsBusy: false,
   autoResultState: { visible: false, key: "", handled: false, missing: 0, stable: 0 },
@@ -392,6 +403,7 @@ async function updateMap() {
     // per-frame capture + map-read work (the biggest steady-state cost). Fall
     // back to a full in-place size re-detect, then a client relocate, only when
     // the locked size no longer reads — e.g. on the next floor.
+    const tRead0 = perfNow();
     let read = readMapAtCalibration(captureRegion, state.calibration, { floors: [state.calibration.floor] });
     if (!read) read = readMapAtCalibration(captureRegion, state.calibration);
     if (!read && Date.now() - state.lastCalibrationAttempt >= AUTO_CALIBRATION_INTERVAL) {
@@ -445,12 +457,18 @@ async function updateMap() {
     }
     if (transition.reset) resetFloor(transition.resetAt ?? now, gameMap.openedRoomCount);
 
+    const tReadMs = perfNow() - tRead0;
     state.image = image;
     state.gameMap = gameMap;
     state.lastBase = gameMap.base ?? state.lastBase;
     state.lastRoomCount = gameMap.openedRoomCount;
+    const tDetect0 = perfNow();
     updateLocalGatestones(detectGatestones(image, gameMap));
+    const tDetectMs = perfNow() - tDetect0;
+    const tRender0 = perfNow();
     render();
+    // Per-frame phase timings (ms) for the debug performance readout.
+    state.perf = { read: tReadMs, detect: tDetectMs, render: perfNow() - tRender0 };
     setStatus(`${floor.name} map live`, "ok");
   } catch (error) {
     setStatus(error.message || String(error), "error");
@@ -500,7 +518,15 @@ function updateStats() {
   const minutes = elapsedFloorMinutes(state.floorStart, now);
   const rpm = rpmValue(rooms, minutes);
   const elapsed = formatElapsedClock(elapsedFloorSeconds(state.floorStart, now));
-  elements.stats.textContent = `${rooms} rooms (${possible}) · ${rpm} rpm · ${state.gameMap.deadEndCount} dead ends · ${elapsed}`;
+  let text = `${rooms} rooms (${possible}) · ${rpm} rpm · ${state.gameMap.deadEndCount} dead ends · ${elapsed}`;
+  // Verbose diagnostics surface the per-frame map-loop cost so a slow machine or
+  // an old Alt1 capture path can be told apart from a heavy app loop.
+  if (elements.debugMode?.checked && state.perf) {
+    const p = state.perf;
+    const total = p.read + p.detect + p.render;
+    text += ` · ⏱ ${total.toFixed(0)}ms (read ${p.read.toFixed(0)} · det ${p.detect.toFixed(0)} · draw ${p.render.toFixed(0)})`;
+  }
+  elements.stats.textContent = text;
 }
 
 function currentOverlayStats() {
@@ -738,6 +764,19 @@ function updateOverlayStatus(text = "") {
   }
 }
 
+// Re-issue the native overlay only when its content changed (or before it
+// expires). Native overlay commands are relatively costly on older Alt1/CEF, and
+// the overlay lasts OVERLAY_DURATION, so redrawing identical content every 600ms
+// frame was pure churn on the game screen.
+function drawGameOverlayGated(api, group, commands) {
+  const signature = JSON.stringify(commands);
+  const now = Date.now();
+  if (signature === state.lastOverlaySignature && now - state.lastOverlayDraw < OVERLAY_REFRESH_INTERVAL) return;
+  state.lastOverlaySignature = signature;
+  state.lastOverlayDraw = now;
+  state.lastOverlayReport = drawOverlayGroup(api, group, commands);
+}
+
 function renderGameOverlay() {
   if (!hasAlt1()) {
     updateOverlayStatus();
@@ -750,7 +789,7 @@ function renderGameOverlay() {
   }
   const group = "dungeons-alt1";
   if (!elements.gameOverlay.checked || !state.calibration || !state.gameMap || api.permissionOverlay === false) {
-    state.lastOverlayReport = drawOverlayGroup(api, group, []);
+    drawGameOverlayGated(api, group, []);
     updateOverlayStatus();
     return;
   }
@@ -773,7 +812,7 @@ function renderGameOverlay() {
     statsPosition: elements.statsPosition?.value || "bottom",
     duration: OVERLAY_DURATION,
   });
-  state.lastOverlayReport = drawOverlayGroup(api, group, commands);
+  drawGameOverlayGated(api, group, commands);
   updateOverlayStatus();
 }
 
