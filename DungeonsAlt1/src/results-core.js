@@ -8,6 +8,52 @@ export const RESULT_BATCH_MODES = Object.freeze({
   Reset: "reset",
 });
 
+// The on-screen floor-tracking table shows a compact, glanceable subset led by a
+// per-floor number. The full XP breakdown stays in every result object and in the
+// "Copy table" export (RESULT_COLUMNS); this only controls what the table renders.
+export const RESULT_DISPLAY_COLUMNS = Object.freeze([
+  { header: "#", field: "#" },
+  { header: "Floor", field: "Floor" },
+  { header: "Size", field: "FloorSize" },
+  { header: "Time", field: "Time" },
+  { header: "Rooms", field: "Roomcount" },
+  { header: "Bonus %", field: "BonusMod" },
+  { header: "Dead ends", field: "DeadEnds" },
+  { header: "Final XP", field: "FinalXP" },
+  { header: "When", field: "Timestamp" },
+]);
+
+// Group whole-number counts (e.g. Final XP "259036" -> "259,036"); leave anything
+// that is not a plain integer untouched (blank reads, already-formatted values).
+export function formatResultCount(value) {
+  const text = String(value ?? "").trim();
+  return /^\d+$/.test(text) ? Number(text).toLocaleString("en-US") : text;
+}
+
+// The stored Timestamp is a full locale date-time; the table only needs the clock
+// time. Pull HH:MM (keeping AM/PM when present); fall back to the raw string.
+export function formatResultWhen(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  const match = text.match(/(\d{1,2}:\d{2})(?::\d{2})?\s*([AP]\.?M\.?)?/i);
+  return match ? `${match[1]}${match[2] ? ` ${match[2].toUpperCase().replace(/\./g, "")}` : ""}` : text;
+}
+
+export function resultDisplayValue(result, field, number) {
+  switch (field) {
+    case "#": return number == null ? "" : String(number);
+    case "Timestamp": return formatResultWhen(result?.Timestamp);
+    case "FinalXP": return formatResultCount(result?.FinalXP);
+    default: return String(result?.[field] ?? "");
+  }
+}
+
+// The table reads top-to-bottom in play order (oldest floor = #1), independent of
+// the newest-first storage order used everywhere else.
+export function orderedResultsForDisplay(results = []) {
+  return (Array.isArray(results) ? results : []).slice().reverse();
+}
+
 export const RESULT_THEME_RANGES = Object.freeze({
   frozen: [[1, 11]],
   abandoned: [[12, 17], [30, 35]],

@@ -8,7 +8,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>Dungeons Alt1</title>
-  <link rel="stylesheet" href="./styles.css?v=20260625-13">
+  <link rel="stylesheet" href="./styles.css?v=20260625-14">
 </head>
 <body>
   <header class="titlebar">
@@ -107,9 +107,8 @@
           <table>
             <thead>
               <tr>
-                <th>Timestamp</th><th>Time</th><th>Floor</th><th>Floor XP</th><th>Prestige XP</th><th>Base XP</th>
-                <th>Size</th><th>Size mod</th><th>Bonus</th><th>Difficulty</th><th>Level</th><th>XP boost</th>
-                <th>Total mod</th><th>Final XP</th><th>Rooms</th><th>Dead ends</th>
+                <th>#</th><th>Floor</th><th>Size</th><th>Time</th><th>Rooms</th>
+                <th>Bonus %</th><th>Dead ends</th><th>Final XP</th><th>When</th>
               </tr>
             </thead>
             <tbody id="results-body"></tbody>
@@ -179,7 +178,7 @@
     (function bootstrapDungeons() {
       "use strict";
 
-      var fallbackVersion = "20260625-13";
+      var fallbackVersion = "20260625-14";
       var appStarted = false;
       var environment = document.getElementById("environment");
       var status = document.getElementById("status");

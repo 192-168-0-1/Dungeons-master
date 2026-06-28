@@ -2,9 +2,14 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
+  RESULT_DISPLAY_COLUMNS,
   averageResultTime,
+  formatResultCount,
   formatResultDuration,
+  formatResultWhen,
   nextAutoResultState,
+  orderedResultsForDisplay,
+  resultDisplayValue,
   normalizeResultBatchTarget,
   parseResultTimeSeconds,
   plannedResultExports,
@@ -34,6 +39,42 @@ const sampleResult = Object.freeze({
   FinalXP: "12345",
   Roomcount: "55",
   DeadEnds: "4",
+});
+
+test("the floor-tracking table shows the compact, numbered column set", () => {
+  assert.deepEqual(RESULT_DISPLAY_COLUMNS.map((column) => column.header), [
+    "#", "Floor", "Size", "Time", "Rooms", "Bonus %", "Dead ends", "Final XP", "When",
+  ]);
+  assert.deepEqual(RESULT_DISPLAY_COLUMNS.map((column) => column.field), [
+    "#", "Floor", "FloorSize", "Time", "Roomcount", "BonusMod", "DeadEnds", "FinalXP", "Timestamp",
+  ]);
+});
+
+test("display cells number the floor, group Final XP and shorten the timestamp", () => {
+  assert.equal(resultDisplayValue(sampleResult, "#", 3), "3");
+  assert.equal(resultDisplayValue(sampleResult, "#", null), "");
+  assert.equal(resultDisplayValue(sampleResult, "Floor", 1), "54");
+  assert.equal(resultDisplayValue(sampleResult, "FloorSize", 1), "Large");
+  assert.equal(resultDisplayValue(sampleResult, "FinalXP", 1), "12,345");
+  assert.equal(resultDisplayValue({ ...sampleResult, Timestamp: "6/28/2026, 12:31:05 PM" }, "Timestamp"), "12:31 PM");
+  assert.equal(resultDisplayValue({ FinalXP: "" }, "FinalXP"), "");
+});
+
+test("display formatters group counts and extract the clock time", () => {
+  assert.equal(formatResultCount("259036"), "259,036");
+  assert.equal(formatResultCount("18"), "18");
+  assert.equal(formatResultCount(""), "");
+  assert.equal(formatResultCount("14.0%"), "14.0%");
+  assert.equal(formatResultWhen("6/28/2026, 12:31:05 PM"), "12:31 PM");
+  assert.equal(formatResultWhen("2026-06-28 09:05:00"), "09:05");
+  assert.equal(formatResultWhen(""), "");
+});
+
+test("the table renders oldest floor first regardless of newest-first storage", () => {
+  const newestFirst = [{ Floor: "11" }, { Floor: "10" }, { Floor: "9" }];
+  assert.deepEqual(orderedResultsForDisplay(newestFirst).map((row) => row.Floor), ["9", "10", "11"]);
+  assert.deepEqual(orderedResultsForDisplay([]), []);
+  assert.deepEqual(orderedResultsForDisplay(), []);
 });
 
 test("results auto tracking options are present and default off in the UI", () => {

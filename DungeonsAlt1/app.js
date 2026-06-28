@@ -8,21 +8,21 @@ import {
   isOpened,
   mapToImage,
   toChess,
-} from "./src/map-core.js?v=20260625-13";
+} from "./src/map-core.js?v=20260625-14";
 import {
   MAP_SCALE_CANDIDATES,
   findMapByAlt1Anchor,
   findMapByScaledCorners,
   readMapAtCalibration,
   scaledFloorDimensions,
-} from "./src/alt1-map-locator.js?v=20260625-13";
+} from "./src/alt1-map-locator.js?v=20260625-14";
 import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js";
 import {
   buildMapOverlayCommands,
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260625-13";
+} from "./src/alt1-overlay.js?v=20260625-14";
 import {
   elapsedFloorMinutes,
   elapsedFloorSeconds,
@@ -30,8 +30,8 @@ import {
   floorStartForDetectedMap,
   formatElapsedClock,
   rpmValue,
-} from "./src/rpm-state.js?v=20260625-13";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-13";
+} from "./src/rpm-state.js?v=20260625-14";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-14";
 import {
   PARTY_COLORS,
   automaticPartyRoomStatus,
@@ -40,13 +40,16 @@ import {
   partyColor,
   reconcileObservedParty,
   roomStatusLine,
-} from "./src/party-core.js?v=20260625-13";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-13";
-import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-13";
+} from "./src/party-core.js?v=20260625-14";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-14";
+import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-14";
 import {
   RESULT_COLUMNS,
+  RESULT_DISPLAY_COLUMNS,
   RESULT_BATCH_MODES,
   nextAutoResultState,
+  orderedResultsForDisplay,
+  resultDisplayValue,
   plannedResultExports,
   resultAlreadyRecorded,
   resultBatchIsComplete,
@@ -55,7 +58,7 @@ import {
   normalizeResultBatchTarget,
   safeFilePart,
   safeTimestampForFilename,
-} from "./src/results-core.js?v=20260625-13";
+} from "./src/results-core.js?v=20260625-14";
 import {
   chooseSaveFolder,
   clearStoredSaveFolder,
@@ -63,10 +66,10 @@ import {
   querySaveFolderPermission,
   supportsFolderSaving,
   writeDataUrlToFolder,
-} from "./src/file-saver.js?v=20260625-13";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-13";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-13";
-import { WinterfaceReader } from "./src/winterface.js?v=20260625-13";
+} from "./src/file-saver.js?v=20260625-14";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-14";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-14";
+import { WinterfaceReader } from "./src/winterface.js?v=20260625-14";
 
 const SCAN_INTERVAL = 600;
 const AUTO_CALIBRATION_INTERVAL = 2500;
@@ -1242,23 +1245,27 @@ function renderResults() {
   // supported everywhere Alt1 runs.
   const tbody = elements.resultsBody;
   while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
-  for (const result of state.results) {
+  // Oldest floor first so the # column reads 1..N top-to-bottom.
+  orderedResultsForDisplay(state.results).forEach((result, index) => {
     const row = document.createElement("tr");
-    for (const column of RESULT_COLUMNS) {
+    for (const column of RESULT_DISPLAY_COLUMNS) {
       const cell = document.createElement("td");
-      cell.textContent = result[column] ?? "";
+      cell.textContent = resultDisplayValue(result, column.field, index + 1);
       row.appendChild(cell);
     }
     tbody.appendChild(row);
-  }
+  });
   renderResultBatchSummary();
 }
 
 async function copyResults() {
   if (!state.results.length) return;
+  // Export keeps the full XP breakdown (RESULT_COLUMNS), in the same play order
+  // as the on-screen table (oldest first), with a leading floor number.
   const text = [
-    RESULT_COLUMNS.join("\t"),
-    ...state.results.map((result) => RESULT_COLUMNS.map((column) => result[column] ?? "").join("\t")),
+    ["#", ...RESULT_COLUMNS].join("\t"),
+    ...orderedResultsForDisplay(state.results).map((result, index) =>
+      [index + 1, ...RESULT_COLUMNS.map((column) => result[column] ?? "")].join("\t")),
   ].join("\n");
   try {
     await navigator.clipboard.writeText(text);
