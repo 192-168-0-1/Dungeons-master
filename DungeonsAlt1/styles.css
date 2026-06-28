@@ -83,6 +83,18 @@ main { padding: 9px; }
 .status[data-tone="warn"] { color: var(--warning); }
 .status[data-tone="error"] { color: var(--danger); }
 
+/* Persistent "are we in a room?" line in the experimental panel. Always
+   reflects the live team-sync connection so a join is confirmed in place. */
+.room-status {
+  display: block;
+  margin: 3px 0 1px;
+  font-weight: 600;
+  color: #b8c7ca;
+}
+.room-status[data-tone="ok"] { color: #9ee6be; }
+.room-status[data-tone="warn"] { color: var(--warning); }
+.room-status[data-tone="error"] { color: var(--danger); }
+
 .stats {
   padding: 6px 9px;
   border: 1px solid var(--line);

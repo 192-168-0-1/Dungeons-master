@@ -8,21 +8,21 @@ import {
   isOpened,
   mapToImage,
   toChess,
-} from "./src/map-core.js?v=20260625-12";
+} from "./src/map-core.js?v=20260625-13";
 import {
   MAP_SCALE_CANDIDATES,
   findMapByAlt1Anchor,
   findMapByScaledCorners,
   readMapAtCalibration,
   scaledFloorDimensions,
-} from "./src/alt1-map-locator.js?v=20260625-12";
+} from "./src/alt1-map-locator.js?v=20260625-13";
 import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js";
 import {
   buildMapOverlayCommands,
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260625-12";
+} from "./src/alt1-overlay.js?v=20260625-13";
 import {
   elapsedFloorMinutes,
   elapsedFloorSeconds,
@@ -30,8 +30,8 @@ import {
   floorStartForDetectedMap,
   formatElapsedClock,
   rpmValue,
-} from "./src/rpm-state.js?v=20260625-12";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-12";
+} from "./src/rpm-state.js?v=20260625-13";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-13";
 import {
   PARTY_COLORS,
   automaticPartyRoomStatus,
@@ -39,9 +39,10 @@ import {
   observedPartySlot,
   partyColor,
   reconcileObservedParty,
-} from "./src/party-core.js?v=20260625-12";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-12";
-import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-12";
+  roomStatusLine,
+} from "./src/party-core.js?v=20260625-13";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-13";
+import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-13";
 import {
   RESULT_COLUMNS,
   RESULT_BATCH_MODES,
@@ -54,7 +55,7 @@ import {
   normalizeResultBatchTarget,
   safeFilePart,
   safeTimestampForFilename,
-} from "./src/results-core.js?v=20260625-12";
+} from "./src/results-core.js?v=20260625-13";
 import {
   chooseSaveFolder,
   clearStoredSaveFolder,
@@ -62,10 +63,10 @@ import {
   querySaveFolderPermission,
   supportsFolderSaving,
   writeDataUrlToFolder,
-} from "./src/file-saver.js?v=20260625-12";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-12";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-12";
-import { WinterfaceReader } from "./src/winterface.js?v=20260625-12";
+} from "./src/file-saver.js?v=20260625-13";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-13";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-13";
+import { WinterfaceReader } from "./src/winterface.js?v=20260625-13";
 
 const SCAN_INTERVAL = 600;
 const AUTO_CALIBRATION_INTERVAL = 2500;
@@ -121,6 +122,7 @@ const elements = {
   partyScan: document.querySelector("#party-scan"),
   partyForget: document.querySelector("#party-forget"),
   partyScanStatus: document.querySelector("#party-scan-status"),
+  roomStatus: document.querySelector("#room-status"),
   experimentalFeatures: document.querySelector("#experimental-features"),
   experimentalTools: document.querySelector("#experimental-tools"),
   experimentalAutoRoom: document.querySelector("#experimental-auto-room"),
@@ -184,6 +186,11 @@ const state = {
   experimentalEnabled: false,
   syncedLocalGatestones: new Set(),
   partyMenuTarget: null,
+  // Room-status indicator: roomWanted tracks whether we intended to be in a room
+  // (so a drop reads "connection lost" rather than "not in a room"); roomStatusHint
+  // holds the idle-state line (waiting/why-skipped) shown when no socket is live.
+  roomWanted: false,
+  roomStatusHint: null,
 };
 
 function loadCalibration() {
@@ -1535,24 +1542,56 @@ function drawPartyDebugOverlay(panel, members = []) {
   api.overLaySetGroup("");
 }
 
+const ROOM_STATUS_TONES = new Set(["", "ok", "warn", "error"]);
+
+function setRoomStatus(message, tone = "") {
+  const el = elements.roomStatus;
+  if (!el) return;
+  el.textContent = message;
+  el.dataset.tone = ROOM_STATUS_TONES.has(tone) ? tone : "";
+}
+
+// Single source of truth for the "are we in a room?" line in the experimental
+// panel. It always reflects the LIVE teamSync socket state, so a join is
+// confirmed right where the user is looking — the per-scan status line is
+// overwritten every 5s and the Team-sync panel is a different collapsible.
+// Idle reasons (auto-join off/waiting, connection lost) come from roomStatusHint.
+function renderRoomStatus() {
+  if (!elements.roomStatus) return;
+  const { message, tone } = roomStatusLine({
+    connected: teamSync.connected,
+    connecting: teamSync.connecting,
+    roomCode: teamSync.roomCode,
+    memberCount: teamSync.members.length,
+    hint: state.roomStatusHint,
+  });
+  setRoomStatus(message, tone);
+}
+
 function maybeAutoJoinFromParty() {
   const localName = elements.teamName.value.trim() || teamSync.name;
   const status = automaticPartyRoomStatus(state.observedParty, localName);
   const haveRoom = Boolean(status.roomCode) && status.members.length >= 2;
   if (!elements.experimentalAutoRoom?.checked) {
     // The scan works but auto-join is off — tell the user how to start a room.
-    if (haveRoom && !teamSync.connected) {
-      elements.partyScanStatus.textContent += " · tick “Auto-join” to start a room";
-    }
+    state.roomStatusHint = haveRoom
+      ? { message: `Party ready · tick “Auto-join” to start room ${status.roomCode}`, tone: "warn" }
+      : null;
+    renderRoomStatus();
     return;
   }
   // Only ever auto-join from a clean state. While a socket is OPEN or still
   // CONNECTING we leave it alone: this stops a 5s rescan from tearing down an
   // in-flight handshake (the relay can cold-start for ~30s) and never silently
-  // overrides a room the user joined by hand.
-  if (teamSync.connected || teamSync.connecting) return;
+  // overrides a room the user joined by hand. The indicator still reflects it.
+  if (teamSync.connected || teamSync.connecting) {
+    renderRoomStatus();
+    return;
+  }
   if (!haveRoom) {
+    state.roomStatusHint = { message: `Auto-room waiting: ${status.message}`, tone: "warn" };
     elements.teamStatus.textContent = `Auto-room waiting: ${status.message}`;
+    renderRoomStatus();
     return;
   }
   clearRemoteTeamState();
@@ -1560,10 +1599,13 @@ function maybeAutoJoinFromParty() {
   // placed us in slot 1; otherwise join (the relay forms the room on join), so a
   // missed local RSN no longer blocks the room from starting.
   const isLeader = status.localSlot === 1;
+  state.roomWanted = true;
+  state.roomStatusHint = null;
   elements.teamRoom.value = teamSync.connect(status.roomCode, localName, undefined, { create: isLeader });
   elements.teamStatus.textContent = status.localSlot
     ? `Experimental: auto-joining ${status.roomCode} (leader ${status.leaderName}, you are slot ${status.localSlot})…`
     : `Experimental: auto-joining ${status.roomCode} (leader ${status.leaderName}); set your RSN to claim a slot…`;
+  renderRoomStatus();
 }
 
 async function scanPartyInterface({ manual = false, forceFull = false } = {}) {
@@ -1752,19 +1794,28 @@ function bindEvents() {
 
   elements.teamCreate.addEventListener("click", () => {
     clearRemoteTeamState();
+    state.roomWanted = true;
+    state.roomStatusHint = null;
     elements.teamRoom.value = createRoomCode();
     elements.teamRoom.value = teamSync.connect(
       elements.teamRoom.value, elements.teamName.value, undefined, { create: true },
     );
+    renderRoomStatus();
   });
   elements.teamJoin.addEventListener("click", () => {
     clearRemoteTeamState();
+    state.roomWanted = true;
+    state.roomStatusHint = null;
     elements.teamRoom.value = teamSync.connect(elements.teamRoom.value, elements.teamName.value);
+    renderRoomStatus();
   });
   elements.teamDisconnect.addEventListener("click", () => {
+    state.roomWanted = false;
+    state.roomStatusHint = null;
     teamSync.disconnect();
     state.syncedLocalGatestones.clear();
     clearRemoteTeamState();
+    renderRoomStatus();
   });
   elements.partyScan.addEventListener("click", () => scanPartyInterface({ manual: true, forceFull: true }));
   elements.partyForget.addEventListener("click", forgetParty);
@@ -1790,6 +1841,7 @@ function bindEvents() {
       storageSet(`${STORAGE_PREFIX}:experimental`, elements.experimentalFeatures.checked ? "1" : "");
       if (state.experimentalEnabled) {
         elements.partyScanStatus.textContent = "Party tracking on — open the DG party interface in game";
+        renderRoomStatus();
         scanPartyInterface({ manual: true });
       }
     });
@@ -1798,6 +1850,7 @@ function bindEvents() {
     elements.experimentalAutoRoom.addEventListener("change", () => {
       storageSet(`${STORAGE_PREFIX}:auto-room`, elements.experimentalAutoRoom.checked ? "1" : "");
       if (elements.experimentalAutoRoom.checked) maybeAutoJoinFromParty();
+      else renderRoomStatus();
     });
   }
   if (elements.debugMode) {
@@ -1820,13 +1873,27 @@ function bindEvents() {
       hidePartyContextMenu();
     }
   });
-  teamSync.addEventListener("status", (event) => { elements.teamStatus.textContent = event.detail; });
+  teamSync.addEventListener("status", (event) => {
+    elements.teamStatus.textContent = event.detail;
+    renderRoomStatus();
+  });
   teamSync.addEventListener("connected", () => {
+    state.roomWanted = true;
+    state.roomStatusHint = null;
     sendTeamSnapshot();
+    renderRoomStatus();
   });
   teamSync.addEventListener("disconnected", () => {
     state.syncedLocalGatestones.clear();
     clearRemoteTeamState();
+    // An unexpected drop (we still wanted the room) reads as a lost connection;
+    // a deliberate disconnect / kick / full-room clears roomWanted first so this
+    // does not overwrite their more specific reason.
+    if (state.roomWanted) {
+      state.roomStatusHint = { message: "Room connection lost — rescan or press Join to rejoin", tone: "error" };
+    }
+    state.roomWanted = false;
+    renderRoomStatus();
   });
   teamSync.addEventListener("hello", (event) => {
     if (trustedTeamSender(event.detail.senderId)) sendTeamSnapshot();
@@ -1840,6 +1907,7 @@ function bindEvents() {
   });
   teamSync.addEventListener("roster", () => {
     renderParty();
+    renderRoomStatus();
     const memberIds = new Set(teamSync.members.map((member) => member.id));
     if (memberIds.size) {
       for (const ownerId of state.teamGatestones.keys()) {
@@ -1853,7 +1921,14 @@ function bindEvents() {
     }
     render();
   });
-  teamSync.addEventListener("full", clearTeamGatestones);
+  teamSync.addEventListener("full", () => {
+    clearTeamGatestones();
+    // The relay rejected us and is about to drop the socket; show why instead of
+    // a generic "connection lost", and stop roomWanted from overriding it.
+    state.roomWanted = false;
+    state.roomStatusHint = { message: `Room ${teamSync.roomCode} is full (5/5) — not joined`, tone: "error" };
+    renderRoomStatus();
+  });
   teamSync.addEventListener("annotation", (event) => {
     const { senderId, senderName, point, text, slot } = event.detail;
     if (!trustedTeamSender(senderId) || !pointInFloor(point)) return;
@@ -1896,6 +1971,9 @@ function bindEvents() {
   teamSync.addEventListener("kicked", () => {
     state.syncedLocalGatestones.clear();
     clearRemoteTeamState();
+    state.roomWanted = false;
+    state.roomStatusHint = { message: "Removed from the room", tone: "error" };
+    renderRoomStatus();
     render();
   });
 }

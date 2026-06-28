@@ -17,7 +17,38 @@ import {
   partyTextColor,
   reconcileObservedParty,
   removePartyMember,
+  roomStatusLine,
 } from "../src/party-core.js";
+
+test("room status line reflects the live connection over any idle hint", () => {
+  // Connected wins over everything and reports the live member count.
+  assert.deepEqual(
+    roomStatusLine({ connected: true, roomCode: "DG01O31B7X", memberCount: 3, hint: { message: "x", tone: "warn" } }),
+    { message: "In room DG01O31B7X · 3/5 players", tone: "ok" },
+  );
+  // A connected room with an unread roster still reads as at least one player.
+  assert.deepEqual(
+    roomStatusLine({ connected: true, roomCode: "DG01O31B7X", memberCount: 0 }),
+    { message: "In room DG01O31B7X · 1/5 player", tone: "ok" },
+  );
+  // Connecting beats an idle hint but loses to connected.
+  assert.deepEqual(
+    roomStatusLine({ connecting: true, roomCode: "DG01O31B7X", hint: { message: "x", tone: "warn" } }),
+    { message: "Joining room DG01O31B7X…", tone: "warn" },
+  );
+});
+
+test("room status line falls back to the idle hint, then to not-in-a-room", () => {
+  assert.deepEqual(
+    roomStatusLine({ hint: { message: "Room connection lost — rescan or press Join to rejoin", tone: "error" } }),
+    { message: "Room connection lost — rescan or press Join to rejoin", tone: "error" },
+  );
+  // A hint without an explicit tone defaults to neutral.
+  assert.deepEqual(roomStatusLine({ hint: { message: "Auto-room waiting: …" } }),
+    { message: "Auto-room waiting: …", tone: "" });
+  assert.deepEqual(roomStatusLine(), { message: "Not in a room", tone: "" });
+  assert.deepEqual(roomStatusLine({ hint: null }), { message: "Not in a room", tone: "" });
+});
 
 test("party slots use the fixed RuneScape player color order", () => {
   assert.deepEqual(PARTY_COLORS.map((entry) => entry.color), [

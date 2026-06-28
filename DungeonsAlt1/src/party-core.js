@@ -50,6 +50,24 @@ export function partyRoomCodeFromLeader(value) {
   return `DG${encoded}`;
 }
 
+// Decide the single persistent "are we in a room?" line shown in the
+// experimental panel. The live socket state wins (so a join is confirmed where
+// the user is looking); otherwise an idle hint (auto-join waiting/off, kicked,
+// connection lost) explains why no room is active. Pure so it can be unit-tested.
+export function roomStatusLine({ connected = false, connecting = false, roomCode = "", memberCount = 0, hint = null } = {}) {
+  if (connected) {
+    const count = Math.max(1, Number(memberCount) || 0);
+    return { message: `In room ${roomCode} · ${count}/5 player${count === 1 ? "" : "s"}`, tone: "ok" };
+  }
+  if (connecting) {
+    return { message: `Joining room ${roomCode}…`, tone: "warn" };
+  }
+  if (hint && hint.message) {
+    return { message: String(hint.message), tone: hint.tone ?? "" };
+  }
+  return { message: "Not in a room", tone: "" };
+}
+
 export function automaticPartyRoom(members, localName) {
   const status = automaticPartyRoomStatus(members, localName);
   return status.ready ? {
