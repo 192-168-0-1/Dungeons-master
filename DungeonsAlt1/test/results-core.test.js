@@ -43,21 +43,23 @@ const sampleResult = Object.freeze({
 
 test("the floor-tracking table shows the compact, numbered column set", () => {
   assert.deepEqual(RESULT_DISPLAY_COLUMNS.map((column) => column.header), [
-    "#", "Floor", "Size", "Time", "Rooms", "Bonus %", "Dead ends", "Final XP", "When",
+    "#", "Floor", "Time", "Bonus %", "Size", "Rooms", "Dead ends", "Final XP",
   ]);
   assert.deepEqual(RESULT_DISPLAY_COLUMNS.map((column) => column.field), [
-    "#", "Floor", "FloorSize", "Time", "Roomcount", "BonusMod", "DeadEnds", "FinalXP", "Timestamp",
+    "#", "Floor", "Time", "BonusMod", "DifficultyMod", "Roomcount", "DeadEnds", "FinalXP",
   ]);
 });
 
-test("display cells number the floor, group Final XP and shorten the timestamp", () => {
+test("display cells number the floor, show the difficulty ratio and group Final XP", () => {
   assert.equal(resultDisplayValue(sampleResult, "#", 3), "3");
   assert.equal(resultDisplayValue(sampleResult, "#", null), "");
   assert.equal(resultDisplayValue(sampleResult, "Floor", 1), "54");
-  assert.equal(resultDisplayValue(sampleResult, "FloorSize", 1), "Large");
+  // The "Size" column is the difficulty ratio read into DifficultyMod (e.g. 5:5).
+  assert.equal(resultDisplayValue({ DifficultyMod: "5:5" }, "DifficultyMod"), "5:5");
   assert.equal(resultDisplayValue(sampleResult, "FinalXP", 1), "12,345");
-  assert.equal(resultDisplayValue({ ...sampleResult, Timestamp: "6/28/2026, 12:31:05 PM" }, "Timestamp"), "12:31 PM");
   assert.equal(resultDisplayValue({ FinalXP: "" }, "FinalXP"), "");
+  // The timestamp formatter still works even though the table no longer shows it.
+  assert.equal(resultDisplayValue({ Timestamp: "6/28/2026, 12:31:05 PM" }, "Timestamp"), "12:31 PM");
 });
 
 test("display formatters group counts and extract the clock time", () => {

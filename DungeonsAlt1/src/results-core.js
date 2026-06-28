@@ -14,13 +14,14 @@ export const RESULT_BATCH_MODES = Object.freeze({
 export const RESULT_DISPLAY_COLUMNS = Object.freeze([
   { header: "#", field: "#" },
   { header: "Floor", field: "Floor" },
-  { header: "Size", field: "FloorSize" },
   { header: "Time", field: "Time" },
-  { header: "Rooms", field: "Roomcount" },
   { header: "Bonus %", field: "BonusMod" },
+  // "Size" shows the in-game difficulty ratio (the team size the floor was
+  // scaled for, e.g. 5:5 or 1:1), which the winterface reads into DifficultyMod.
+  { header: "Size", field: "DifficultyMod" },
+  { header: "Rooms", field: "Roomcount" },
   { header: "Dead ends", field: "DeadEnds" },
   { header: "Final XP", field: "FinalXP" },
-  { header: "When", field: "Timestamp" },
 ]);
 
 // Group whole-number counts (e.g. Final XP "259036" -> "259,036"); leave anything
