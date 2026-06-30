@@ -78,6 +78,19 @@ export function evaluateMapTransition(previous = {}, gameMap, calibration, now =
   const openedRoomCount = Math.max(0, Number(gameMap.openedRoomCount) || 0);
   const baseChanged = Boolean(previous.lastBase && gameMap.base && !samePoint(previous.lastBase, gameMap.base));
   const singleBaseAfterProgress = lastRoomCount > 1 && openedRoomCount === 1 && Boolean(gameMap.base);
+  // A new floor is entered with just the base room. On a slow/jittery scanner
+  // the exact 1-room frame is often missed and the first clean read already
+  // shows a few rooms, so when the new floor reuses the same base grid cell as
+  // the previous one neither baseChanged nor singleBaseAfterProgress fires and
+  // the timer is never reset (stale floorStart -> impossibly low rpm). Treat a
+  // large collapse in the room count (you do not lose half your rooms except at
+  // a floor change) as another reset trigger. The C# reference only needed
+  // openedRoomCount===1 because its detection reliably caught that frame. This
+  // is confirmed through the same two-frame gate below, so a single misread
+  // cannot reset the timer.
+  const roomCountDropped = lastRoomCount > 1 && openedRoomCount > 0
+    && openedRoomCount < lastRoomCount
+    && (lastRoomCount - openedRoomCount) >= Math.max(2, Math.ceil(lastRoomCount / 2));
   const key = resetCandidateKey(gameMap, calibration);
   const pending = previous.pendingReset ?? null;
   const samePending = Boolean(key && pending?.key === key);
@@ -99,7 +112,7 @@ export function evaluateMapTransition(previous = {}, gameMap, calibration, now =
     };
   }
 
-  if (!baseChanged && !singleBaseAfterProgress) {
+  if (!baseChanged && !singleBaseAfterProgress && !roomCountDropped) {
     return {
       accept: true,
       reset: false,

@@ -125,6 +125,50 @@ test("base changes require a confirmation before resetting the floor timer", () 
   assert.equal(confirmed.reason, "confirmed-base-change");
 });
 
+test("a new floor reusing the base resets even when the one-room frame is missed", () => {
+  // Slow scanner: the 1-room entry frame was never captured, so the first clean
+  // read of the new floor already shows 3 rooms, and the new base sits in the
+  // same grid cell as the previous floor. Without the room-collapse trigger this
+  // slipped through as same-floor and stranded floorStart (the 0.4 rpm bug).
+  const first = evaluateMapTransition({
+    floorStart: 10_000,
+    lastBase: { x: 2, y: 3 },
+    lastRoomCount: 15,
+    pendingReset: null,
+  }, gameMap({ rooms: 3, base: { x: 2, y: 3 } }), calibration, 60_000);
+
+  assert.equal(first.accept, false);
+  assert.equal(first.reset, false);
+  assert.equal(first.reason, "pending-single-base");
+
+  const confirmed = evaluateMapTransition({
+    floorStart: 10_000,
+    lastBase: { x: 2, y: 3 },
+    lastRoomCount: 15,
+    pendingReset: first.pendingReset,
+  }, gameMap({ rooms: 3, base: { x: 2, y: 3 } }), calibration, 60_600);
+
+  assert.equal(confirmed.accept, true);
+  assert.equal(confirmed.reset, true);
+  assert.equal(confirmed.resetAt, 60_000);
+  assert.equal(confirmed.reason, "confirmed-single-base");
+});
+
+test("a minor room-count dip on the same floor is not treated as a new floor", () => {
+  // Detection noise that loses a couple of rooms (12 -> 11, far under the
+  // half-collapse threshold) must stay same-floor and never reset the timer.
+  const result = evaluateMapTransition({
+    floorStart: 10_000,
+    lastBase: { x: 0, y: 0 },
+    lastRoomCount: 12,
+    pendingReset: null,
+  }, gameMap({ rooms: 11, base: { x: 0, y: 0 } }), calibration, 20_000);
+
+  assert.equal(result.accept, true);
+  assert.equal(result.reset, false);
+  assert.equal(result.reason, "same-floor");
+});
+
 test("confirmed new floors keep the first-seen pending time for rpm accuracy", () => {
   const first = evaluateMapTransition({
     floorStart: 10_000,
