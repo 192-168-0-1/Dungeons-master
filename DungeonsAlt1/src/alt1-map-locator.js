@@ -4,7 +4,7 @@ import {
   isValidInGameMapFrame,
   isValidMap,
   readGameMap,
-} from "./map-core.js?v=20260625-22";
+} from "./map-core.js?v=20260625-23";
 
 // Anchor-based map location adapted from Sleepy-meh-alt-1/dg-map with
 // permission relayed by this project's maintainer. The anchor is the fixed
@@ -117,7 +117,12 @@ export function scoreMapCandidate(image, floor) {
     readableRooms,
     validFrame,
     validCorners,
-    score: (validCorners ? 10_000 : 0) + (gameMap.base ? 1_000 : 0) + readableRooms * 50 + floor.width * floor.height,
+    // No floor-area term: a Small floor's rooms are byte-identical to a Medium
+    // read of the same rooms (shared bottom-anchored grid), so an area tiebreak
+    // let Medium spuriously win an equal read and flip the floor mid-run. On a
+    // genuine tie the strict-> iteration keeps the first (smaller) floor, matching
+    // the C# first-valid break; a real larger floor still wins on more rooms.
+    score: (validCorners ? 10_000 : 0) + (gameMap.base ? 1_000 : 0) + readableRooms * 50,
   };
 }
 

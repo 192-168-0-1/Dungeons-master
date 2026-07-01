@@ -8,21 +8,21 @@ import {
   isOpened,
   mapToImage,
   toChess,
-} from "./src/map-core.js?v=20260625-22";
+} from "./src/map-core.js?v=20260625-23";
 import {
   MAP_SCALE_CANDIDATES,
   findMapByAlt1Anchor,
   findMapByScaledCorners,
   readMapAtCalibration,
   scaledFloorDimensions,
-} from "./src/alt1-map-locator.js?v=20260625-22";
+} from "./src/alt1-map-locator.js?v=20260625-23";
 import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js";
 import {
   buildMapOverlayCommands,
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260625-22";
+} from "./src/alt1-overlay.js?v=20260625-23";
 import {
   DEFAULT_FLOOR_TARGET_SECONDS,
   elapsedFloorMinutes,
@@ -33,8 +33,8 @@ import {
   formatElapsedClock,
   parseFloorTargetSeconds,
   rpmValue,
-} from "./src/rpm-state.js?v=20260625-22";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-22";
+} from "./src/rpm-state.js?v=20260625-23";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-23";
 import {
   PARTY_COLORS,
   automaticPartyRoomStatus,
@@ -43,9 +43,9 @@ import {
   partyColor,
   reconcileObservedParty,
   roomStatusLine,
-} from "./src/party-core.js?v=20260625-22";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-22";
-import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-22";
+} from "./src/party-core.js?v=20260625-23";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-23";
+import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-23";
 import {
   RESULT_COLUMNS,
   RESULT_DISPLAY_COLUMNS,
@@ -61,7 +61,7 @@ import {
   normalizeResultBatchTarget,
   safeFilePart,
   safeTimestampForFilename,
-} from "./src/results-core.js?v=20260625-22";
+} from "./src/results-core.js?v=20260625-23";
 import {
   chooseSaveFolder,
   clearStoredSaveFolder,
@@ -70,10 +70,10 @@ import {
   requestSaveFolderPermission,
   supportsFolderSaving,
   writeDataUrlToFolder,
-} from "./src/file-saver.js?v=20260625-22";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-22";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-22";
-import { WinterfaceReader } from "./src/winterface.js?v=20260625-22";
+} from "./src/file-saver.js?v=20260625-23";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-23";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-23";
+import { WinterfaceReader } from "./src/winterface.js?v=20260625-23";
 
 const SCAN_INTERVAL = 600;
 const AUTO_CALIBRATION_INTERVAL = 2500;
@@ -455,6 +455,10 @@ async function updateMap() {
     if (!transition.accept) {
       const pendingReason = transition.reason === "pending-base-change" ? "base moved" : "single base room";
       setStatus(`Possible new floor detected (${pendingReason}); waiting for confirmation`, "warn");
+      // Keep the elapsed clock / rpm ticking off the still-valid floor while the
+      // new read awaits confirmation, matching the C# reference which refreshes
+      // its data label every frame (the JS gate must not freeze the readout).
+      updateStats();
       return;
     }
     if (!sameCalibration(nextCalibration, state.calibration)) {

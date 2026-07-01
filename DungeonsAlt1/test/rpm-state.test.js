@@ -177,6 +177,36 @@ test("a new floor reusing the base resets even when the one-room frame is missed
   assert.equal(confirmed.reason, "confirmed-single-base");
 });
 
+test("a partial room-count misread and recovery does not reset the floor timer", () => {
+  // 12 -> 5 fires roomCountDropped (pending single-base); the 12 -> 7 recovery
+  // frame is not itself a reset candidate, so it must NOT confirm a reset.
+  const first = evaluateMapTransition({
+    floorStart: 10_000,
+    lastBase: { x: 0, y: 0 },
+    lastRoomCount: 12,
+    pendingReset: null,
+  }, gameMap({ rooms: 5, base: { x: 0, y: 0 } }), calibration, 30_000);
+  assert.equal(first.accept, false);
+  assert.equal(first.pendingReset.reason, "single-base");
+
+  const recovery = evaluateMapTransition({
+    floorStart: 10_000,
+    lastBase: { x: 0, y: 0 },
+    lastRoomCount: 12,
+    pendingReset: first.pendingReset,
+  }, gameMap({ rooms: 7, base: { x: 0, y: 0 } }), calibration, 30_600);
+  assert.equal(recovery.reset, false);
+  assert.equal(recovery.reason, "same-floor");
+});
+
+test("the elapsed clock rolls into hours past 60 minutes", () => {
+  assert.equal(formatElapsedClock(59), "00:59");
+  assert.equal(formatElapsedClock(754), "12:34");
+  assert.equal(formatElapsedClock(3600), "1:00:00");
+  assert.equal(formatElapsedClock(3661), "1:01:01");
+  assert.equal(formatElapsedClock(7325), "2:02:05");
+});
+
 test("a minor room-count dip on the same floor is not treated as a new floor", () => {
   // Detection noise that loses a couple of rooms (12 -> 11, far under the
   // half-collapse threshold) must stay same-floor and never reset the timer.

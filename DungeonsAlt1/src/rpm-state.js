@@ -26,8 +26,12 @@ export function elapsedFloorSeconds(floorStart, now = Date.now()) {
 }
 
 export function formatElapsedClock(seconds = 0) {
-  const value = Math.max(0, Number(seconds) || 0);
-  return `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(Math.floor(value % 60)).padStart(2, "0")}`;
+  const value = Math.floor(Math.max(0, Number(seconds) || 0));
+  const mm = String(Math.floor((value % 3600) / 60)).padStart(2, "0");
+  const ss = String(value % 60).padStart(2, "0");
+  // Roll over into H:MM:SS past an hour instead of showing 61:01 etc.
+  const hours = Math.floor(value / 3600);
+  return hours > 0 ? `${hours}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
 export function rpmValue(rooms = 0, minutes = 0) {
@@ -134,8 +138,13 @@ export function evaluateMapTransition(previous = {}, gameMap, calibration, now =
   const recentEnough = !Number.isFinite(Number(pending?.seenAt))
     || timestamp - Number(pending.seenAt) <= confirmationWindowMs;
   const plausibleSingleBase = openedRoomCount <= Math.max(5, pendingRoomCount + 3);
+  // The confirmation frame must itself still look like a floor change. Otherwise
+  // a partial room-count misread (e.g. 12 -> 5 -> 7) that fired roomCountDropped
+  // on the glitch frame would be confirmed by a recovery frame that is not a
+  // reset candidate at all, spuriously resetting the timer mid-floor.
+  const isResetCandidate = baseChanged || singleBaseAfterProgress || roomCountDropped;
 
-  if (samePending && pending?.reason === "single-base" && recentEnough && plausibleSingleBase) {
+  if (samePending && pending?.reason === "single-base" && recentEnough && plausibleSingleBase && isResetCandidate) {
     return {
       accept: true,
       reset: true,
@@ -157,7 +166,7 @@ export function evaluateMapTransition(previous = {}, gameMap, calibration, now =
 
   const plausibleResetCandidate = !singleBaseAfterProgress || plausibleSingleBase;
 
-  if (samePending && recentEnough && plausibleResetCandidate) {
+  if (samePending && recentEnough && plausibleResetCandidate && isResetCandidate) {
     return {
       accept: true,
       reset: true,
