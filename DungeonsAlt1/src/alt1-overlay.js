@@ -1,5 +1,5 @@
-import { ROOM_SIZE, mapToImage } from "./map-core.js?v=20260625-20";
-import { rpmValue } from "./rpm-state.js?v=20260625-20";
+import { ROOM_SIZE, mapToImage } from "./map-core.js?v=20260625-21";
+import { rpmValue } from "./rpm-state.js?v=20260625-21";
 
 export const GATESTONE_POSITIONS = Object.freeze([
   [2, 21],
@@ -111,7 +111,9 @@ export function statsBarOrigin({ position = "bottom", mapX, mapY, mapWidth, mapH
   }
 }
 
-export function buildStatsOverlayCommands({ stats, mapX, mapY, floor, overlayScale = 1, duration = 30_000, position = "bottom", free = null }) {
+export const STATS_DEFAULT_TEXT_COLOR = mixColor(220, 225, 226);
+
+export function buildStatsOverlayCommands({ stats, mapX, mapY, floor, overlayScale = 1, duration = 30_000, position = "bottom", free = null, textColor = STATS_DEFAULT_TEXT_COLOR }) {
   if (!stats || !floor || position === "hidden") return [];
   const scale = overlayScaleValue(overlayScale);
   const barHeight = 21;
@@ -131,7 +133,7 @@ export function buildStatsOverlayCommands({ stats, mapX, mapY, floor, overlaySca
     commands.push(rect(mixColor(1, 1, 1), originX + inset, barTop + inset,
       Math.max(1, barWidth - inset * 2), Math.max(1, barHeight - inset * 2), duration, 1));
   }
-  commands.push(text(value, mixColor(220, 225, 226), fontSize,
+  commands.push(text(value, textColor, fontSize,
     originX + 3, barTop + 3, duration, false, false));
   return commands;
 }
@@ -147,6 +149,7 @@ export function buildMapOverlayCommands({
   stats = "",
   statsPosition = "bottom",
   statsFree = null,
+  statsColor = STATS_DEFAULT_TEXT_COLOR,
   duration = 30_000,
 }) {
   const commands = [];
@@ -198,6 +201,7 @@ export function buildMapOverlayCommands({
       duration,
       position: statsPosition,
       free: statsFree,
+      textColor: statsColor,
     }));
   }
 

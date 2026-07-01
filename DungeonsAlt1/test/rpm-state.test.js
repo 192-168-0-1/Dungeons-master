@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  DEFAULT_FLOOR_TARGET_SECONDS,
   elapsedFloorMinutes,
   elapsedFloorSeconds,
   evaluateMapTransition,
+  floorPaceStatus,
   floorStartForDetectedMap,
   formatElapsedClock,
+  parseFloorTargetSeconds,
   rpmValue,
 } from "../src/rpm-state.js";
 
@@ -42,6 +45,26 @@ test("late map resets are backdated enough to avoid impossible initial rpm spike
   const minutes = elapsedFloorMinutes(lateStart, now);
   assert.equal(rpmValue(20, minutes), "8.0");
   assert.ok(now - lateStart > 120_000);
+});
+
+test("floor pace target parses mm:ss and plain seconds, else falls back", () => {
+  assert.equal(parseFloorTargetSeconds("6:15"), 375);
+  assert.equal(parseFloorTargetSeconds("10:00"), 600);
+  assert.equal(parseFloorTargetSeconds("90"), 90);
+  assert.equal(parseFloorTargetSeconds(""), DEFAULT_FLOOR_TARGET_SECONDS);
+  assert.equal(parseFloorTargetSeconds("6:99"), DEFAULT_FLOOR_TARGET_SECONDS);
+  assert.equal(parseFloorTargetSeconds("nonsense"), DEFAULT_FLOOR_TARGET_SECONDS);
+});
+
+test("floor pace projects the known floor onto the target time", () => {
+  // Not enough progress yet -> no tint.
+  assert.equal(floorPaceStatus({ openedRooms: 1, possibleRooms: 4, minutes: 1 }).status, "none");
+  // Fast start, whole known floor projects well under 6:15 -> ahead.
+  assert.equal(floorPaceStatus({ openedRooms: 5, possibleRooms: 5, minutes: 0.5, targetSeconds: 375 }).status, "ahead");
+  // Projects a little over target (~7:12) -> close.
+  assert.equal(floorPaceStatus({ openedRooms: 5, possibleRooms: 6, minutes: 6, targetSeconds: 375 }).status, "close");
+  // Slow with lots still to open (~10:40 projected) -> behind.
+  assert.equal(floorPaceStatus({ openedRooms: 3, possibleRooms: 8, minutes: 4, targetSeconds: 375 }).status, "behind");
 });
 
 test("first valid map starts a new floor immediately", () => {

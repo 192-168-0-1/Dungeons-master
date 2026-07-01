@@ -36,6 +36,39 @@ export function rpmValue(rooms = 0, minutes = 0) {
   return Math.max(0, (roomCount - 0.8) / elapsedMinutes).toFixed(1);
 }
 
+// Target floor time for the on-pace indicator. 6:15 by default (the user's
+// benchmark); PACE_CLOSE_RATIO is how far over target still counts as "close".
+export const DEFAULT_FLOOR_TARGET_SECONDS = 375;
+export const PACE_CLOSE_RATIO = 1.2;
+
+export function parseFloorTargetSeconds(value, fallback = DEFAULT_FLOOR_TARGET_SECONDS) {
+  const text = String(value ?? "").trim();
+  const clock = /^(\d{1,3}):([0-5]?\d)$/.exec(text);
+  if (clock) return Number(clock[1]) * 60 + Number(clock[2]);
+  const seconds = Number(text);
+  if (Number.isFinite(seconds) && seconds > 0) return Math.round(seconds);
+  return fallback;
+}
+
+// Subtle pace signal for the RPM display: projecting the current room-opening
+// rate onto the whole currently-known floor (opened + still-visible mystery
+// rooms), would it finish within the target floor time? Returns a status the UI
+// tints the rpm with: "ahead" (on/under target), "close" (a little over),
+// "behind" (well over), or "none" when there is not enough data yet.
+export function floorPaceStatus({ openedRooms = 0, possibleRooms = 0, minutes = 0, targetSeconds = DEFAULT_FLOOR_TARGET_SECONDS } = {}) {
+  const opened = Math.max(0, Number(openedRooms) || 0);
+  const possible = Math.max(opened, Number(possibleRooms) || 0);
+  const elapsed = Math.max(0, Number(minutes) || 0);
+  const targetMinutes = Math.max(0, Number(targetSeconds) || 0) / 60;
+  if (opened < 2 || elapsed < MIN_RPM_MINUTES * 2 || targetMinutes <= 0) {
+    return { status: "none", ratio: 0, projectedSeconds: 0 };
+  }
+  const projectedMinutes = elapsed * (possible / opened);
+  const ratio = projectedMinutes / targetMinutes;
+  const status = ratio <= 1 ? "ahead" : ratio <= PACE_CLOSE_RATIO ? "close" : "behind";
+  return { status, ratio, projectedSeconds: Math.round(projectedMinutes * 60) };
+}
+
 function samePoint(left, right) {
   return Boolean(left && right && left.x === right.x && left.y === right.y);
 }

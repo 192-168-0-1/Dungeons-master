@@ -8,30 +8,33 @@ import {
   isOpened,
   mapToImage,
   toChess,
-} from "./src/map-core.js?v=20260625-20";
+} from "./src/map-core.js?v=20260625-21";
 import {
   MAP_SCALE_CANDIDATES,
   findMapByAlt1Anchor,
   findMapByScaledCorners,
   readMapAtCalibration,
   scaledFloorDimensions,
-} from "./src/alt1-map-locator.js?v=20260625-20";
+} from "./src/alt1-map-locator.js?v=20260625-21";
 import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js";
 import {
   buildMapOverlayCommands,
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260625-20";
+} from "./src/alt1-overlay.js?v=20260625-21";
 import {
+  DEFAULT_FLOOR_TARGET_SECONDS,
   elapsedFloorMinutes,
   elapsedFloorSeconds,
   evaluateMapTransition,
+  floorPaceStatus,
   floorStartForDetectedMap,
   formatElapsedClock,
+  parseFloorTargetSeconds,
   rpmValue,
-} from "./src/rpm-state.js?v=20260625-20";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-20";
+} from "./src/rpm-state.js?v=20260625-21";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-21";
 import {
   PARTY_COLORS,
   automaticPartyRoomStatus,
@@ -40,9 +43,9 @@ import {
   partyColor,
   reconcileObservedParty,
   roomStatusLine,
-} from "./src/party-core.js?v=20260625-20";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-20";
-import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-20";
+} from "./src/party-core.js?v=20260625-21";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-21";
+import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-21";
 import {
   RESULT_COLUMNS,
   RESULT_DISPLAY_COLUMNS,
@@ -58,7 +61,7 @@ import {
   normalizeResultBatchTarget,
   safeFilePart,
   safeTimestampForFilename,
-} from "./src/results-core.js?v=20260625-20";
+} from "./src/results-core.js?v=20260625-21";
 import {
   chooseSaveFolder,
   clearStoredSaveFolder,
@@ -66,10 +69,10 @@ import {
   querySaveFolderPermission,
   supportsFolderSaving,
   writeDataUrlToFolder,
-} from "./src/file-saver.js?v=20260625-20";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-20";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-20";
-import { WinterfaceReader } from "./src/winterface.js?v=20260625-20";
+} from "./src/file-saver.js?v=20260625-21";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-21";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-21";
+import { WinterfaceReader } from "./src/winterface.js?v=20260625-21";
 
 const SCAN_INTERVAL = 600;
 const AUTO_CALIBRATION_INTERVAL = 2500;
@@ -103,6 +106,8 @@ const elements = {
   rpmOnly: document.querySelector("#rpm-only"),
   gameOverlay: document.querySelector("#game-overlay"),
   statsPosition: document.querySelector("#stats-position"),
+  paceIndicator: document.querySelector("#pace-indicator"),
+  paceTarget: document.querySelector("#pace-target"),
   testOverlay: document.querySelector("#test-overlay"),
   overlayStatus: document.querySelector("#overlay-status"),
   autoTrackResults: document.querySelector("#auto-track-results"),
@@ -507,6 +512,27 @@ function clearRemoteTeamState() {
   render();
 }
 
+// Subtle "on pace for a 6:15 floor" signal. Toggle + target time live in Display.
+const PACE_OVERLAY_COLORS = {
+  ahead: overlayArgb(127, 223, 143),
+  close: overlayArgb(240, 194, 74),
+  behind: overlayArgb(239, 110, 90),
+};
+
+function floorPaceTargetSeconds() {
+  return parseFloorTargetSeconds(elements.paceTarget?.value, DEFAULT_FLOOR_TARGET_SECONDS);
+}
+
+function currentFloorPace() {
+  if (!elements.paceIndicator?.checked || !state.gameMap) return { status: "none" };
+  return floorPaceStatus({
+    openedRooms: state.gameMap.openedRoomCount,
+    possibleRooms: state.gameMap.openedRoomCount + state.gameMap.mysteryCount,
+    minutes: elapsedFloorMinutes(state.floorStart),
+    targetSeconds: floorPaceTargetSeconds(),
+  });
+}
+
 function updateStats() {
   if (!state.gameMap) {
     elements.stats.textContent = "No map read yet";
@@ -518,15 +544,19 @@ function updateStats() {
   const minutes = elapsedFloorMinutes(state.floorStart, now);
   const rpm = rpmValue(rooms, minutes);
   const elapsed = formatElapsedClock(elapsedFloorSeconds(state.floorStart, now));
-  let text = `${rooms} rooms (${possible}) · ${rpm} rpm · ${state.gameMap.deadEndCount} dead ends · ${elapsed}`;
+  // Tint just the rpm token by floor pace (all interpolated values are
+  // app-generated numbers, so this markup is injection-safe).
+  const paceClass = { ahead: "pace-ahead", close: "pace-close", behind: "pace-behind" }[currentFloorPace().status] || "";
+  const rpmMarkup = paceClass ? `<span class="${paceClass}">${rpm} rpm</span>` : `${rpm} rpm`;
+  let html = `${rooms} rooms (${possible}) · ${rpmMarkup} · ${state.gameMap.deadEndCount} dead ends · ${elapsed}`;
   // Verbose diagnostics surface the per-frame map-loop cost so a slow machine or
   // an old Alt1 capture path can be told apart from a heavy app loop.
   if (elements.debugMode?.checked && state.perf) {
     const p = state.perf;
     const total = p.read + p.detect + p.render;
-    text += ` · ⏱ ${total.toFixed(0)}ms (read ${p.read.toFixed(0)} · det ${p.detect.toFixed(0)} · draw ${p.render.toFixed(0)})`;
+    html += ` · ⏱ ${total.toFixed(0)}ms (read ${p.read.toFixed(0)} · det ${p.detect.toFixed(0)} · draw ${p.render.toFixed(0)})`;
   }
-  elements.stats.textContent = text;
+  elements.stats.innerHTML = html;
 }
 
 function currentOverlayStats() {
@@ -810,6 +840,7 @@ function renderGameOverlay() {
     gatestones: elements.rpmOnly.checked ? [] : collectGatestoneMarkers(state.gameMap.floor),
     stats: currentOverlayStats(),
     statsPosition: elements.statsPosition?.value || "bottom",
+    statsColor: PACE_OVERLAY_COLORS[currentFloorPace().status] || undefined,
     duration: OVERLAY_DURATION,
   });
   drawGameOverlayGated(api, group, commands);
@@ -1811,6 +1842,20 @@ function bindEvents() {
       renderGameOverlay();
     });
   }
+  if (elements.paceIndicator) {
+    elements.paceIndicator.addEventListener("change", () => {
+      storageSet(`${STORAGE_PREFIX}:pace-indicator`, elements.paceIndicator.checked ? "1" : "");
+      updateStats();
+      renderGameOverlay();
+    });
+  }
+  if (elements.paceTarget) {
+    elements.paceTarget.addEventListener("change", () => {
+      storageSet(`${STORAGE_PREFIX}:pace-target`, elements.paceTarget.value);
+      updateStats();
+      renderGameOverlay();
+    });
+  }
   elements.testOverlay.addEventListener("click", testGameOverlay);
   window.addEventListener("beforeunload", () => {
     clearGameOverlay();
@@ -2114,6 +2159,15 @@ function initialize() {
     if (savedStatsPosition && [...elements.statsPosition.options].some((option) => option.value === savedStatsPosition)) {
       elements.statsPosition.value = savedStatsPosition;
     }
+  }
+  // Restore the floor-pace indicator settings (defaults on / 6:15).
+  if (elements.paceIndicator) {
+    const savedPace = storageGet(`${STORAGE_PREFIX}:pace-indicator`);
+    if (savedPace !== null) elements.paceIndicator.checked = savedPace === "1";
+  }
+  if (elements.paceTarget) {
+    const savedTarget = storageGet(`${STORAGE_PREFIX}:pace-target`);
+    if (savedTarget) elements.paceTarget.value = savedTarget;
   }
   // Restore the experimental opt-ins (all default off) before first render.
   if (elements.experimentalFeatures) elements.experimentalFeatures.checked = storageGet(`${STORAGE_PREFIX}:experimental`) === "1";

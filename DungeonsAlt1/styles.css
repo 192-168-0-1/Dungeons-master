@@ -95,6 +95,12 @@ main { padding: 9px; }
 .room-status[data-tone="warn"] { color: var(--warning); }
 .room-status[data-tone="error"] { color: var(--danger); }
 
+/* Subtle floor-pace tint on the rpm value (green = on pace for the target
+   floor time, amber = a little behind, red = behind). */
+.pace-ahead { color: #7fdf8f; }
+.pace-close { color: #f0c24a; }
+.pace-behind { color: #ef6e5a; }
+
 .stats {
   padding: 6px 9px;
   border: 1px solid var(--line);
