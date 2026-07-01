@@ -8,21 +8,21 @@ import {
   isOpened,
   mapToImage,
   toChess,
-} from "./src/map-core.js?v=20260625-21";
+} from "./src/map-core.js?v=20260625-22";
 import {
   MAP_SCALE_CANDIDATES,
   findMapByAlt1Anchor,
   findMapByScaledCorners,
   readMapAtCalibration,
   scaledFloorDimensions,
-} from "./src/alt1-map-locator.js?v=20260625-21";
+} from "./src/alt1-map-locator.js?v=20260625-22";
 import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js";
 import {
   buildMapOverlayCommands,
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260625-21";
+} from "./src/alt1-overlay.js?v=20260625-22";
 import {
   DEFAULT_FLOOR_TARGET_SECONDS,
   elapsedFloorMinutes,
@@ -33,8 +33,8 @@ import {
   formatElapsedClock,
   parseFloorTargetSeconds,
   rpmValue,
-} from "./src/rpm-state.js?v=20260625-21";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-21";
+} from "./src/rpm-state.js?v=20260625-22";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-22";
 import {
   PARTY_COLORS,
   automaticPartyRoomStatus,
@@ -43,9 +43,9 @@ import {
   partyColor,
   reconcileObservedParty,
   roomStatusLine,
-} from "./src/party-core.js?v=20260625-21";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-21";
-import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-21";
+} from "./src/party-core.js?v=20260625-22";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-22";
+import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-22";
 import {
   RESULT_COLUMNS,
   RESULT_DISPLAY_COLUMNS,
@@ -61,18 +61,19 @@ import {
   normalizeResultBatchTarget,
   safeFilePart,
   safeTimestampForFilename,
-} from "./src/results-core.js?v=20260625-21";
+} from "./src/results-core.js?v=20260625-22";
 import {
   chooseSaveFolder,
   clearStoredSaveFolder,
   loadStoredSaveFolder,
   querySaveFolderPermission,
+  requestSaveFolderPermission,
   supportsFolderSaving,
   writeDataUrlToFolder,
-} from "./src/file-saver.js?v=20260625-21";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-21";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-21";
-import { WinterfaceReader } from "./src/winterface.js?v=20260625-21";
+} from "./src/file-saver.js?v=20260625-22";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-22";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-22";
+import { WinterfaceReader } from "./src/winterface.js?v=20260625-22";
 
 const SCAN_INTERVAL = 600;
 const AUTO_CALIBRATION_INTERVAL = 2500;
@@ -1050,7 +1051,14 @@ async function writePngToSaveFolder(kind, filename, dataUrl, label, options = {}
     updateSaveFolderStatus(kind);
     return { saved: false, reason: "no-folder" };
   }
-  const permission = await querySaveFolderPermission(folder.handle);
+  let permission = await querySaveFolderPermission(folder.handle);
+  // The File System Access grant does not survive a reload, so a restored handle
+  // reads back as "prompt". A manual save is a user gesture, so we can re-request
+  // the grant in place instead of forcing the user to pick the folder again.
+  // (The quiet auto-save path cannot prompt — it runs outside a user gesture.)
+  if (permission === "prompt" && !quiet) {
+    permission = await requestSaveFolderPermission(folder.handle);
+  }
   folder.permission = permission;
   updateSaveFolderStatus(kind);
   if (permission !== "granted") {
@@ -1073,7 +1081,12 @@ function mapPngFilename(date = new Date()) {
 }
 
 async function saveMap(options = {}) {
-  if (!state.image) return { saved: false, reason: "no-map" };
+  if (!state.image) {
+    // Every other save path reports a reason; the manual button must not no-op
+    // silently. Stay quiet on the auto-save path (it aggregates its own status).
+    if (!options?.quiet) setStatus("No map to save yet — wait for a Dungeoneering map to appear", "warn");
+    return { saved: false, reason: "no-map" };
+  }
   const date = options?.date instanceof Date ? options.date : new Date();
   return writePngToSaveFolder(
     "map",
@@ -1212,7 +1225,11 @@ async function saveResultArtifacts(capture) {
   const exports = plannedResultExports({
     autoSaveMap: elements.autoSaveMapPng.checked,
     autoSaveResults: elements.autoSaveResultsPng.checked,
-    hasMap: Boolean(state.image),
+    // Only auto-save the map when the held map matches the floor these results
+    // are for. The last map read is sticky, so if the floor-B winterface was
+    // reached without ever locking floor B's map, state.image is still floor A —
+    // pairing a stale floor-A map PNG with a floor-B results row on disk.
+    hasMap: Boolean(state.image) && state.gameMap?.floor?.name === capture?.result?.FloorSize,
     hasResultsOffset: Boolean(capture?.offset),
   });
   const results = [];
