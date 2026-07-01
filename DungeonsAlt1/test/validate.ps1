@@ -155,9 +155,12 @@ if (($overlay -notmatch 'sizeScale') -or
     ($app -notmatch 'statsScale: statsScaleValue') -or
     ($app -notmatch 'statsFree: state\.statsFree') -or
     ($app -notmatch 'function setStatsFree') -or
+    ($app -notmatch 'addEventListener\("alt1pressed"') -or
+    ($app -notmatch 'mouseRs') -or
     ($html -notmatch 'id="stats-scale"') -or
+    ($html -notmatch 'id="stats-place"') -or
     ($html -notmatch 'data-stats-nudge')) {
-    throw 'The in-game RPM/stats overlay must be resizable and freely movable.'
+    throw 'The in-game RPM/stats overlay must be resizable, freely movable and Alt+1 placeable.'
 }
 if (([regex]::Matches($html, 'class="party-slot" data-slot="[1-5]"')).Count -ne 5) {
     throw 'The Dungeoneering party interface must contain exactly five visible slots.'
@@ -328,24 +331,24 @@ if (($rpmState -notmatch 'function evaluateMapTransition') -or
     ($overlay -notmatch 'rpmValue')) {
     throw 'RPM state must be centralized and must gate suspicious floor resets before updating visible stats.'
 }
-if (($app -notmatch 'map-core\.js\?v=20260625-24') -or
-    ($app -notmatch 'alt1-map-locator\.js\?v=20260625-24') -or
-    ($app -notmatch 'rpm-state\.js\?v=20260625-24') -or
-    ($app -notmatch 'team-sync\.js\?v=20260625-24') -or
-    ($app -notmatch 'party-core\.js\?v=20260625-24') -or
-    ($app -notmatch 'results-core\.js\?v=20260625-24') -or
-    ($app -notmatch 'party-menu\.js\?v=20260625-24') -or
-    ($app -notmatch 'team-gates\.js\?v=20260625-24') -or
-    ($app -notmatch 'file-saver\.js\?v=20260625-24') -or
-    ($app -notmatch 'party-anchor\.js\?v=20260625-24') -or
-    ($app -notmatch 'winterface\.js\?v=20260625-24') -or
-    ($overlay -notmatch 'map-core\.js\?v=20260625-24') -or
-    ($overlay -notmatch 'rpm-state\.js\?v=20260625-24') -or
-    ($teamSync -notmatch 'party-core\.js\?v=20260625-24') -or
-    ($teamGates -notmatch 'party-core\.js\?v=20260625-24') -or
-    ($teamGates -notmatch 'alt1-overlay\.js\?v=20260625-24') -or
-    ($partyAnchor -notmatch 'party-interface\.js\?v=20260625-24') -or
-    ($mapLocator -notmatch 'map-core\.js\?v=20260625-24')) {
+if (($app -notmatch 'map-core\.js\?v=20260625-25') -or
+    ($app -notmatch 'alt1-map-locator\.js\?v=20260625-25') -or
+    ($app -notmatch 'rpm-state\.js\?v=20260625-25') -or
+    ($app -notmatch 'team-sync\.js\?v=20260625-25') -or
+    ($app -notmatch 'party-core\.js\?v=20260625-25') -or
+    ($app -notmatch 'results-core\.js\?v=20260625-25') -or
+    ($app -notmatch 'party-menu\.js\?v=20260625-25') -or
+    ($app -notmatch 'team-gates\.js\?v=20260625-25') -or
+    ($app -notmatch 'file-saver\.js\?v=20260625-25') -or
+    ($app -notmatch 'party-anchor\.js\?v=20260625-25') -or
+    ($app -notmatch 'winterface\.js\?v=20260625-25') -or
+    ($overlay -notmatch 'map-core\.js\?v=20260625-25') -or
+    ($overlay -notmatch 'rpm-state\.js\?v=20260625-25') -or
+    ($teamSync -notmatch 'party-core\.js\?v=20260625-25') -or
+    ($teamGates -notmatch 'party-core\.js\?v=20260625-25') -or
+    ($teamGates -notmatch 'alt1-overlay\.js\?v=20260625-25') -or
+    ($partyAnchor -notmatch 'party-interface\.js\?v=20260625-25') -or
+    ($mapLocator -notmatch 'map-core\.js\?v=20260625-25')) {
     throw 'Changed Alt1 runtime modules must be cache-busted for existing Alt1 installations.'
 }
 if (($app -notmatch 'buildVisibleRemoteGatestones') -or

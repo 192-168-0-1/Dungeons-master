@@ -8,21 +8,21 @@ import {
   isOpened,
   mapToImage,
   toChess,
-} from "./src/map-core.js?v=20260625-24";
+} from "./src/map-core.js?v=20260625-25";
 import {
   MAP_SCALE_CANDIDATES,
   findMapByAlt1Anchor,
   findMapByScaledCorners,
   readMapAtCalibration,
   scaledFloorDimensions,
-} from "./src/alt1-map-locator.js?v=20260625-24";
+} from "./src/alt1-map-locator.js?v=20260625-25";
 import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js";
 import {
   buildMapOverlayCommands,
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260625-24";
+} from "./src/alt1-overlay.js?v=20260625-25";
 import {
   DEFAULT_FLOOR_TARGET_SECONDS,
   elapsedFloorMinutes,
@@ -33,8 +33,8 @@ import {
   formatElapsedClock,
   parseFloorTargetSeconds,
   rpmValue,
-} from "./src/rpm-state.js?v=20260625-24";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-24";
+} from "./src/rpm-state.js?v=20260625-25";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-25";
 import {
   PARTY_COLORS,
   automaticPartyRoomStatus,
@@ -43,9 +43,9 @@ import {
   partyColor,
   reconcileObservedParty,
   roomStatusLine,
-} from "./src/party-core.js?v=20260625-24";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-24";
-import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-24";
+} from "./src/party-core.js?v=20260625-25";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-25";
+import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-25";
 import {
   RESULT_COLUMNS,
   RESULT_DISPLAY_COLUMNS,
@@ -61,7 +61,7 @@ import {
   normalizeResultBatchTarget,
   safeFilePart,
   safeTimestampForFilename,
-} from "./src/results-core.js?v=20260625-24";
+} from "./src/results-core.js?v=20260625-25";
 import {
   chooseSaveFolder,
   clearStoredSaveFolder,
@@ -70,10 +70,10 @@ import {
   requestSaveFolderPermission,
   supportsFolderSaving,
   writeDataUrlToFolder,
-} from "./src/file-saver.js?v=20260625-24";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-24";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-24";
-import { WinterfaceReader } from "./src/winterface.js?v=20260625-24";
+} from "./src/file-saver.js?v=20260625-25";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-25";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-25";
+import { WinterfaceReader } from "./src/winterface.js?v=20260625-25";
 
 const SCAN_INTERVAL = 600;
 const AUTO_CALIBRATION_INTERVAL = 2500;
@@ -112,6 +112,7 @@ const elements = {
   statsFreeX: document.querySelector("#stats-free-x"),
   statsFreeY: document.querySelector("#stats-free-y"),
   statsFreeNudge: [...document.querySelectorAll("[data-stats-nudge]")],
+  statsPlace: document.querySelector("#stats-place"),
   paceIndicator: document.querySelector("#pace-indicator"),
   paceTarget: document.querySelector("#pace-target"),
   testOverlay: document.querySelector("#test-overlay"),
@@ -182,6 +183,7 @@ const state = {
   perf: null,
   // Free (movable) RPM/stats overlay position; restored from storage on init.
   statsFree: { x: 8, y: 8 },
+  placingStats: false,
   results: [],
   resultsBusy: false,
   autoResultState: { visible: false, key: "", handled: false, missing: 0, stable: 0 },
@@ -563,6 +565,46 @@ function setStatsFree(x, y) {
   storageSet(`${STORAGE_PREFIX}:stats-free`, JSON.stringify(state.statsFree));
   clearGameOverlay();
   renderGameOverlay();
+}
+
+function stopStatsPlacement(message, tone) {
+  state.placingStats = false;
+  if (elements.statsPlace) elements.statsPlace.textContent = "Place with Alt+1";
+  if (message) setStatus(message, tone);
+}
+
+// Click-to-place: arm a mode where the next Alt+1 press drops the RPM counter at
+// the cursor. Alt1 fires "alt1pressed" with mouseRs in RuneScape-client
+// coordinates — the same system as the overlay — so no rsX/rsY offset is needed.
+function beginStatsPlacement() {
+  if (!hasAlt1()) {
+    setStatus("Open the app in Alt1 to place the counter on the game screen", "warn");
+    return;
+  }
+  if (state.placingStats) {
+    stopStatsPlacement("Placement cancelled", "warn");
+    return;
+  }
+  if (elements.statsPosition && elements.statsPosition.value !== "free") {
+    elements.statsPosition.value = "free";
+    storageSet(`${STORAGE_PREFIX}:stats-position`, "free");
+    applyStatsFreeVisibility();
+  }
+  state.placingStats = true;
+  if (elements.statsPlace) elements.statsPlace.textContent = "Cancel (waiting for Alt+1)";
+  setStatus("Point the cursor where you want the RPM counter on RuneScape, then press Alt+1", "warn");
+}
+
+function onAlt1Pressed(event) {
+  if (!state.placingStats) return;
+  const rs = event?.mouseRs || event?.detail?.mouseRs
+    || (Number.isFinite(event?.x) && Number.isFinite(event?.y) ? { x: event.x, y: event.y } : null);
+  if (!rs || !Number.isFinite(rs.x) || !Number.isFinite(rs.y)) {
+    stopStatsPlacement("Could not read the cursor position — use the X/Y controls instead", "warn");
+    return;
+  }
+  setStatsFree(rs.x, rs.y);
+  stopStatsPlacement(`RPM counter placed at ${state.statsFree.x}, ${state.statsFree.y}`, "ok");
 }
 
 function currentFloorPace() {
@@ -1916,6 +1958,8 @@ function bindEvents() {
   if (elements.statsFreeY) {
     elements.statsFreeY.addEventListener("change", () => setStatsFree(state.statsFree.x, elements.statsFreeY.value));
   }
+  if (elements.statsPlace) elements.statsPlace.addEventListener("click", beginStatsPlacement);
+  window.addEventListener("alt1pressed", onAlt1Pressed);
   for (const button of elements.statsFreeNudge) {
     button.addEventListener("click", () => {
       const step = 10;

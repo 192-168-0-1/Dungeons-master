@@ -8,7 +8,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>Dungeons Alt1</title>
-  <link rel="stylesheet" href="./styles.css?v=20260625-24">
+  <link rel="stylesheet" href="./styles.css?v=20260625-25">
 </head>
 <body>
   <header class="titlebar">
@@ -79,6 +79,7 @@
               <button type="button" data-stats-nudge="down" aria-label="Move down" title="Move down">▼</button>
               <button type="button" data-stats-nudge="right" aria-label="Move right" title="Move right">▶</button>
             </span>
+            <button id="stats-place" type="button" title="Point at RuneScape and press Alt+1 to place">Place with Alt+1</button>
           </div>
         </div>
         <label><input id="pace-indicator" type="checkbox" checked> Tint the RPM by floor pace</label>
@@ -198,7 +199,7 @@
     (function bootstrapDungeons() {
       "use strict";
 
-      var fallbackVersion = "20260625-24";
+      var fallbackVersion = "20260625-25";
       var appStarted = false;
       var environment = document.getElementById("environment");
       var status = document.getElementById("status");
