@@ -1,5 +1,5 @@
-import { ROOM_SIZE, mapToImage } from "./map-core.js?v=20260625-23";
-import { rpmValue } from "./rpm-state.js?v=20260625-23";
+import { ROOM_SIZE, mapToImage } from "./map-core.js?v=20260625-24";
+import { rpmValue } from "./rpm-state.js?v=20260625-24";
 
 export const GATESTONE_POSITIONS = Object.freeze([
   [2, 21],
@@ -113,11 +113,14 @@ export function statsBarOrigin({ position = "bottom", mapX, mapY, mapWidth, mapH
 
 export const STATS_DEFAULT_TEXT_COLOR = mixColor(220, 225, 226);
 
-export function buildStatsOverlayCommands({ stats, mapX, mapY, floor, overlayScale = 1, duration = 30_000, position = "bottom", free = null, textColor = STATS_DEFAULT_TEXT_COLOR }) {
+export function buildStatsOverlayCommands({ stats, mapX, mapY, floor, overlayScale = 1, duration = 30_000, position = "bottom", free = null, textColor = STATS_DEFAULT_TEXT_COLOR, sizeScale = 1 }) {
   if (!stats || !floor || position === "hidden") return [];
   const scale = overlayScaleValue(overlayScale);
-  const barHeight = 21;
-  const fontSize = 11;
+  // Independent user size for the strip (default 1 keeps existing geometry).
+  const size = overlayScaleValue(sizeScale);
+  const barHeight = Math.round(21 * size);
+  const fontSize = Math.max(6, Math.round(11 * size));
+  const pad = Math.round(3 * size);
   const value = String(stats);
   const mapWidth = Math.round(floor.imageWidth * scale);
   const mapHeight = Math.round(floor.imageHeight * scale);
@@ -134,7 +137,7 @@ export function buildStatsOverlayCommands({ stats, mapX, mapY, floor, overlaySca
       Math.max(1, barWidth - inset * 2), Math.max(1, barHeight - inset * 2), duration, 1));
   }
   commands.push(text(value, textColor, fontSize,
-    originX + 3, barTop + 3, duration, false, false));
+    originX + pad, barTop + pad, duration, false, false));
   return commands;
 }
 
@@ -150,6 +153,7 @@ export function buildMapOverlayCommands({
   statsPosition = "bottom",
   statsFree = null,
   statsColor = STATS_DEFAULT_TEXT_COLOR,
+  statsScale = 1,
   duration = 30_000,
 }) {
   const commands = [];
@@ -202,6 +206,7 @@ export function buildMapOverlayCommands({
       position: statsPosition,
       free: statsFree,
       textColor: statsColor,
+      sizeScale: statsScale,
     }));
   }
 

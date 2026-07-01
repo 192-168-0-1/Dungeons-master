@@ -121,6 +121,20 @@ test("stats overlay can be placed on any side of the map, free, or hidden", () =
   assert.deepEqual(buildStatsOverlayCommands({ ...base, position: "hidden" }), []);
 });
 
+test("stats overlay resizes the strip by sizeScale without moving it at scale 1", () => {
+  const base = buildStatsOverlayCommands({ stats: "x", mapX: 100, mapY: 50, floor });
+  const big = buildStatsOverlayCommands({ stats: "x", mapX: 100, mapY: 50, floor, sizeScale: 2 });
+  const baseText = base.find((command) => command.type === "text");
+  const bigText = big.find((command) => command.type === "text");
+  assert.equal(baseText.size, 11);
+  assert.equal(bigText.size, 22);
+  // A default scale of 1 must keep the exact existing geometry.
+  assert.deepEqual({ x: baseText.x, y: baseText.y }, { x: 103, y: 205 });
+  // A taller strip draws more nested outline rows.
+  const rows = (commands) => commands.filter((command) => command.type === "rect").length;
+  assert.ok(rows(big) > rows(base));
+});
+
 test("map commands use client-relative coordinates and include every marker type", () => {
   const gatestones = assignGatestoneSlots([
     { source: "local", point: { x: 1, y: 1 }, text: "G1", fill: "#ffd23f", textColor: "#111111" },

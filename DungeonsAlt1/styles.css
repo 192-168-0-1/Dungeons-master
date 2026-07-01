@@ -101,6 +101,17 @@ main { padding: 9px; }
 .pace-close { color: #f0c24a; }
 .pace-behind { color: #ef6e5a; }
 
+/* Resize + free-move controls for the in-game RPM/stats overlay. */
+.stats-scale-row { display: inline-flex; align-items: center; gap: 4px; }
+.stats-scale-row input { width: 64px; }
+.stats-free-controls { display: flex; flex-direction: column; gap: 5px; margin: 2px 0 4px; }
+.stats-free-hint { color: #8fa0a4; font-size: 12px; }
+.stats-free-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.stats-free-row label { display: inline-flex; align-items: center; gap: 4px; }
+.stats-free-row input { width: 66px; }
+.stats-nudge { display: inline-flex; gap: 2px; }
+.stats-nudge button { width: 28px; padding: 3px 0; line-height: 1; }
+
 .stats {
   padding: 6px 9px;
   border: 1px solid var(--line);

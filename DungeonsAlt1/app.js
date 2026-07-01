@@ -8,21 +8,21 @@ import {
   isOpened,
   mapToImage,
   toChess,
-} from "./src/map-core.js?v=20260625-23";
+} from "./src/map-core.js?v=20260625-24";
 import {
   MAP_SCALE_CANDIDATES,
   findMapByAlt1Anchor,
   findMapByScaledCorners,
   readMapAtCalibration,
   scaledFloorDimensions,
-} from "./src/alt1-map-locator.js?v=20260625-23";
+} from "./src/alt1-map-locator.js?v=20260625-24";
 import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js";
 import {
   buildMapOverlayCommands,
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260625-23";
+} from "./src/alt1-overlay.js?v=20260625-24";
 import {
   DEFAULT_FLOOR_TARGET_SECONDS,
   elapsedFloorMinutes,
@@ -33,8 +33,8 @@ import {
   formatElapsedClock,
   parseFloorTargetSeconds,
   rpmValue,
-} from "./src/rpm-state.js?v=20260625-23";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-23";
+} from "./src/rpm-state.js?v=20260625-24";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-24";
 import {
   PARTY_COLORS,
   automaticPartyRoomStatus,
@@ -43,9 +43,9 @@ import {
   partyColor,
   reconcileObservedParty,
   roomStatusLine,
-} from "./src/party-core.js?v=20260625-23";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-23";
-import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-23";
+} from "./src/party-core.js?v=20260625-24";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-24";
+import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-24";
 import {
   RESULT_COLUMNS,
   RESULT_DISPLAY_COLUMNS,
@@ -61,7 +61,7 @@ import {
   normalizeResultBatchTarget,
   safeFilePart,
   safeTimestampForFilename,
-} from "./src/results-core.js?v=20260625-23";
+} from "./src/results-core.js?v=20260625-24";
 import {
   chooseSaveFolder,
   clearStoredSaveFolder,
@@ -70,10 +70,10 @@ import {
   requestSaveFolderPermission,
   supportsFolderSaving,
   writeDataUrlToFolder,
-} from "./src/file-saver.js?v=20260625-23";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-23";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-23";
-import { WinterfaceReader } from "./src/winterface.js?v=20260625-23";
+} from "./src/file-saver.js?v=20260625-24";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-24";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-24";
+import { WinterfaceReader } from "./src/winterface.js?v=20260625-24";
 
 const SCAN_INTERVAL = 600;
 const AUTO_CALIBRATION_INTERVAL = 2500;
@@ -107,6 +107,11 @@ const elements = {
   rpmOnly: document.querySelector("#rpm-only"),
   gameOverlay: document.querySelector("#game-overlay"),
   statsPosition: document.querySelector("#stats-position"),
+  statsScale: document.querySelector("#stats-scale"),
+  statsFreeControls: document.querySelector("#stats-free-controls"),
+  statsFreeX: document.querySelector("#stats-free-x"),
+  statsFreeY: document.querySelector("#stats-free-y"),
+  statsFreeNudge: [...document.querySelectorAll("[data-stats-nudge]")],
   paceIndicator: document.querySelector("#pace-indicator"),
   paceTarget: document.querySelector("#pace-target"),
   testOverlay: document.querySelector("#test-overlay"),
@@ -175,6 +180,8 @@ const state = {
   lastOverlaySignature: "",
   lastOverlayDraw: 0,
   perf: null,
+  // Free (movable) RPM/stats overlay position; restored from storage on init.
+  statsFree: { x: 8, y: 8 },
   results: [],
   resultsBusy: false,
   autoResultState: { visible: false, key: "", handled: false, missing: 0, stable: 0 },
@@ -528,6 +535,36 @@ function floorPaceTargetSeconds() {
   return parseFloorTargetSeconds(elements.paceTarget?.value, DEFAULT_FLOOR_TARGET_SECONDS);
 }
 
+// User size for the in-game RPM/stats strip, as a fraction (100% -> 1). Clamped
+// so it stays legible and cannot be shrunk away or blown up off-screen.
+function statsScaleValue() {
+  const percent = Number(elements.statsScale?.value);
+  const fraction = Number.isFinite(percent) && percent > 0 ? percent / 100 : 1;
+  return Math.min(3, Math.max(0.5, fraction));
+}
+
+// The free-position X/Y controls only apply to the "Free / movable" mode.
+function applyStatsFreeVisibility() {
+  if (elements.statsFreeControls) {
+    elements.statsFreeControls.hidden = (elements.statsPosition?.value || "bottom") !== "free";
+  }
+}
+
+function clampStatsFree(value, axis) {
+  const extent = axis === "x" ? Number(window.alt1?.rsWidth) : Number(window.alt1?.rsHeight);
+  const limit = Number.isFinite(extent) && extent > 40 ? extent - 20 : Number.POSITIVE_INFINITY;
+  return Math.max(0, Math.min(limit, Math.round(Number(value) || 0)));
+}
+
+function setStatsFree(x, y) {
+  state.statsFree = { x: clampStatsFree(x, "x"), y: clampStatsFree(y, "y") };
+  if (elements.statsFreeX) elements.statsFreeX.value = state.statsFree.x;
+  if (elements.statsFreeY) elements.statsFreeY.value = state.statsFree.y;
+  storageSet(`${STORAGE_PREFIX}:stats-free`, JSON.stringify(state.statsFree));
+  clearGameOverlay();
+  renderGameOverlay();
+}
+
 function currentFloorPace() {
   if (!elements.paceIndicator?.checked || !state.gameMap) return { status: "none" };
   return floorPaceStatus({
@@ -846,6 +883,8 @@ function renderGameOverlay() {
     stats: currentOverlayStats(),
     statsPosition: elements.statsPosition?.value || "bottom",
     statsColor: PACE_OVERLAY_COLORS[currentFloorPace().status] || undefined,
+    statsScale: statsScaleValue(),
+    statsFree: state.statsFree,
     duration: OVERLAY_DURATION,
   });
   drawGameOverlayGated(api, group, commands);
@@ -1859,8 +1898,37 @@ function bindEvents() {
   if (elements.statsPosition) {
     elements.statsPosition.addEventListener("change", () => {
       storageSet(`${STORAGE_PREFIX}:stats-position`, elements.statsPosition.value);
+      applyStatsFreeVisibility();
       clearGameOverlay();
       renderGameOverlay();
+    });
+  }
+  if (elements.statsScale) {
+    elements.statsScale.addEventListener("change", () => {
+      storageSet(`${STORAGE_PREFIX}:stats-scale`, elements.statsScale.value);
+      clearGameOverlay();
+      renderGameOverlay();
+    });
+  }
+  if (elements.statsFreeX) {
+    elements.statsFreeX.addEventListener("change", () => setStatsFree(elements.statsFreeX.value, state.statsFree.y));
+  }
+  if (elements.statsFreeY) {
+    elements.statsFreeY.addEventListener("change", () => setStatsFree(state.statsFree.x, elements.statsFreeY.value));
+  }
+  for (const button of elements.statsFreeNudge) {
+    button.addEventListener("click", () => {
+      const step = 10;
+      const dir = button.dataset.statsNudge;
+      const dx = dir === "left" ? -step : dir === "right" ? step : 0;
+      const dy = dir === "up" ? -step : dir === "down" ? step : 0;
+      // Moving to a free spot implies the free mode; switch to it so the nudge shows.
+      if (elements.statsPosition && elements.statsPosition.value !== "free") {
+        elements.statsPosition.value = "free";
+        storageSet(`${STORAGE_PREFIX}:stats-position`, "free");
+        applyStatsFreeVisibility();
+      }
+      setStatsFree(state.statsFree.x + dx, state.statsFree.y + dy);
     });
   }
   if (elements.paceIndicator) {
@@ -2174,13 +2242,26 @@ function initialize() {
   renderParty();
   drawEmptyState();
   updateStats();
-  // Restore the saved in-game stats overlay position.
+  // Restore the saved in-game stats overlay position, size and free coordinates.
   if (elements.statsPosition) {
     const savedStatsPosition = storageGet(`${STORAGE_PREFIX}:stats-position`);
     if (savedStatsPosition && [...elements.statsPosition.options].some((option) => option.value === savedStatsPosition)) {
       elements.statsPosition.value = savedStatsPosition;
     }
   }
+  if (elements.statsScale) {
+    const savedScale = storageGet(`${STORAGE_PREFIX}:stats-scale`);
+    if (savedScale) elements.statsScale.value = savedScale;
+  }
+  try {
+    const savedFree = JSON.parse(storageGet(`${STORAGE_PREFIX}:stats-free`) || "null");
+    if (savedFree && Number.isFinite(savedFree.x) && Number.isFinite(savedFree.y)) {
+      state.statsFree = { x: Math.max(0, Math.round(savedFree.x)), y: Math.max(0, Math.round(savedFree.y)) };
+    }
+  } catch { /* keep the default free position */ }
+  if (elements.statsFreeX) elements.statsFreeX.value = state.statsFree.x;
+  if (elements.statsFreeY) elements.statsFreeY.value = state.statsFree.y;
+  applyStatsFreeVisibility();
   // Restore the floor-pace indicator settings (defaults on / 6:15).
   if (elements.paceIndicator) {
     const savedPace = storageGet(`${STORAGE_PREFIX}:pace-indicator`);

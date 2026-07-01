@@ -8,7 +8,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>Dungeons Alt1</title>
-  <link rel="stylesheet" href="./styles.css?v=20260625-23">
+  <link rel="stylesheet" href="./styles.css?v=20260625-24">
 </head>
 <body>
   <header class="titlebar">
@@ -61,10 +61,26 @@
             <option value="top">Fixed: above the map</option>
             <option value="left">Fixed: left of the map</option>
             <option value="right">Fixed: right of the map</option>
-            <option value="free">Free: top-left of screen</option>
+            <option value="free">Free / movable</option>
             <option value="hidden">Hidden</option>
           </select>
         </label>
+        <label class="select-row" for="stats-scale">RPM / stats size
+          <span class="stats-scale-row"><input id="stats-scale" type="number" min="50" max="300" step="10" value="100" aria-label="RPM and stats overlay size percent"> %</span>
+        </label>
+        <div id="stats-free-controls" class="stats-free-controls" hidden>
+          <span class="stats-free-hint">Free position (client pixels). Type X/Y or nudge:</span>
+          <div class="stats-free-row">
+            <label for="stats-free-x">X <input id="stats-free-x" type="number" min="0" step="1" value="8"></label>
+            <label for="stats-free-y">Y <input id="stats-free-y" type="number" min="0" step="1" value="8"></label>
+            <span class="stats-nudge" role="group" aria-label="Move the RPM overlay">
+              <button type="button" data-stats-nudge="left" aria-label="Move left" title="Move left">◀</button>
+              <button type="button" data-stats-nudge="up" aria-label="Move up" title="Move up">▲</button>
+              <button type="button" data-stats-nudge="down" aria-label="Move down" title="Move down">▼</button>
+              <button type="button" data-stats-nudge="right" aria-label="Move right" title="Move right">▶</button>
+            </span>
+          </div>
+        </div>
         <label><input id="pace-indicator" type="checkbox" checked> Tint the RPM by floor pace</label>
         <label class="select-row" for="pace-target">Target floor time
           <input id="pace-target" type="text" inputmode="numeric" maxlength="6" size="5" value="6:15" placeholder="6:15" aria-label="Target floor time (mm:ss)">
@@ -182,7 +198,7 @@
     (function bootstrapDungeons() {
       "use strict";
 
-      var fallbackVersion = "20260625-23";
+      var fallbackVersion = "20260625-24";
       var appStarted = false;
       var environment = document.getElementById("environment");
       var status = document.getElementById("status");
