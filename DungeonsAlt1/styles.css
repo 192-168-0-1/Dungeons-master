@@ -101,15 +101,21 @@ main { padding: 9px; }
 .pace-close { color: #f0c24a; }
 .pace-behind { color: #ef6e5a; }
 
-/* Resize + free-move controls for the in-game RPM/stats overlay. */
-.stats-scale-row { display: inline-flex; align-items: center; gap: 4px; }
-.stats-scale-row input { width: 64px; }
-.stats-free-controls { display: flex; flex-direction: column; gap: 5px; margin: 2px 0 4px; }
+/* Resize + free-move controls for the in-game RPM/stats overlay. Spaced with
+   margins, not flex gap: flex gap needs Chromium 84+ and old Alt1/CEF builds
+   would render these controls flush together. */
+.stats-scale-row { display: inline-flex; align-items: center; }
+.stats-scale-row input { width: 64px; margin-right: 4px; }
+.stats-free-controls { display: flex; flex-direction: column; margin: 2px 0 4px; }
+.stats-free-controls > * + * { margin-top: 5px; }
 .stats-free-hint { color: #8fa0a4; font-size: 12px; }
-.stats-free-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.stats-free-row label { display: inline-flex; align-items: center; gap: 4px; }
+.stats-free-row { display: flex; align-items: center; flex-wrap: wrap; }
+.stats-free-row > * + * { margin-left: 10px; }
+.stats-free-row label { display: inline-flex; align-items: center; }
+.stats-free-row label input { margin-left: 4px; }
 .stats-free-row input { width: 66px; }
-.stats-nudge { display: inline-flex; gap: 2px; }
+.stats-nudge { display: inline-flex; }
+.stats-nudge button + button { margin-left: 2px; }
 .stats-nudge button { width: 28px; padding: 3px 0; line-height: 1; }
 
 .stats {
@@ -205,9 +211,12 @@ input {
   padding: 4px 7px;
 }
 
+/* Plain :focus only. Old Alt1/CEF (Chromium < 86) does not know :focus-visible,
+   and an unknown pseudo-class in a selector list drops the WHOLE rule there —
+   which silently removed the input focus ring too. */
 input:focus,
-button:focus-visible,
-summary:focus-visible {
+button:focus,
+summary:focus {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }

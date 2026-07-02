@@ -260,6 +260,9 @@ test("floor filters accept ranges, themes and floor sizes", () => {
   assert.equal(resultMatchesFloorFilter({ Floor: "54", FloorSize: "Large" }, "warped"), true);
   assert.equal(resultMatchesFloorFilter({ Floor: "42", FloorSize: "Large" }, "occult"), true);
   assert.equal(resultMatchesFloorFilter({ Floor: "16", FloorSize: "Medium" }, "abandoned"), true);
+  assert.equal(resultMatchesFloorFilter({ Floor: "5", FloorSize: "Small" }, "1-11"), true);
+  assert.equal(resultMatchesFloorFilter({ Floor: "14", FloorSize: "Medium" }, "12-17"), true);
+  assert.equal(resultMatchesFloorFilter({ Floor: "30", FloorSize: "Large" }, "abandoned-2"), true);
   assert.equal(resultMatchesFloorFilter({ Floor: "54", FloorSize: "Large" }, "1-11, occult"), false);
   assert.equal(resultMatchesFloorFilter({ Floor: "54", FloorSize: "Large" }, "large"), true);
 });

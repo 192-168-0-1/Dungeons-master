@@ -51,6 +51,11 @@ test("floor pace target parses mm:ss and plain seconds, else falls back", () => 
   assert.equal(parseFloorTargetSeconds("6:15"), 375);
   assert.equal(parseFloorTargetSeconds("10:00"), 600);
   assert.equal(parseFloorTargetSeconds("90"), 90);
+  assert.equal(parseFloorTargetSeconds("6.15"), 375);
+  assert.equal(parseFloorTargetSeconds("6,15"), 375);
+  assert.equal(parseFloorTargetSeconds("6"), DEFAULT_FLOOR_TARGET_SECONDS);
+  assert.equal(parseFloorTargetSeconds("6.5"), DEFAULT_FLOOR_TARGET_SECONDS);
+  assert.equal(parseFloorTargetSeconds("615"), 615);
   assert.equal(parseFloorTargetSeconds(""), DEFAULT_FLOOR_TARGET_SECONDS);
   assert.equal(parseFloorTargetSeconds("6:99"), DEFAULT_FLOOR_TARGET_SECONDS);
   assert.equal(parseFloorTargetSeconds("nonsense"), DEFAULT_FLOOR_TARGET_SECONDS);

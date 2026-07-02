@@ -8,21 +8,21 @@ import {
   isOpened,
   mapToImage,
   toChess,
-} from "./src/map-core.js?v=20260625-25";
+} from "./src/map-core.js?v=20260625-26";
 import {
   MAP_SCALE_CANDIDATES,
   findMapByAlt1Anchor,
   findMapByScaledCorners,
   readMapAtCalibration,
   scaledFloorDimensions,
-} from "./src/alt1-map-locator.js?v=20260625-25";
+} from "./src/alt1-map-locator.js?v=20260625-26";
 import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js";
 import {
   buildMapOverlayCommands,
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260625-25";
+} from "./src/alt1-overlay.js?v=20260625-26";
 import {
   DEFAULT_FLOOR_TARGET_SECONDS,
   elapsedFloorMinutes,
@@ -33,8 +33,8 @@ import {
   formatElapsedClock,
   parseFloorTargetSeconds,
   rpmValue,
-} from "./src/rpm-state.js?v=20260625-25";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-25";
+} from "./src/rpm-state.js?v=20260625-26";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-26";
 import {
   PARTY_COLORS,
   automaticPartyRoomStatus,
@@ -43,9 +43,9 @@ import {
   partyColor,
   reconcileObservedParty,
   roomStatusLine,
-} from "./src/party-core.js?v=20260625-25";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-25";
-import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-25";
+} from "./src/party-core.js?v=20260625-26";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-26";
+import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-26";
 import {
   RESULT_COLUMNS,
   RESULT_DISPLAY_COLUMNS,
@@ -61,7 +61,7 @@ import {
   normalizeResultBatchTarget,
   safeFilePart,
   safeTimestampForFilename,
-} from "./src/results-core.js?v=20260625-25";
+} from "./src/results-core.js?v=20260625-26";
 import {
   chooseSaveFolder,
   clearStoredSaveFolder,
@@ -70,10 +70,10 @@ import {
   requestSaveFolderPermission,
   supportsFolderSaving,
   writeDataUrlToFolder,
-} from "./src/file-saver.js?v=20260625-25";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-25";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-25";
-import { WinterfaceReader } from "./src/winterface.js?v=20260625-25";
+} from "./src/file-saver.js?v=20260625-26";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-26";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-26";
+import { WinterfaceReader } from "./src/winterface.js?v=20260625-26";
 
 const SCAN_INTERVAL = 600;
 const AUTO_CALIBRATION_INTERVAL = 2500;
@@ -567,6 +567,17 @@ function setStatsFree(x, y) {
   renderGameOverlay();
 }
 
+// Alt1 delivers its events ONLY through the alt1.events[type] handler arrays
+// (A1lib.on does exactly this push); it never dispatches DOM window events, so
+// registering alt1pressed/permissionchanged on window silently never fires.
+function onAlt1Event(type, handler) {
+  if (!hasAlt1()) return;
+  const api = window.alt1;
+  api.events = api.events || {};
+  api.events[type] = api.events[type] || [];
+  api.events[type].push(handler);
+}
+
 function stopStatsPlacement(message, tone) {
   state.placingStats = false;
   if (elements.statsPlace) elements.statsPlace.textContent = "Place with Alt+1";
@@ -576,6 +587,8 @@ function stopStatsPlacement(message, tone) {
 // Click-to-place: arm a mode where the next Alt+1 press drops the RPM counter at
 // the cursor. Alt1 fires "alt1pressed" with mouseRs in RuneScape-client
 // coordinates — the same system as the overlay — so no rsX/rsY offset is needed.
+// The position mode switches to "free" only when a spot is actually placed (see
+// onAlt1Pressed), so cancelling or a failed read leaves the current mode intact.
 function beginStatsPlacement() {
   if (!hasAlt1()) {
     setStatus("Open the app in Alt1 to place the counter on the game screen", "warn");
@@ -585,11 +598,6 @@ function beginStatsPlacement() {
     stopStatsPlacement("Placement cancelled", "warn");
     return;
   }
-  if (elements.statsPosition && elements.statsPosition.value !== "free") {
-    elements.statsPosition.value = "free";
-    storageSet(`${STORAGE_PREFIX}:stats-position`, "free");
-    applyStatsFreeVisibility();
-  }
   state.placingStats = true;
   if (elements.statsPlace) elements.statsPlace.textContent = "Cancel (waiting for Alt+1)";
   setStatus("Point the cursor where you want the RPM counter on RuneScape, then press Alt+1", "warn");
@@ -597,11 +605,18 @@ function beginStatsPlacement() {
 
 function onAlt1Pressed(event) {
   if (!state.placingStats) return;
-  const rs = event?.mouseRs || event?.detail?.mouseRs
-    || (Number.isFinite(event?.x) && Number.isFinite(event?.y) ? { x: event.x, y: event.y } : null);
+  // Only trust mouseRs: it is guaranteed RuneScape-client coordinates. The
+  // event's top-level x/y may be screen coordinates and would misplace the strip.
+  const rs = event?.mouseRs || event?.detail?.mouseRs || null;
   if (!rs || !Number.isFinite(rs.x) || !Number.isFinite(rs.y)) {
     stopStatsPlacement("Could not read the cursor position — use the X/Y controls instead", "warn");
     return;
+  }
+  // Switch to free/movable mode only now that a spot is actually being placed.
+  if (elements.statsPosition && elements.statsPosition.value !== "free") {
+    elements.statsPosition.value = "free";
+    storageSet(`${STORAGE_PREFIX}:stats-position`, "free");
+    applyStatsFreeVisibility();
   }
   setStatsFree(rs.x, rs.y);
   stopStatsPlacement(`RPM counter placed at ${state.statsFree.x}, ${state.statsFree.y}`, "ok");
@@ -835,6 +850,11 @@ function drawSelection(floor) {
 }
 
 function clearGameOverlay() {
+  // The native overlay is gone after this, so the redraw gate's memo must be
+  // reset too — otherwise a follow-up render with byte-identical commands is
+  // skipped and the strip stays invisible for up to OVERLAY_REFRESH_INTERVAL.
+  state.lastOverlaySignature = "";
+  state.lastOverlayDraw = 0;
   if (hasAlt1() && typeof window.alt1.overLayClearGroup === "function") {
     for (const group of ["dungeons-alt1", "dungeons-alt1-test", PARTY_DEBUG_GROUP]) {
       window.alt1.overLayClearGroup(group);
@@ -926,6 +946,7 @@ function renderGameOverlay() {
     statsPosition: elements.statsPosition?.value || "bottom",
     statsColor: PACE_OVERLAY_COLORS[currentFloorPace().status] || undefined,
     statsScale: statsScaleValue(),
+    statsScreen: { width: api.rsWidth, height: api.rsHeight },
     statsFree: state.statsFree,
     duration: OVERLAY_DURATION,
   });
@@ -1482,6 +1503,10 @@ function forgetParty() {
   state.partyPendingChanges.clear();
   state.partyPanel = null;
   state.partyAutoScan = false;
+  // Team-sync error facts (connection lost / removed from the room) must survive
+  // forgetting the scanned party; only a stale non-error hint is cleared.
+  if (state.roomStatusHint?.tone !== "error") state.roomStatusHint = null;
+  renderRoomStatus();
   renderParty();
   elements.partyScanStatus.textContent = "Party forgotten; open the DG party interface and scan again";
 }
@@ -1959,7 +1984,7 @@ function bindEvents() {
     elements.statsFreeY.addEventListener("change", () => setStatsFree(state.statsFree.x, elements.statsFreeY.value));
   }
   if (elements.statsPlace) elements.statsPlace.addEventListener("click", beginStatsPlacement);
-  window.addEventListener("alt1pressed", onAlt1Pressed);
+  onAlt1Event("alt1pressed", onAlt1Pressed);
   for (const button of elements.statsFreeNudge) {
     button.addEventListener("click", () => {
       const step = 10;
@@ -1984,6 +2009,10 @@ function bindEvents() {
   }
   if (elements.paceTarget) {
     elements.paceTarget.addEventListener("change", () => {
+      // Normalize the field so the user sees the effective target (e.g. "6.15"
+      // becomes "06:15", and a bare "6" falls back to the default clock).
+      const seconds = parseFloorTargetSeconds(elements.paceTarget.value, DEFAULT_FLOOR_TARGET_SECONDS);
+      elements.paceTarget.value = formatElapsedClock(seconds);
       storageSet(`${STORAGE_PREFIX}:pace-target`, elements.paceTarget.value);
       updateStats();
       renderGameOverlay();
@@ -1994,7 +2023,7 @@ function bindEvents() {
     clearGameOverlay();
     teamSync.disconnect(false);
   });
-  window.addEventListener("permissionchanged", updateInstallLink);
+  onAlt1Event("permissionchanged", updateInstallLink);
   elements.applyAnnotation.addEventListener("click", () => setSelectedAnnotation(elements.annotation.value));
   elements.annotation.addEventListener("keydown", (event) => {
     if (event.key === "Enter") { setSelectedAnnotation(elements.annotation.value); elements.canvas.focus(); }
@@ -2057,6 +2086,8 @@ function bindEvents() {
   elements.partyScan.addEventListener("click", () => scanPartyInterface({ manual: true, forceFull: true }));
   elements.partyForget.addEventListener("click", forgetParty);
   elements.partyInterface.addEventListener("change", () => {
+    // Persist the opt-in/out first so both branches save it across a restart.
+    storageSet(`${STORAGE_PREFIX}:party-interface`, elements.partyInterface.checked ? "1" : "");
     if (!elements.partyInterface.checked) {
       state.partyAutoScan = false;
       state.partyPanel = null;
@@ -2065,6 +2096,9 @@ function bindEvents() {
         : "RuneScape party positions disabled; using team join order";
       renderParty();
       render();
+      // Drop a stale party-derived room hint, but keep team-sync error facts.
+      if (state.roomStatusHint?.tone !== "error") state.roomStatusHint = null;
+      renderRoomStatus();
       return;
     }
     elements.partyScanStatus.textContent = state.observedParty.length
@@ -2086,8 +2120,9 @@ function bindEvents() {
   if (elements.experimentalAutoRoom) {
     elements.experimentalAutoRoom.addEventListener("change", () => {
       storageSet(`${STORAGE_PREFIX}:auto-room`, elements.experimentalAutoRoom.checked ? "1" : "");
-      if (elements.experimentalAutoRoom.checked) maybeAutoJoinFromParty();
-      else renderRoomStatus();
+      // Recompute the hint from the current party for both states — the unchecked
+      // branch of maybeAutoJoinFromParty already refreshes the idle hint itself.
+      maybeAutoJoinFromParty();
     });
   }
   if (elements.debugMode) {
@@ -2319,6 +2354,10 @@ function initialize() {
   if (elements.experimentalFeatures) elements.experimentalFeatures.checked = storageGet(`${STORAGE_PREFIX}:experimental`) === "1";
   if (elements.experimentalAutoRoom) elements.experimentalAutoRoom.checked = storageGet(`${STORAGE_PREFIX}:auto-room`) === "1";
   if (elements.debugMode) elements.debugMode.checked = storageGet(`${STORAGE_PREFIX}:debug`) === "1";
+  // The party-interface opt-out must survive a restart. The !== null guard keeps
+  // the default-checked markup on a fresh install (nothing stored yet).
+  const savedPartyInterface = storageGet(`${STORAGE_PREFIX}:party-interface`);
+  if (savedPartyInterface !== null && elements.partyInterface) elements.partyInterface.checked = savedPartyInterface === "1";
   applyExperimentalState();
   window.__dungeonsAppReady = true;
   elements.teamRoom.value = createRoomCode();

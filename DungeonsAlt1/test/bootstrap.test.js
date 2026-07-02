@@ -75,7 +75,7 @@ test("Alt1 bootstrap starts the cached app when version.json hangs", async () =>
 
   assert.equal(runtime.appendedToBody.length, 1);
   assert.equal(runtime.appendedToBody[0].type, "module");
-  assert.match(runtime.appendedToBody[0].src, /^\.\/app\.js\?v=20260625-25$/);
+  assert.match(runtime.appendedToBody[0].src, /^\.\/app\.js\?v=20260625-26$/);
 });
 
 test("failed OCR loading does not block the core Alt1 app", async () => {
@@ -84,7 +84,7 @@ test("failed OCR loading does not block the core Alt1 app", async () => {
 
   assert.equal(runtime.appendedToBody.length, 1);
   assert.equal(runtime.appendedToHead.length, 1);
-  assert.match(runtime.appendedToBody[0].src, /^\.\/app\.js\?v=20260625-25$/);
+  assert.match(runtime.appendedToBody[0].src, /^\.\/app\.js\?v=20260625-26$/);
 
   runtime.appendedToHead[0].onerror();
   await runtime.window.__dungeonsOcrReady;

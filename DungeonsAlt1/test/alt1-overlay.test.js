@@ -121,6 +121,26 @@ test("stats overlay can be placed on any side of the map, free, or hidden", () =
   assert.deepEqual(buildStatsOverlayCommands({ ...base, position: "hidden" }), []);
 });
 
+test("a free stats strip is clamped onto the screen so a corner click keeps it visible", () => {
+  const base = { stats: "x", mapX: 100, mapY: 50, floor }; // Small map is 152x152
+  const clamped = buildStatsOverlayCommands({
+    ...base,
+    position: "free",
+    free: { x: 1900, y: 1060 },
+    screen: { width: 1920, height: 1080 },
+  }).find((command) => command.type === "rect");
+  assert.ok(clamped.x >= 0 && clamped.y >= 0);
+  assert.ok(clamped.x + clamped.width <= 1920);
+  assert.ok(clamped.y + clamped.height <= 1080);
+  // Without a screen the free point is used verbatim (back-compat).
+  const unclamped = buildStatsOverlayCommands({
+    ...base,
+    position: "free",
+    free: { x: 1900, y: 1060 },
+  }).find((command) => command.type === "rect");
+  assert.deepEqual({ x: unclamped.x, y: unclamped.y }, { x: 1900, y: 1060 });
+});
+
 test("stats overlay resizes the strip by sizeScale without moving it at scale 1", () => {
   const base = buildStatsOverlayCommands({ stats: "x", mapX: 100, mapY: 50, floor });
   const big = buildStatsOverlayCommands({ stats: "x", mapX: 100, mapY: 50, floor, sizeScale: 2 });

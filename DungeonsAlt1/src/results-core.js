@@ -186,7 +186,10 @@ export function resultMatchesFloorFilter(result, filter = "") {
   if (!query || /^(all|\*)$/i.test(query)) return true;
   const floor = Number.parseInt(result?.Floor, 10);
   const size = String(result?.FloorSize ?? "").trim().toLowerCase();
-  const tokens = query.split(/[,\s]+/).map(normalizeFilterToken).filter(Boolean);
+  // Keep the hyphen intact here (trim + lowercase only): normalizeFilterToken
+  // strips hyphens, which would turn a "1-11" range into "111" and stop the
+  // range regex below from ever matching. Theme aliases apply it individually.
+  const tokens = query.split(/[,\s]+/).map((token) => String(token ?? "").trim().toLowerCase()).filter(Boolean);
   if (!tokens.length) return true;
 
   for (const token of tokens) {
@@ -198,7 +201,7 @@ export function resultMatchesFloorFilter(result, filter = "") {
       continue;
     }
     if (/^\d{1,2}$/.test(token) && Number.parseInt(token, 10) === floor) return true;
-    const themeRanges = RESULT_THEME_RANGES[token];
+    const themeRanges = RESULT_THEME_RANGES[normalizeFilterToken(token)];
     if (themeRanges && Number.isFinite(floor) && floorInRanges(floor, themeRanges)) return true;
     if (["small", "medium", "large"].includes(token) && token === size) return true;
   }

@@ -47,10 +47,14 @@ export const PACE_CLOSE_RATIO = 1.2;
 
 export function parseFloorTargetSeconds(value, fallback = DEFAULT_FLOOR_TARGET_SECONDS) {
   const text = String(value ?? "").trim();
-  const clock = /^(\d{1,3}):([0-5]?\d)$/.exec(text);
-  if (clock) return Number(clock[1]) * 60 + Number(clock[2]);
+  // Accept mm:ss and mm.ss/mm,ss (two second-digits required for the dot/comma
+  // forms so "6.15" reads as 6:15, not 6 seconds), plus a bare seconds count but
+  // only when plausible (>= 30) so a "6" or "6.5" typo falls back to the default
+  // instead of becoming an absurdly small target.
+  const clock = /^(\d{1,3})(?::([0-5]?\d)|[.,]([0-5]\d))$/.exec(text);
+  if (clock) return Number(clock[1]) * 60 + Number(clock[2] ?? clock[3]);
   const seconds = Number(text);
-  if (Number.isFinite(seconds) && seconds > 0) return Math.round(seconds);
+  if (Number.isFinite(seconds) && seconds >= 30) return Math.round(seconds);
   return fallback;
 }
 

@@ -1,5 +1,5 @@
-import { ROOM_SIZE, mapToImage } from "./map-core.js?v=20260625-25";
-import { rpmValue } from "./rpm-state.js?v=20260625-25";
+import { ROOM_SIZE, mapToImage } from "./map-core.js?v=20260625-26";
+import { rpmValue } from "./rpm-state.js?v=20260625-26";
 
 export const GATESTONE_POSITIONS = Object.freeze([
   [2, 21],
@@ -113,7 +113,7 @@ export function statsBarOrigin({ position = "bottom", mapX, mapY, mapWidth, mapH
 
 export const STATS_DEFAULT_TEXT_COLOR = mixColor(220, 225, 226);
 
-export function buildStatsOverlayCommands({ stats, mapX, mapY, floor, overlayScale = 1, duration = 30_000, position = "bottom", free = null, textColor = STATS_DEFAULT_TEXT_COLOR, sizeScale = 1 }) {
+export function buildStatsOverlayCommands({ stats, mapX, mapY, floor, overlayScale = 1, duration = 30_000, position = "bottom", free = null, textColor = STATS_DEFAULT_TEXT_COLOR, sizeScale = 1, screen = null }) {
   if (!stats || !floor || position === "hidden") return [];
   const scale = overlayScaleValue(overlayScale);
   // Independent user size for the strip (default 1 keeps existing geometry).
@@ -124,10 +124,20 @@ export function buildStatsOverlayCommands({ stats, mapX, mapY, floor, overlaySca
   const value = String(stats);
   const mapWidth = Math.round(floor.imageWidth * scale);
   const mapHeight = Math.round(floor.imageHeight * scale);
-  const barWidth = Math.max(mapWidth, estimateOverlayTextWidth(value, fontSize) + 8);
+  // Right margin mirrors the left pad (identical to +8 at sizeScale 1, pad = 3).
+  const barWidth = Math.max(mapWidth, estimateOverlayTextWidth(value, fontSize) + pad * 2 + 2);
   const origin = statsBarOrigin({ position, mapX, mapY, mapWidth, mapHeight, barWidth, barHeight, free });
-  const originX = Math.max(0, origin.x);
-  const barTop = Math.max(0, origin.y);
+  // The free point is the strip's top-left, so without a right/bottom clamp a
+  // corner click leaves only a sliver on-screen. Only the free mode clamps to the
+  // screen; every other position (and the no-screen default) keeps Math.max(0, ...).
+  let originX = Math.max(0, origin.x);
+  let barTop = Math.max(0, origin.y);
+  if (position === "free" && screen
+    && Number.isFinite(screen.width) && screen.width > 0
+    && Number.isFinite(screen.height) && screen.height > 0) {
+    originX = Math.max(0, Math.min(origin.x, Math.round(screen.width) - barWidth));
+    barTop = Math.max(0, Math.min(origin.y, Math.round(screen.height) - barHeight));
+  }
   const commands = [];
 
   // Alt1 rectangles are outlines rather than fills. Nested opaque-black
@@ -154,6 +164,7 @@ export function buildMapOverlayCommands({
   statsFree = null,
   statsColor = STATS_DEFAULT_TEXT_COLOR,
   statsScale = 1,
+  statsScreen = null,
   duration = 30_000,
 }) {
   const commands = [];
@@ -207,6 +218,7 @@ export function buildMapOverlayCommands({
       free: statsFree,
       textColor: statsColor,
       sizeScale: statsScale,
+      screen: statsScreen,
     }));
   }
 
