@@ -82,13 +82,17 @@ function samePoint(left, right) {
 }
 
 function resetCandidateKey(gameMap, calibration) {
-  if (!gameMap?.base || !calibration) return "";
+  if (!calibration) return "";
+  // A base-less read still gets a stable key. In the first seconds of a new
+  // floor the base marker is often unreadable, and an empty key made samePending
+  // permanently false — the transition could then never confirm, freezing the
+  // accepted map (and the rpm/stats overlay) on the PREVIOUS floor.
   return [
     calibration.floor?.name ?? "",
     Math.round(Number(calibration.x) || 0),
     Math.round(Number(calibration.y) || 0),
-    gameMap.base.x,
-    gameMap.base.y,
+    gameMap?.base ? gameMap.base.x : "none",
+    gameMap?.base ? gameMap.base.y : "none",
   ].join(":");
 }
 
@@ -180,6 +184,28 @@ export function evaluateMapTransition(previous = {}, gameMap, calibration, now =
     };
   }
 
+  // Escape valve for a jittering base: when the base cell reads differently on
+  // every frame the pending key never matches twice and the two-frame gate can
+  // stall indefinitely, freezing the accepted map on the previous floor. A
+  // pending that has lived CONTINUOUSLY (refreshed every frame) for this long
+  // while the room count stays collapsed can only be a genuinely new floor —
+  // single-frame misreads resolve to same-floor within a frame and a base
+  // oscillation without a count collapse never reaches this path.
+  const collapseStreakMs = 2_500;
+  const streakLastSeen = Number(pending?.seenAt);
+  const streakAlive = Number.isFinite(streakLastSeen) && timestamp - streakLastSeen <= 2_000;
+  const streakStart = Number(pending?.firstSeenAt);
+  if (roomCountDropped && streakAlive && Number.isFinite(streakStart) && streakStart > 0
+    && timestamp - streakStart >= collapseStreakMs) {
+    return {
+      accept: true,
+      reset: true,
+      pendingReset: null,
+      resetAt: streakStart,
+      reason: "confirmed-room-collapse",
+    };
+  }
+
   return {
     accept: false,
     reset: false,
@@ -189,6 +215,9 @@ export function evaluateMapTransition(previous = {}, gameMap, calibration, now =
       openedRoomCount,
       base: gameMap.base ? { x: gameMap.base.x, y: gameMap.base.y } : null,
       seenAt: timestamp,
+      // The streak start survives key changes so the valve above can measure a
+      // continuous pending; a gap (lost reads) starts a fresh streak.
+      firstSeenAt: streakAlive && streakStart > 0 ? streakStart : timestamp,
       reason: baseChanged ? "base-change" : "single-base",
     },
     reason: baseChanged ? "pending-base-change" : "pending-single-base",

@@ -182,6 +182,62 @@ test("a new floor reusing the base resets even when the one-room frame is missed
   assert.equal(confirmed.reason, "confirmed-single-base");
 });
 
+test("a new floor whose base is not yet readable still confirms and resets", () => {
+  // The first seconds of a new floor often read rooms but no base marker. An
+  // empty pending key made samePending permanently false, freezing the accepted
+  // map (and the 55-room overlay of the previous floor) indefinitely.
+  const first = evaluateMapTransition({
+    floorStart: 10_000,
+    lastBase: { x: 5, y: 5 },
+    lastRoomCount: 55,
+    pendingReset: null,
+  }, gameMap({ rooms: 8, base: null }), calibration, 60_000);
+  assert.equal(first.accept, false);
+  assert.ok(first.pendingReset.key.length > 0);
+
+  const confirmed = evaluateMapTransition({
+    floorStart: 10_000,
+    lastBase: { x: 5, y: 5 },
+    lastRoomCount: 55,
+    pendingReset: first.pendingReset,
+  }, gameMap({ rooms: 10, base: null }), calibration, 60_600);
+  assert.equal(confirmed.accept, true);
+  assert.equal(confirmed.reset, true);
+  assert.equal(confirmed.resetAt, 60_000);
+});
+
+test("a jittering base cannot stall a collapsed-count floor change forever", () => {
+  // The base cell reads differently every frame, so the pending key never
+  // matches twice; the sustained-collapse valve must confirm after ~2.5s.
+  const previous = { floorStart: 10_000, lastBase: { x: 5, y: 5 }, lastRoomCount: 55 };
+  const bases = [{ x: 0, y: 1 }, { x: 1, y: 1 }, { x: 0, y: 1 }, { x: 1, y: 1 }];
+  let pending = null;
+  let result = null;
+  for (let frame = 0; frame < bases.length; frame += 1) {
+    result = evaluateMapTransition({ ...previous, pendingReset: pending },
+      gameMap({ rooms: 8 + frame, base: bases[frame] }), calibration, 60_000 + frame * 1_000);
+    if (result.reset) break;
+    assert.equal(result.accept, false);
+    pending = result.pendingReset;
+  }
+  assert.equal(result.reset, true);
+  assert.equal(result.reason, "confirmed-room-collapse");
+  assert.equal(result.resetAt, 60_000);
+});
+
+test("a stale pending from before lost reads does not instantly confirm", () => {
+  // Reads were lost for a while (loading screen); the surviving pending's
+  // streak is dead, so the first new candidate frame must start over.
+  const first = evaluateMapTransition({
+    floorStart: 10_000,
+    lastBase: { x: 5, y: 5 },
+    lastRoomCount: 55,
+    pendingReset: { key: "old", openedRoomCount: 8, seenAt: 60_000, firstSeenAt: 55_000, reason: "single-base" },
+  }, gameMap({ rooms: 9, base: { x: 2, y: 2 } }), calibration, 70_000);
+  assert.equal(first.accept, false);
+  assert.equal(first.pendingReset.firstSeenAt, 70_000);
+});
+
 test("a partial room-count misread and recovery does not reset the floor timer", () => {
   // 12 -> 5 fires roomCountDropped (pending single-base); the 12 -> 7 recovery
   // frame is not itself a reset candidate, so it must NOT confirm a reset.

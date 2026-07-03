@@ -8,21 +8,21 @@ import {
   isOpened,
   mapToImage,
   toChess,
-} from "./src/map-core.js?v=20260625-26";
+} from "./src/map-core.js?v=20260625-27";
 import {
   MAP_SCALE_CANDIDATES,
   findMapByAlt1Anchor,
   findMapByScaledCorners,
   readMapAtCalibration,
   scaledFloorDimensions,
-} from "./src/alt1-map-locator.js?v=20260625-26";
+} from "./src/alt1-map-locator.js?v=20260625-27";
 import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js";
 import {
   buildMapOverlayCommands,
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260625-26";
+} from "./src/alt1-overlay.js?v=20260625-27";
 import {
   DEFAULT_FLOOR_TARGET_SECONDS,
   elapsedFloorMinutes,
@@ -33,8 +33,8 @@ import {
   formatElapsedClock,
   parseFloorTargetSeconds,
   rpmValue,
-} from "./src/rpm-state.js?v=20260625-26";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-26";
+} from "./src/rpm-state.js?v=20260625-27";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-27";
 import {
   PARTY_COLORS,
   automaticPartyRoomStatus,
@@ -43,9 +43,9 @@ import {
   partyColor,
   reconcileObservedParty,
   roomStatusLine,
-} from "./src/party-core.js?v=20260625-26";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-26";
-import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-26";
+} from "./src/party-core.js?v=20260625-27";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-27";
+import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-27";
 import {
   RESULT_COLUMNS,
   RESULT_DISPLAY_COLUMNS,
@@ -61,7 +61,7 @@ import {
   normalizeResultBatchTarget,
   safeFilePart,
   safeTimestampForFilename,
-} from "./src/results-core.js?v=20260625-26";
+} from "./src/results-core.js?v=20260625-27";
 import {
   chooseSaveFolder,
   clearStoredSaveFolder,
@@ -70,10 +70,10 @@ import {
   requestSaveFolderPermission,
   supportsFolderSaving,
   writeDataUrlToFolder,
-} from "./src/file-saver.js?v=20260625-26";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-26";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-26";
-import { WinterfaceReader } from "./src/winterface.js?v=20260625-26";
+} from "./src/file-saver.js?v=20260625-27";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-27";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-27";
+import { WinterfaceReader } from "./src/winterface.js?v=20260625-27";
 
 const SCAN_INTERVAL = 600;
 const AUTO_CALIBRATION_INTERVAL = 2500;
@@ -461,6 +461,7 @@ async function updateMap() {
       pendingReset: state.pendingFloorReset,
     }, gameMap, nextCalibration, now);
     state.pendingFloorReset = transition.pendingReset;
+    state.lastTransition = transition.reason;
     if (!transition.accept) {
       const pendingReason = transition.reason === "pending-base-change" ? "base moved" : "single base room";
       setStatus(`Possible new floor detected (${pendingReason}); waiting for confirmation`, "warn");
@@ -653,6 +654,8 @@ function updateStats() {
   if (elements.debugMode?.checked && state.perf) {
     const p = state.perf;
     const total = p.read + p.detect + p.render;
+    // The transition reason makes a stuck/missed floor reset diagnosable live.
+    if (state.lastTransition) html += ` · ${state.lastTransition}`;
     html += ` · ⏱ ${total.toFixed(0)}ms (read ${p.read.toFixed(0)} · det ${p.detect.toFixed(0)} · draw ${p.render.toFixed(0)})`;
   }
   elements.stats.innerHTML = html;
