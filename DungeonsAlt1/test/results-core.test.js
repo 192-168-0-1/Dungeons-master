@@ -17,6 +17,7 @@ import {
   resultBatchIsComplete,
   resultBatchStatus,
   resultFingerprint,
+  resultLooksComplete,
   resultMatchesFloorFilter,
   safeFilePart,
   safeTimestampForFilename,
@@ -207,6 +208,45 @@ test("auto results state adds a changed screen after the previous disappears", (
   state = nextAutoResultState(state, other);
   assert.equal(state.shouldAdd, true);
   assert.notEqual(state.key, firstKey);
+});
+
+test("auto results stability ignores the ticking timer so consecutive scans still settle", () => {
+  // The results screen's bottom-left Time box counts down every second, so two
+  // scans differ only in Time. That must not reset the stability counter.
+  const first = nextAutoResultState(FRESH_AUTO_STATE, { ...sampleResult, Time: "12:34" });
+  assert.equal(first.stable, 1);
+  assert.equal(first.shouldAdd, false);
+  const second = nextAutoResultState(first, { ...sampleResult, Time: "12:33" });
+  assert.equal(second.stable, 2);
+  assert.equal(second.shouldAdd, true);
+  assert.equal(second.key, first.key);
+});
+
+test("auto results state never commits the empty pre-skip completion screen", () => {
+  // The pre-skip screen matches the winterface marker with every XP field empty.
+  const empty = { ...sampleResult, Floor: "", FinalXP: "" };
+  let state = FRESH_AUTO_STATE;
+  for (let scan = 0; scan < 3; scan += 1) {
+    state = nextAutoResultState(state, empty);
+    assert.equal(state.visible, true);
+    assert.equal(state.stable, 0);
+    assert.equal(state.handled, false);
+    assert.equal(state.shouldAdd, false);
+  }
+  // Once real values appear it still takes exactly two stable scans to add.
+  const seen = nextAutoResultState(state, sampleResult);
+  assert.equal(seen.stable, 1);
+  assert.equal(seen.shouldAdd, false);
+  const settled = nextAutoResultState(seen, sampleResult);
+  assert.equal(settled.stable, 2);
+  assert.equal(settled.shouldAdd, true);
+});
+
+test("resultLooksComplete requires both the floor number and the final XP", () => {
+  assert.equal(resultLooksComplete(sampleResult), true);
+  assert.equal(resultLooksComplete({ ...sampleResult, Floor: "" }), false);
+  assert.equal(resultLooksComplete({ ...sampleResult, FinalXP: "" }), false);
+  assert.equal(resultLooksComplete({}), false);
 });
 
 test("result fingerprints ignore volatile fields but include the winterface values", () => {

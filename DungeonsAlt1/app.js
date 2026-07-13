@@ -8,21 +8,21 @@ import {
   isOpened,
   mapToImage,
   toChess,
-} from "./src/map-core.js?v=20260625-27";
+} from "./src/map-core.js?v=20260625-28";
 import {
   MAP_SCALE_CANDIDATES,
   findMapByAlt1Anchor,
   findMapByScaledCorners,
   readMapAtCalibration,
   scaledFloorDimensions,
-} from "./src/alt1-map-locator.js?v=20260625-27";
+} from "./src/alt1-map-locator.js?v=20260625-28";
 import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js";
 import {
   buildMapOverlayCommands,
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260625-27";
+} from "./src/alt1-overlay.js?v=20260625-28";
 import {
   DEFAULT_FLOOR_TARGET_SECONDS,
   elapsedFloorMinutes,
@@ -33,8 +33,8 @@ import {
   formatElapsedClock,
   parseFloorTargetSeconds,
   rpmValue,
-} from "./src/rpm-state.js?v=20260625-27";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-27";
+} from "./src/rpm-state.js?v=20260625-28";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-28";
 import {
   PARTY_COLORS,
   automaticPartyRoomStatus,
@@ -43,9 +43,9 @@ import {
   partyColor,
   reconcileObservedParty,
   roomStatusLine,
-} from "./src/party-core.js?v=20260625-27";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-27";
-import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-27";
+} from "./src/party-core.js?v=20260625-28";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-28";
+import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-28";
 import {
   RESULT_COLUMNS,
   RESULT_DISPLAY_COLUMNS,
@@ -55,13 +55,14 @@ import {
   resultDisplayValue,
   plannedResultExports,
   resultAlreadyRecorded,
+  resultLooksComplete,
   resultBatchIsComplete,
   resultBatchStatus,
   resultMatchesFloorFilter,
   normalizeResultBatchTarget,
   safeFilePart,
   safeTimestampForFilename,
-} from "./src/results-core.js?v=20260625-27";
+} from "./src/results-core.js?v=20260625-28";
 import {
   chooseSaveFolder,
   clearStoredSaveFolder,
@@ -70,10 +71,10 @@ import {
   requestSaveFolderPermission,
   supportsFolderSaving,
   writeDataUrlToFolder,
-} from "./src/file-saver.js?v=20260625-27";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-27";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-27";
-import { WinterfaceReader } from "./src/winterface.js?v=20260625-27";
+} from "./src/file-saver.js?v=20260625-28";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-28";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-28";
+import { WinterfaceReader } from "./src/winterface.js?v=20260625-28";
 
 const SCAN_INTERVAL = 600;
 const AUTO_CALIBRATION_INTERVAL = 2500;
@@ -633,6 +634,15 @@ function currentFloorPace() {
   });
 }
 
+// Predicted floor finish time (dg-map style) from the current pace projection.
+// Zero when the pace toggle is off or there is not enough data (status "none").
+// Coarse rounding to the nearest 5s keeps the native overlay from redrawing
+// every frame as the projection drifts.
+function predictedFloorSeconds(pace = currentFloorPace()) {
+  if (!pace || pace.status === "none") return 0;
+  return Math.round((Number(pace.projectedSeconds) || 0) / 5) * 5;
+}
+
 function updateStats() {
   if (!state.gameMap) {
     elements.stats.textContent = "No map read yet";
@@ -646,9 +656,14 @@ function updateStats() {
   const elapsed = formatElapsedClock(elapsedFloorSeconds(state.floorStart, now));
   // Tint just the rpm token by floor pace (all interpolated values are
   // app-generated numbers, so this markup is injection-safe).
-  const paceClass = { ahead: "pace-ahead", close: "pace-close", behind: "pace-behind" }[currentFloorPace().status] || "";
+  const pace = currentFloorPace();
+  const paceClass = { ahead: "pace-ahead", close: "pace-close", behind: "pace-behind" }[pace.status] || "";
   const rpmMarkup = paceClass ? `<span class="${paceClass}">${rpm} rpm</span>` : `${rpm} rpm`;
   let html = `${rooms} rooms (${possible}) · ${rpmMarkup} · ${state.gameMap.deadEndCount} dead ends · ${elapsed}`;
+  // Predicted floor finish time (plain text, no tint), same ~M:SS token as the
+  // native overlay; absent when the pace toggle is off or there is not enough data.
+  const predicted = predictedFloorSeconds(pace);
+  if (predicted > 0) html += ` | ~${formatElapsedClock(predicted).replace(/^0(?=\d:)/, "")}`;
   // Verbose diagnostics surface the per-frame map-loop cost so a slow machine or
   // an old Alt1 capture path can be told apart from a heavy app loop.
   if (elements.debugMode?.checked && state.perf) {
@@ -669,6 +684,7 @@ function currentOverlayStats() {
     mystery: state.gameMap.mysteryCount,
     deadEnds: state.gameMap.deadEndCount,
     minutes,
+    predictedSeconds: predictedFloorSeconds(),
   });
 }
 
@@ -1405,6 +1421,12 @@ async function captureDungeonResults() {
       setStatus("Results screen not found — keep the XP overview visible", "error");
       return;
     }
+    // The pre-skip completion screen matches the winterface marker with every XP
+    // field empty; committing it saves a blank results PNG. Wait for real values.
+    if (!resultLooksComplete(capture.result)) {
+      setStatus("Results not fully visible yet — press Skip in game, then read again", "warn");
+      return;
+    }
     const committed = await commitDungeonResultsCapture(capture, "manual");
     setStatus(committed.status, committed.tone);
   } catch (error) {
@@ -1422,7 +1444,12 @@ async function autoCaptureDungeonResults() {
   }
   if (state.resultsBusy || !hasAlt1() || !window.alt1.rsLinked) return;
   const now = Date.now();
-  if (now - state.lastAutoResultScan < RESULTS_AUTO_INTERVAL) return;
+  // While a results screen is up but not yet committed, scan at the loop's full
+  // 600ms cadence so the two stable reads land ~1.2s after the values appear
+  // instead of ~3s. The 1500ms gate stays for the idle case (no screen visible),
+  // which is the expensive full-screen search.
+  const awaitingResults = Boolean(state.autoResultState?.visible) && !state.autoResultState?.handled;
+  if (!awaitingResults && now - state.lastAutoResultScan < RESULTS_AUTO_INTERVAL) return;
   state.lastAutoResultScan = now;
 
   state.resultsBusy = true;

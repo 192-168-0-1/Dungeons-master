@@ -88,6 +88,25 @@ export function resultFingerprint(result) {
   return RESULT_ID_COLUMNS.map((column) => String(result[column] ?? "").trim()).join("\u001f");
 }
 
+// The stability gate compares consecutive reads; the fingerprint above is the
+// table dedupe identity. They differ only in the Time column: keep it out of the
+// stability comparison because the on-screen timer ticks every second, so
+// including it makes two consecutive scans never match and stalls the gate.
+const RESULT_TICKING_COLUMNS = new Set(["Time"]);
+const RESULT_STABILITY_COLUMNS = RESULT_ID_COLUMNS.filter((column) => !RESULT_TICKING_COLUMNS.has(column));
+
+export function resultStabilityKey(result) {
+  if (!result || typeof result !== "object") return "";
+  return RESULT_STABILITY_COLUMNS.map((column) => String(result[column] ?? "").trim()).join("\u001f");
+}
+
+// The pre-skip completion screen matches the winterface marker with every field
+// empty; an all-empty read is stable and used to be committed (early PNG with no
+// values). Only a screen carrying both the floor number and the final XP counts.
+export function resultLooksComplete(result) {
+  return Boolean(String(result?.Floor ?? "").trim()) && Boolean(String(result?.FinalXP ?? "").trim());
+}
+
 export function resultAlreadyRecorded(results = [], result) {
   const key = resultFingerprint(result);
   return Boolean(key) && (results ?? []).some((candidate) => resultFingerprint(candidate) === key);
@@ -115,7 +134,22 @@ export function nextAutoResultState(previous, result, {
     }
     return { visible: false, key: "", handled: false, missing: 0, stable: 0, shouldAdd: false };
   }
-  const key = resultFingerprint(result);
+  if (!resultLooksComplete(result)) {
+    // The empty pre-skip completion screen reads identically every scan, so it
+    // used to satisfy the stability gate and commit a blank PNG. Count it as
+    // visible so the miss counter does not tear down state, but never accumulate
+    // stability and never add. Preserve handled so an already-committed screen
+    // followed by a transiently-empty OCR read does not re-arm.
+    return {
+      visible: true,
+      key: "",
+      handled: Boolean(previous?.visible) && Boolean(previous?.handled),
+      missing: 0,
+      stable: 0,
+      shouldAdd: false,
+    };
+  }
+  const key = resultStabilityKey(result);
   const required = Math.max(1, Number(stableScansRequired) || 1);
   if (Boolean(previous?.visible) && Boolean(previous?.handled)) {
     // Already committed this screen; ignore every further read (including OCR

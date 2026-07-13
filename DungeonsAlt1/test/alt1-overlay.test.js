@@ -69,6 +69,14 @@ test("map stats match the desktop EXE wording and RPM calculation", () => {
     "12 rooms (16) | 5.6 rpm | 5 dead ends");
 });
 
+test("map stats append the predicted floor time only when a projection exists", () => {
+  const base = "12 rooms (16) | 5.6 rpm | 5 dead ends";
+  assert.equal(formatMapStats({ rooms: 12, mystery: 4, deadEnds: 5, minutes: 2, predictedSeconds: 400 }),
+    `${base} | ~6:40`);
+  assert.equal(formatMapStats({ rooms: 12, mystery: 4, deadEnds: 5, minutes: 2, predictedSeconds: 0 }), base);
+  assert.equal(formatMapStats({ rooms: 12, mystery: 4, deadEnds: 5, minutes: 2 }), base);
+});
+
 test("stats panel is fully filled black with one clean EXE-style text line", () => {
   const commands = buildStatsOverlayCommands({
     stats: "12 rooms (16) | 5.6 rpm | 5 dead ends",

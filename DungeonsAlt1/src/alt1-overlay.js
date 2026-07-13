@@ -1,5 +1,5 @@
-import { ROOM_SIZE, mapToImage } from "./map-core.js?v=20260625-27";
-import { rpmValue } from "./rpm-state.js?v=20260625-27";
+import { ROOM_SIZE, mapToImage } from "./map-core.js?v=20260625-28";
+import { formatElapsedClock, rpmValue } from "./rpm-state.js?v=20260625-28";
 
 export const GATESTONE_POSITIONS = Object.freeze([
   [2, 21],
@@ -58,12 +58,17 @@ export function formatRpmCounter({ rooms = 0, minutes = 0 } = {}) {
   return `${rpmValue(rooms, minutes)} rpm`;
 }
 
-export function formatMapStats({ rooms = 0, mystery = 0, deadEnds = 0, minutes = 0 } = {}) {
+export function formatMapStats({ rooms = 0, mystery = 0, deadEnds = 0, minutes = 0, predictedSeconds = 0 } = {}) {
   const roomCount = Math.max(0, Number(rooms) || 0);
   const possible = roomCount + Math.max(0, Number(mystery) || 0);
   const rpm = rpmValue(roomCount, minutes);
   const roomLabel = roomCount === 1 ? "room" : "rooms";
-  return `${roomCount} ${roomLabel} (${possible}) | ${rpm} rpm | ${Math.max(0, Number(deadEnds) || 0)} dead ends`;
+  const line = `${roomCount} ${roomLabel} (${possible}) | ${rpm} rpm | ${Math.max(0, Number(deadEnds) || 0)} dead ends`;
+  const predicted = Math.max(0, Number(predictedSeconds) || 0);
+  // Predicted floor finish time (dg-map style), appended only once a projection
+  // exists. formatElapsedClock reuses the shared mm:ss math; drop its leading
+  // zero so a sub-10-minute projection reads ~6:40, not ~06:40.
+  return predicted > 0 ? `${line} | ~${formatElapsedClock(predicted).replace(/^0(?=\d:)/, "")}` : line;
 }
 
 function rect(color, x, y, width, height, duration, lineWidth) {
