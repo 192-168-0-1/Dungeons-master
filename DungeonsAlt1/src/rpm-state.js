@@ -58,9 +58,12 @@ export function parseFloorTargetSeconds(value, fallback = DEFAULT_FLOOR_TARGET_S
   return fallback;
 }
 
-// Subtle pace signal for the RPM display: projecting the current room-opening
-// rate onto the whole currently-known floor (opened + still-visible mystery
-// rooms), would it finish within the target floor time? Returns a status the UI
+// Subtle pace signal for the RPM display: this is dg-map's projection of
+// elapsed / completion, where completion is the fraction of ALL KNOWN rooms
+// visited (visited / (visited + unknown + locked)). projectedMinutes =
+// elapsed * (possible / opened) is algebraically that same elapsed / completion
+// — the caller widens `possible` with rooms behind doors that open onto empty
+// cells. Would the floor finish within the target time? Returns a status the UI
 // tints the rpm with: "ahead" (on/under target), "close" (a little over),
 // "behind" (well over), or "none" when there is not enough data yet.
 export function floorPaceStatus({ openedRooms = 0, possibleRooms = 0, minutes = 0, targetSeconds = DEFAULT_FLOOR_TARGET_SECONDS } = {}) {

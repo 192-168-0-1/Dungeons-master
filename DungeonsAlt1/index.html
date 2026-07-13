@@ -8,7 +8,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>Dungeons Alt1</title>
-  <link rel="stylesheet" href="./styles.css?v=20260625-28">
+  <link rel="stylesheet" href="./styles.css?v=20260625-29">
 </head>
 <body>
   <header class="titlebar">
@@ -116,11 +116,13 @@
           <div class="save-folder-tools">
             <button id="choose-map-save-folder" type="button">Choose map folder</button>
             <button id="clear-map-save-folder" type="button">Clear map folder</button>
+            <button id="reallow-map-save-folder" type="button" hidden>Re-allow folder</button>
             <small id="map-save-folder-status">Choose a map folder before map PNG auto-save</small>
           </div>
           <div class="save-folder-tools">
             <button id="choose-results-save-folder" type="button">Choose results folder</button>
             <button id="clear-results-save-folder" type="button">Clear results folder</button>
+            <button id="reallow-results-save-folder" type="button" hidden>Re-allow folder</button>
             <small id="results-save-folder-status">Choose a results folder before results PNG auto-save</small>
           </div>
         </div>
@@ -199,7 +201,7 @@
     (function bootstrapDungeons() {
       "use strict";
 
-      var fallbackVersion = "20260625-28";
+      var fallbackVersion = "20260625-29";
       var appStarted = false;
       var environment = document.getElementById("environment");
       var status = document.getElementById("status");

@@ -87,6 +87,29 @@ test("game map counts opened rooms and detects a personal gatestone", () => {
   assert.deepEqual(detectGatestones(target, gameMap)[1], { x: 0, y: 0 });
 });
 
+test("readGameMap counts doors pointing at empty cells as unexplored rooms", () => {
+  const floor = FLOOR_SIZES.find((candidate) => candidate.name === "Small");
+  const signatureForType = (type) => [...SIGNATURES.entries()].find(([, value]) => value === type)[0];
+
+  // Two connected opened rooms: A(0,0) has E (to B) and N (into empty (0,1));
+  // B(1,0) has W back to A. Only A's N door opens onto a Gap cell -> count 1.
+  const connected = image(floor.imageWidth, floor.imageHeight);
+  paintSignature(connected, mapToImage({ x: 0, y: 0 }, floor), signatureForType(RoomType.E | RoomType.N));
+  paintSignature(connected, mapToImage({ x: 1, y: 0 }, floor), signatureForType(RoomType.W));
+  const connectedMap = readGameMap(connected, floor);
+  assert.equal(connectedMap.openedRoomCount, 2);
+  assert.equal(connectedMap.unexploredRoomCount, 1);
+
+  // Two separate opened rooms whose doors both point at the SAME empty cell
+  // (0,1): A(0,0) with N and C(0,2) with S. The shared cell counts once.
+  const shared = image(floor.imageWidth, floor.imageHeight);
+  paintSignature(shared, mapToImage({ x: 0, y: 0 }, floor), signatureForType(RoomType.N));
+  paintSignature(shared, mapToImage({ x: 0, y: 2 }, floor), signatureForType(RoomType.S));
+  const sharedMap = readGameMap(shared, floor);
+  assert.equal(sharedMap.openedRoomCount, 2);
+  assert.equal(sharedMap.unexploredRoomCount, 1);
+});
+
 test("boss-room red pixels are not detected as G2", () => {
   const floor = FLOOR_SIZES.find((candidate) => candidate.name === "Small");
   const target = image(floor.imageWidth, floor.imageHeight);

@@ -8,21 +8,21 @@ import {
   isOpened,
   mapToImage,
   toChess,
-} from "./src/map-core.js?v=20260625-28";
+} from "./src/map-core.js?v=20260625-29";
 import {
   MAP_SCALE_CANDIDATES,
   findMapByAlt1Anchor,
   findMapByScaledCorners,
   readMapAtCalibration,
   scaledFloorDimensions,
-} from "./src/alt1-map-locator.js?v=20260625-28";
+} from "./src/alt1-map-locator.js?v=20260625-29";
 import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js";
 import {
   buildMapOverlayCommands,
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260625-28";
+} from "./src/alt1-overlay.js?v=20260625-29";
 import {
   DEFAULT_FLOOR_TARGET_SECONDS,
   elapsedFloorMinutes,
@@ -33,8 +33,8 @@ import {
   formatElapsedClock,
   parseFloorTargetSeconds,
   rpmValue,
-} from "./src/rpm-state.js?v=20260625-28";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-28";
+} from "./src/rpm-state.js?v=20260625-29";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-29";
 import {
   PARTY_COLORS,
   automaticPartyRoomStatus,
@@ -43,9 +43,9 @@ import {
   partyColor,
   reconcileObservedParty,
   roomStatusLine,
-} from "./src/party-core.js?v=20260625-28";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-28";
-import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-28";
+} from "./src/party-core.js?v=20260625-29";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-29";
+import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-29";
 import {
   RESULT_COLUMNS,
   RESULT_DISPLAY_COLUMNS,
@@ -62,7 +62,7 @@ import {
   normalizeResultBatchTarget,
   safeFilePart,
   safeTimestampForFilename,
-} from "./src/results-core.js?v=20260625-28";
+} from "./src/results-core.js?v=20260625-29";
 import {
   chooseSaveFolder,
   clearStoredSaveFolder,
@@ -71,10 +71,10 @@ import {
   requestSaveFolderPermission,
   supportsFolderSaving,
   writeDataUrlToFolder,
-} from "./src/file-saver.js?v=20260625-28";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-28";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-28";
-import { WinterfaceReader } from "./src/winterface.js?v=20260625-28";
+} from "./src/file-saver.js?v=20260625-29";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-29";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-29";
+import { WinterfaceReader } from "./src/winterface.js?v=20260625-29";
 
 const SCAN_INTERVAL = 600;
 const AUTO_CALIBRATION_INTERVAL = 2500;
@@ -128,9 +128,11 @@ const elements = {
   resultBatchSummary: document.querySelector("#result-batch-summary"),
   chooseMapSaveFolder: document.querySelector("#choose-map-save-folder"),
   clearMapSaveFolder: document.querySelector("#clear-map-save-folder"),
+  reallowMapSaveFolder: document.querySelector("#reallow-map-save-folder"),
   mapSaveFolderStatus: document.querySelector("#map-save-folder-status"),
   chooseResultsSaveFolder: document.querySelector("#choose-results-save-folder"),
   clearResultsSaveFolder: document.querySelector("#clear-results-save-folder"),
+  reallowResultsSaveFolder: document.querySelector("#reallow-results-save-folder"),
   resultsSaveFolderStatus: document.querySelector("#results-save-folder-status"),
   selection: document.querySelector("#selection"),
   annotation: document.querySelector("#annotation"),
@@ -624,11 +626,15 @@ function onAlt1Pressed(event) {
   stopStatsPlacement(`RPM counter placed at ${state.statsFree.x}, ${state.statsFree.y}`, "ok");
 }
 
+// Pace projection is dg-map's elapsed / completion-of-known-rooms: doors drawn
+// toward still-empty cells (unexploredRoomCount) join opened + mystery in the
+// denominator so early floors project a realistic finish instead of tracking
+// elapsed time. The visible "(possible)" stats number stays opened + mystery.
 function currentFloorPace() {
   if (!elements.paceIndicator?.checked || !state.gameMap) return { status: "none" };
   return floorPaceStatus({
     openedRooms: state.gameMap.openedRoomCount,
-    possibleRooms: state.gameMap.openedRoomCount + state.gameMap.mysteryCount,
+    possibleRooms: state.gameMap.openedRoomCount + state.gameMap.mysteryCount + (state.gameMap.unexploredRoomCount || 0),
     minutes: elapsedFloorMinutes(state.floorStart),
     targetSeconds: floorPaceTargetSeconds(),
   });
@@ -1046,6 +1052,7 @@ const SAVE_FOLDER_TARGETS = Object.freeze({
     label: "map",
     choose: "chooseMapSaveFolder",
     clear: "clearMapSaveFolder",
+    reallow: "reallowMapSaveFolder",
     status: "mapSaveFolderStatus",
   }),
   results: Object.freeze({
@@ -1053,6 +1060,7 @@ const SAVE_FOLDER_TARGETS = Object.freeze({
     label: "results",
     choose: "chooseResultsSaveFolder",
     clear: "clearResultsSaveFolder",
+    reallow: "reallowResultsSaveFolder",
     status: "resultsSaveFolderStatus",
   }),
 });
@@ -1070,6 +1078,10 @@ function updateSaveFolderStatus(kind) {
   const folder = saveFolderState(kind);
   elements[target.choose].disabled = folder.loading || !state.saveFolders.supported;
   elements[target.clear].disabled = folder.loading || !folder.handle;
+  // Offer the one-click re-grant only when a folder is remembered but its grant
+  // lapsed (restored handles read back as "prompt" after an Alt1 restart).
+  elements[target.reallow].hidden = !(!folder.loading && state.saveFolders.supported
+    && folder.handle && folder.permission !== "granted");
   if (folder.loading) {
     elements[target.status].textContent = `Checking ${target.label} save folder...`;
     return;
@@ -1083,7 +1095,7 @@ function updateSaveFolderStatus(kind) {
     return;
   }
   if (folder.handle) {
-    elements[target.status].textContent = `${target.label} folder permission needed; choose the folder again`;
+    elements[target.status].textContent = `${target.label} folder access expired — click Re-allow folder`;
     return;
   }
   elements[target.status].textContent = `Choose a ${target.label} folder before ${target.label} PNG auto-save`;
@@ -1161,6 +1173,22 @@ async function clearSelectedSaveFolder(kind) {
   folder.permission = "unknown";
   updateSaveFolderStatus(kind);
   setStatus(`${target.label} save folder cleared`, "warn");
+}
+
+async function reallowSaveFolder(kind) {
+  const target = saveFolderTarget(kind);
+  const folder = saveFolderState(kind);
+  if (!folder.handle) return;
+  // The auto-save loop runs outside a user gesture and may not prompt; this
+  // click is the gesture that restores the persisted grant.
+  folder.permission = await requestSaveFolderPermission(folder.handle);
+  updateSaveFolderStatus(kind);
+  const label = target.label.charAt(0).toUpperCase() + target.label.slice(1);
+  if (folder.permission === "granted") {
+    setStatus(`${label} folder re-allowed — PNG auto-save active`, "ok");
+  } else {
+    setStatus(`${label} folder access still blocked — pick the folder again`, "warn");
+  }
 }
 
 async function writePngToSaveFolder(kind, filename, dataUrl, label, options = {}) {
@@ -1973,8 +2001,10 @@ function bindEvents() {
   elements.copyResults.addEventListener("click", copyResults);
   elements.chooseMapSaveFolder.addEventListener("click", () => selectSaveFolder("map"));
   elements.clearMapSaveFolder.addEventListener("click", () => clearSelectedSaveFolder("map"));
+  elements.reallowMapSaveFolder.addEventListener("click", () => reallowSaveFolder("map"));
   elements.chooseResultsSaveFolder.addEventListener("click", () => selectSaveFolder("results"));
   elements.clearResultsSaveFolder.addEventListener("click", () => clearSelectedSaveFolder("results"));
+  elements.reallowResultsSaveFolder.addEventListener("click", () => reallowSaveFolder("results"));
   elements.resetResultBatch.addEventListener("click", () => resetResultBatch(true));
   for (const control of [elements.resultBatchSize, elements.resultFloorFilter, elements.resultBatchMode]) {
     control.addEventListener("change", () => {

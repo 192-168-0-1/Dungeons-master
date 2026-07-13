@@ -338,6 +338,26 @@ export function readGameMap(image, floor) {
     }
   }
 
+  // Doors drawn toward empty (Gap) cells are rooms known to exist but not yet
+  // entered — this is dg-map's unknown/locked denominator without needing
+  // door-icon sprites. A cell reachable through several rooms' doors counts once
+  // (Set); Mystery cells are non-Gap so they are never double-counted.
+  const unexplored = new Set();
+  for (let y = 0; y < floor.height; y += 1) {
+    for (let x = 0; x < floor.width; x += 1) {
+      const type = roomTypes[y * floor.width + x];
+      if (!isOpened(type)) continue;
+      for (const direction of DIRECTIONS) {
+        if (!(type & direction.bit)) continue;
+        const neighbour = { x: x + direction.dx, y: y + direction.dy };
+        if (!inRange(neighbour, floor)) continue;
+        const index = neighbour.y * floor.width + neighbour.x;
+        if (roomTypes[index] === RoomType.Gap) unexplored.add(index);
+      }
+    }
+  }
+  const unexploredRoomCount = unexplored.size;
+
   const parent = new Map();
   const visited = new Set();
   const visit = (point, previous) => {
@@ -371,6 +391,7 @@ export function readGameMap(image, floor) {
     openedRoomCount,
     mysteryCount,
     deadEndCount,
+    unexploredRoomCount,
     base,
     boss,
     critEndpoints,

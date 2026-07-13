@@ -72,6 +72,15 @@ test("floor pace projects the known floor onto the target time", () => {
   assert.equal(floorPaceStatus({ openedRooms: 3, possibleRooms: 8, minutes: 4, targetSeconds: 375 }).status, "behind");
 });
 
+test("the enriched unexplored denominator raises the early-floor projection", () => {
+  // Doors into empty cells widen possibleRooms (2 opened, 8 known) so the
+  // 1-minute pace projects a full 4:00 finish instead of tracking elapsed time.
+  // Under the 6:15 default target (375s) that projects "ahead".
+  const pace = floorPaceStatus({ openedRooms: 2, possibleRooms: 8, minutes: 1 });
+  assert.equal(pace.projectedSeconds, 240);
+  assert.equal(pace.status, "ahead");
+});
+
 test("first valid map starts a new floor immediately", () => {
   const result = evaluateMapTransition({
     floorStart: null,

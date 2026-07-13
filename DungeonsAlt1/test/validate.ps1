@@ -105,8 +105,9 @@ if (($mapCore -notmatch 'function isBossMarkerAt\(image, originX, originY\)') -o
     ($mapCore -notmatch 'BOSS_JAW_PROBES') -or
     ($mapCore -notmatch 'BOSS_HOLE_PROBES') -or
     ($mapCore -notmatch 'offsetX = -4') -or
-    ($mapCore -notmatch 'jawMatches < 2 && redMatches < 10')) {
-    throw 'Shift-tolerant boss-skull detection is missing from map-core.js.'
+    ($mapCore -notmatch 'jawMatches < 2 && redMatches < 10') -or
+    ($mapCore -notmatch 'unexploredRoomCount')) {
+    throw 'Shift-tolerant boss-skull detection or the unexplored-room denominator is missing from map-core.js.'
 }
 
 $html = Get-Content (Join-Path $appRoot 'index.html') -Raw
@@ -326,6 +327,7 @@ if (($rpmState -notmatch 'function evaluateMapTransition') -or
     ($rpmState -notmatch 'function floorPaceStatus') -or
     ($rpmState -notmatch 'function parseFloorTargetSeconds') -or
     ($app -notmatch 'currentFloorPace') -or
+    ($app -notmatch 'unexploredRoomCount') -or
     ($rpmState -notmatch 'resetAt') -or
     ($rpmState -notmatch 'FLOOR_START_OFFSET_MS = 2000') -or
     ($rpmState -notmatch 'MAX_RESET_RPM = 8') -or
@@ -339,24 +341,24 @@ if (($rpmState -notmatch 'function evaluateMapTransition') -or
     ($overlay -notmatch 'rpmValue')) {
     throw 'RPM state must be centralized and must gate suspicious floor resets before updating visible stats.'
 }
-if (($app -notmatch 'map-core\.js\?v=20260625-28') -or
-    ($app -notmatch 'alt1-map-locator\.js\?v=20260625-28') -or
-    ($app -notmatch 'rpm-state\.js\?v=20260625-28') -or
-    ($app -notmatch 'team-sync\.js\?v=20260625-28') -or
-    ($app -notmatch 'party-core\.js\?v=20260625-28') -or
-    ($app -notmatch 'results-core\.js\?v=20260625-28') -or
-    ($app -notmatch 'party-menu\.js\?v=20260625-28') -or
-    ($app -notmatch 'team-gates\.js\?v=20260625-28') -or
-    ($app -notmatch 'file-saver\.js\?v=20260625-28') -or
-    ($app -notmatch 'party-anchor\.js\?v=20260625-28') -or
-    ($app -notmatch 'winterface\.js\?v=20260625-28') -or
-    ($overlay -notmatch 'map-core\.js\?v=20260625-28') -or
-    ($overlay -notmatch 'rpm-state\.js\?v=20260625-28') -or
-    ($teamSync -notmatch 'party-core\.js\?v=20260625-28') -or
-    ($teamGates -notmatch 'party-core\.js\?v=20260625-28') -or
-    ($teamGates -notmatch 'alt1-overlay\.js\?v=20260625-28') -or
-    ($partyAnchor -notmatch 'party-interface\.js\?v=20260625-28') -or
-    ($mapLocator -notmatch 'map-core\.js\?v=20260625-28')) {
+if (($app -notmatch 'map-core\.js\?v=20260625-29') -or
+    ($app -notmatch 'alt1-map-locator\.js\?v=20260625-29') -or
+    ($app -notmatch 'rpm-state\.js\?v=20260625-29') -or
+    ($app -notmatch 'team-sync\.js\?v=20260625-29') -or
+    ($app -notmatch 'party-core\.js\?v=20260625-29') -or
+    ($app -notmatch 'results-core\.js\?v=20260625-29') -or
+    ($app -notmatch 'party-menu\.js\?v=20260625-29') -or
+    ($app -notmatch 'team-gates\.js\?v=20260625-29') -or
+    ($app -notmatch 'file-saver\.js\?v=20260625-29') -or
+    ($app -notmatch 'party-anchor\.js\?v=20260625-29') -or
+    ($app -notmatch 'winterface\.js\?v=20260625-29') -or
+    ($overlay -notmatch 'map-core\.js\?v=20260625-29') -or
+    ($overlay -notmatch 'rpm-state\.js\?v=20260625-29') -or
+    ($teamSync -notmatch 'party-core\.js\?v=20260625-29') -or
+    ($teamGates -notmatch 'party-core\.js\?v=20260625-29') -or
+    ($teamGates -notmatch 'alt1-overlay\.js\?v=20260625-29') -or
+    ($partyAnchor -notmatch 'party-interface\.js\?v=20260625-29') -or
+    ($mapLocator -notmatch 'map-core\.js\?v=20260625-29')) {
     throw 'Changed Alt1 runtime modules must be cache-busted for existing Alt1 installations.'
 }
 if (($app -notmatch 'buildVisibleRemoteGatestones') -or
