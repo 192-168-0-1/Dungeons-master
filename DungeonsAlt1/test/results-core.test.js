@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
+  AUTO_RESULT_STABLE_SCANS,
   RESULT_DISPLAY_COLUMNS,
   averageResultTime,
   formatResultCount,
@@ -13,6 +14,8 @@ import {
   normalizeResultBatchTarget,
   parseResultTimeSeconds,
   plannedResultExports,
+  resultCaptureRect,
+  resultMapSnapshotIsFresh,
   resultAlreadyRecorded,
   resultBatchIsComplete,
   resultBatchStatus,
@@ -117,6 +120,7 @@ test("auto results state does nothing when no results screen is visible", () => 
 });
 
 test("auto results state waits for a stable reading before adding a screen", () => {
+  assert.equal(AUTO_RESULT_STABLE_SCANS, 3);
   // First sighting: the XP counters may still be animating, so it is not added.
   const seen = nextAutoResultState(FRESH_AUTO_STATE, sampleResult);
   assert.equal(seen.shouldAdd, false);
@@ -124,11 +128,17 @@ test("auto results state waits for a stable reading before adding a screen", () 
   assert.equal(seen.handled, false);
   assert.equal(seen.stable, 1);
 
-  // An identical second read means the values are final — add it now.
-  const settled = nextAutoResultState(seen, { ...sampleResult, Timestamp: "later" });
+  // A second identical read can still be a brief animation plateau.
+  const second = nextAutoResultState(seen, { ...sampleResult, Timestamp: "later" });
+  assert.equal(second.shouldAdd, false);
+  assert.equal(second.handled, false);
+  assert.equal(second.stable, 2);
+  assert.equal(second.key, seen.key);
+
+  const settled = nextAutoResultState(second, { ...sampleResult, Timestamp: "latest" });
   assert.equal(settled.shouldAdd, true);
   assert.equal(settled.handled, true);
-  assert.equal(settled.stable, 2);
+  assert.equal(settled.stable, 3);
   assert.equal(settled.key, seen.key);
 });
 
@@ -141,14 +151,20 @@ test("auto results state never adds while the XP counters are still animating", 
     assert.equal(state.handled, false);
     assert.equal(state.stable, 1);
   }
-  // Once the counter holds steady, the next matching read commits it.
+  // Two matching reads can still be a temporary animation plateau.
   state = nextAutoResultState(state, { ...sampleResult, FinalXP: "12000" });
   assert.equal(state.stable, 2);
+  assert.equal(state.shouldAdd, false);
+  // The third consecutive match is the default commit threshold.
+  state = nextAutoResultState(state, { ...sampleResult, FinalXP: "12000" });
+  assert.equal(state.stable, 3);
   assert.equal(state.shouldAdd, true);
 });
 
 test("auto results state does not add the same screen twice once committed", () => {
-  const settled = nextAutoResultState(nextAutoResultState(FRESH_AUTO_STATE, sampleResult), sampleResult);
+  const first = nextAutoResultState(FRESH_AUTO_STATE, sampleResult);
+  const second = nextAutoResultState(first, sampleResult);
+  const settled = nextAutoResultState(second, sampleResult);
   assert.equal(settled.shouldAdd, true);
 
   // The screen stays open and the OCR even jitters; it must not be re-added.
@@ -171,7 +187,10 @@ test("auto results state tolerates a transient missed read without losing stabil
 
   const recovered = nextAutoResultState(missed, sampleResult);
   assert.equal(recovered.stable, 2);
-  assert.equal(recovered.shouldAdd, true);
+  assert.equal(recovered.shouldAdd, false);
+  const settled = nextAutoResultState(recovered, sampleResult);
+  assert.equal(settled.stable, 3);
+  assert.equal(settled.shouldAdd, true);
 });
 
 test("auto results state resets after consecutive missed reads so the next screen can stabilise", () => {
@@ -187,15 +206,19 @@ test("auto results state resets after consecutive missed reads so the next scree
     shouldAdd: false,
   });
 
-  // A fresh screen still needs two stable reads before it is added.
+  // A fresh screen still needs three stable reads before it is added.
   const freshSeen = nextAutoResultState(missedTwice, { ...sampleResult, FinalXP: "54321" });
   assert.equal(freshSeen.shouldAdd, false);
-  const freshSettled = nextAutoResultState(freshSeen, { ...sampleResult, FinalXP: "54321" });
+  const freshSecond = nextAutoResultState(freshSeen, { ...sampleResult, FinalXP: "54321" });
+  assert.equal(freshSecond.shouldAdd, false);
+  const freshSettled = nextAutoResultState(freshSecond, { ...sampleResult, FinalXP: "54321" });
   assert.equal(freshSettled.shouldAdd, true);
 });
 
 test("auto results state adds a changed screen after the previous disappears", () => {
-  let state = nextAutoResultState(nextAutoResultState(FRESH_AUTO_STATE, sampleResult), sampleResult);
+  let state = nextAutoResultState(FRESH_AUTO_STATE, sampleResult);
+  state = nextAutoResultState(state, sampleResult);
+  state = nextAutoResultState(state, sampleResult);
   assert.equal(state.shouldAdd, true);
   const firstKey = state.key;
 
@@ -206,20 +229,31 @@ test("auto results state adds a changed screen after the previous disappears", (
   state = nextAutoResultState(state, other);
   assert.equal(state.shouldAdd, false);
   state = nextAutoResultState(state, other);
+  assert.equal(state.shouldAdd, false);
+  state = nextAutoResultState(state, other);
   assert.equal(state.shouldAdd, true);
   assert.notEqual(state.key, firstKey);
 });
 
-test("auto results stability ignores the ticking timer so consecutive scans still settle", () => {
-  // The results screen's bottom-left Time box counts down every second, so two
-  // scans differ only in Time. That must not reset the stability counter.
+test("ticking Time stays one identity, settles on scan three, and never recommits", () => {
+  // Time changes every scan, but it must neither reset stability nor create a
+  // second identity after this physical results screen has been committed.
   const first = nextAutoResultState(FRESH_AUTO_STATE, { ...sampleResult, Time: "12:34" });
   assert.equal(first.stable, 1);
   assert.equal(first.shouldAdd, false);
   const second = nextAutoResultState(first, { ...sampleResult, Time: "12:33" });
   assert.equal(second.stable, 2);
-  assert.equal(second.shouldAdd, true);
+  assert.equal(second.shouldAdd, false);
   assert.equal(second.key, first.key);
+  const third = nextAutoResultState(second, { ...sampleResult, Time: "12:32" });
+  assert.equal(third.stable, 3);
+  assert.equal(third.shouldAdd, true);
+  assert.equal(third.key, first.key);
+
+  const tickingAfterCommit = nextAutoResultState(third, { ...sampleResult, Time: "12:31" });
+  assert.equal(tickingAfterCommit.shouldAdd, false);
+  assert.equal(tickingAfterCommit.handled, true);
+  assert.equal(tickingAfterCommit.key, first.key);
 });
 
 test("auto results state never commits the empty pre-skip completion screen", () => {
@@ -233,12 +267,15 @@ test("auto results state never commits the empty pre-skip completion screen", ()
     assert.equal(state.handled, false);
     assert.equal(state.shouldAdd, false);
   }
-  // Once real values appear it still takes exactly two stable scans to add.
+  // Once real values appear it still takes exactly three stable scans to add.
   const seen = nextAutoResultState(state, sampleResult);
   assert.equal(seen.stable, 1);
   assert.equal(seen.shouldAdd, false);
-  const settled = nextAutoResultState(seen, sampleResult);
-  assert.equal(settled.stable, 2);
+  const second = nextAutoResultState(seen, sampleResult);
+  assert.equal(second.stable, 2);
+  assert.equal(second.shouldAdd, false);
+  const settled = nextAutoResultState(second, sampleResult);
+  assert.equal(settled.stable, 3);
   assert.equal(settled.shouldAdd, true);
 });
 
@@ -250,9 +287,10 @@ test("resultLooksComplete requires both the floor number and the final XP", () =
 });
 
 test("result fingerprints ignore volatile fields but include the winterface values", () => {
-  // Timestamp, Roomcount and DeadEnds drift while the same results screen is
+  // Timestamp, Time, Roomcount and DeadEnds drift while the same results screen is
   // open, so they must not change a floor's identity.
   assert.equal(resultFingerprint(sampleResult), resultFingerprint({ ...sampleResult, Timestamp: "later" }));
+  assert.equal(resultFingerprint(sampleResult), resultFingerprint({ ...sampleResult, Time: "12:01" }));
   assert.equal(resultFingerprint(sampleResult), resultFingerprint({ ...sampleResult, Roomcount: "99", DeadEnds: "5" }));
   assert.notEqual(resultFingerprint(sampleResult), resultFingerprint({ ...sampleResult, FinalXP: "999" }));
   assert.notEqual(resultFingerprint(sampleResult), resultFingerprint({ ...sampleResult, Floor: "55" }));
@@ -261,6 +299,7 @@ test("result fingerprints ignore volatile fields but include the winterface valu
 test("result table dedupe ignores volatile map fields but allows real result changes", () => {
   const existing = [{ ...sampleResult, Timestamp: "first read" }];
   assert.equal(resultAlreadyRecorded(existing, { ...sampleResult, Timestamp: "second read" }), true);
+  assert.equal(resultAlreadyRecorded(existing, { ...sampleResult, Time: "12:01" }), true);
   // The same screen read again with a different live room count stays a dupe.
   assert.equal(resultAlreadyRecorded(existing, { ...sampleResult, Roomcount: "1", DeadEnds: "0" }), true);
   assert.equal(resultAlreadyRecorded(existing, { ...sampleResult, FinalXP: "54321" }), false);
@@ -278,6 +317,39 @@ test("auto PNG export planning follows the map/results checkboxes", () => {
     hasMap: true,
     hasResultsOffset: true,
   }), ["map", "results"]);
+});
+
+test("result screenshot crops prefer physical raw geometry over normalized OCR aliases", () => {
+  assert.deepEqual(resultCaptureRect({
+    offset: { x: 0, y: 0 }, width: 512, height: 334,
+    sourceOffset: { x: 70, y: 40 }, sourceWidth: 640, sourceHeight: 418,
+    rawOffset: { x: 90, y: 60 }, rawWidth: 768, rawHeight: 501,
+  }), { offset: { x: 90, y: 60 }, width: 768, height: 501 });
+  assert.deepEqual(resultCaptureRect({ offset: { x: 7, y: 8 }, width: 512, height: 334 }), {
+    offset: { x: 7, y: 8 }, width: 512, height: 334,
+  });
+  assert.equal(resultCaptureRect({ offset: { x: -1, y: 0 }, width: 512, height: 334 }), null);
+});
+
+test("a results row can claim only a fresh, matching, unconsumed map snapshot", () => {
+  const capture = {
+    date: new Date(20_000),
+    mapReadAt: 10_000,
+    mapFloorName: "Large",
+    result: { FloorSize: "Large" },
+  };
+  const current = {
+    currentMapReadAt: 10_000,
+    currentFloorName: "Large",
+    lastConsumedAt: 0,
+    hasMap: true,
+    maxAgeMs: 15_000,
+  };
+  assert.equal(resultMapSnapshotIsFresh(capture, current), true);
+  assert.equal(resultMapSnapshotIsFresh({ ...capture, date: new Date(26_000) }, current), false);
+  assert.equal(resultMapSnapshotIsFresh(capture, { ...current, lastConsumedAt: 10_000 }), false);
+  assert.equal(resultMapSnapshotIsFresh(capture, { ...current, currentMapReadAt: 11_000 }), false);
+  assert.equal(resultMapSnapshotIsFresh(capture, { ...current, currentFloorName: "Small" }), false);
 });
 
 test("result file helpers produce safe deterministic file parts", () => {

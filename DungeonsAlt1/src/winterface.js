@@ -2,6 +2,18 @@ export const WINTERFACE_WIDTH = 512;
 export const WINTERFACE_HEIGHT = 334;
 const DEFAULT_OFFSET = { x: 710, y: 330 };
 const ASSET_ROOT = new URL("../assets/winterface/", import.meta.url);
+const MIN_INTERFACE_SCALE = 1;
+const MAX_INTERFACE_SCALE = 2;
+const INTERFACE_SCALE_STEP = 0.05;
+const SCALED_MARKER_MAX_SCORE = 600;
+const HINTED_MARKER_TRUST_SCORE = 150;
+const SCALED_MARKER_MAX_PROBE_SCORE = 5_000;
+const SCALED_GLYPH_FOREGROUND_DISTANCE = 40_000;
+const SCALED_GLYPH_BACKGROUND_DISTANCE = 2_000;
+const HINT_SCAN_POSITION_BUDGET = 1_000_000;
+const FALLBACK_SCAN_POSITION_BUDGET = 100_000;
+const MAX_COARSE_CANDIDATES = 24;
+const MAX_REFINE_RADIUS = 6;
 
 const FONT_FILES = Object.freeze({
   Base: [...Array(10)].map((_, index) => [`${index}`, `Base${index}.png`]),
@@ -85,8 +97,10 @@ function templateAnchorsMatch(image, template, offsetX, offsetY, anchors) {
   return true;
 }
 
-function findTemplate(image, template) {
-  if (templateMatchesExactly(image, template, DEFAULT_OFFSET.x, DEFAULT_OFFSET.y)) return DEFAULT_OFFSET;
+function findTemplateExactly(image, template) {
+  const defaultCropFits = DEFAULT_OFFSET.x + WINTERFACE_WIDTH <= image.width
+    && DEFAULT_OFFSET.y + WINTERFACE_HEIGHT <= image.height;
+  if (defaultCropFits && templateMatchesExactly(image, template, DEFAULT_OFFSET.x, DEFAULT_OFFSET.y)) return DEFAULT_OFFSET;
   const anchors = [
     [0, 0],
     [template.width - 1, 0],
@@ -105,21 +119,271 @@ function findTemplate(image, template) {
   return null;
 }
 
-function glyphMatches(image, glyph, offsetX, offsetY, color, tolerance = 20) {
+function normalizeScale(value) {
+  let scale = Number(value);
+  if (!Number.isFinite(scale) || scale <= 0) return null;
+  if (scale > 10) scale /= 100;
+  if (scale < MIN_INTERFACE_SCALE || scale > MAX_INTERFACE_SCALE) return null;
+  return scale;
+}
+
+function scaleKey(scale) {
+  return Number(scale).toFixed(4);
+}
+
+function fallbackInterfaceScales(scaleHint) {
+  const result = [];
+  const seen = new Set();
+  const hinted = normalizeScale(scaleHint);
+  if (hinted) {
+    seen.add(scaleKey(hinted));
+    result.push({ scale: hinted, hinted: true });
+  }
+  const steps = Math.round((MAX_INTERFACE_SCALE - MIN_INTERFACE_SCALE) / INTERFACE_SCALE_STEP);
+  for (let index = 0; index <= steps; index += 1) {
+    const scale = Number((MIN_INTERFACE_SCALE + index * INTERFACE_SCALE_STEP).toFixed(2));
+    const key = scaleKey(scale);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push({ scale, hinted: false });
+  }
+  return result;
+}
+
+function scaledInterfaceDimensions(scale) {
+  return {
+    width: Math.round(WINTERFACE_WIDTH * scale),
+    height: Math.round(WINTERFACE_HEIGHT * scale),
+  };
+}
+
+function sourceCoordinate(offset, coordinate, scale, limit) {
+  return Math.min(limit - 1, offset + Math.floor((coordinate + 0.5) * scale));
+}
+
+function markerPixelDistance(image, template, offsetX, offsetY, x, y, scale) {
+  const templateIndex = pixelIndex(template, x, y);
+  const targetX = sourceCoordinate(offsetX, x, scale, image.width);
+  const targetY = sourceCoordinate(offsetY, y, scale, image.height);
+  const imageIndex = pixelIndex(image, targetX, targetY);
+  const red = image.data[imageIndex] - template.data[templateIndex];
+  const green = image.data[imageIndex + 1] - template.data[templateIndex + 1];
+  const blue = image.data[imageIndex + 2] - template.data[templateIndex + 2];
+  return red * red + green * green + blue * blue;
+}
+
+function markerProbes(template) {
+  const points = [
+    [0, 0],
+    [template.width - 1, 0],
+    [0, template.height - 1],
+    [template.width - 1, template.height - 1],
+    [Math.floor(template.width / 2), Math.floor(template.height / 2)],
+    [Math.floor(template.width / 4), Math.floor(template.height / 3)],
+    [Math.floor(template.width * 3 / 4), Math.floor(template.height / 3)],
+    [Math.floor(template.width / 4), Math.floor(template.height * 2 / 3)],
+    [Math.floor(template.width * 3 / 4), Math.floor(template.height * 2 / 3)],
+  ];
+  let brightest = { x: 0, y: 0, value: -1 };
+  let darkest = { x: 0, y: 0, value: Number.POSITIVE_INFINITY };
+  for (let y = 0; y < template.height; y += 1) {
+    for (let x = 0; x < template.width; x += 1) {
+      const index = pixelIndex(template, x, y);
+      const value = template.data[index] + template.data[index + 1] + template.data[index + 2];
+      if (value > brightest.value) brightest = { x, y, value };
+      if (value < darkest.value) darkest = { x, y, value };
+    }
+  }
+  points.push([brightest.x, brightest.y], [darkest.x, darkest.y]);
+  const unique = new Map();
+  for (const point of points) unique.set(`${point[0]}:${point[1]}`, point);
+  return [...unique.values()];
+}
+
+function markerScore(image, template, offsetX, offsetY, scale, probes = null, maximumMean = Number.POSITIVE_INFINITY) {
+  const points = probes || null;
+  let total = 0;
+  let count = 0;
+  const expectedCount = points ? points.length : template.width * template.height;
+  const maximumTotal = maximumMean * expectedCount;
+  if (points) {
+    for (const [x, y] of points) {
+      total += markerPixelDistance(image, template, offsetX, offsetY, x, y, scale);
+      count += 1;
+      if (total > maximumTotal) return Number.POSITIVE_INFINITY;
+    }
+  } else {
+    for (let y = 0; y < template.height; y += 1) {
+      for (let x = 0; x < template.width; x += 1) {
+        total += markerPixelDistance(image, template, offsetX, offsetY, x, y, scale);
+        count += 1;
+        if (total > maximumTotal) return Number.POSITIVE_INFINITY;
+      }
+    }
+  }
+  return count ? total / count : Number.POSITIVE_INFINITY;
+}
+
+function rememberCoarseCandidate(candidates, candidate) {
+  if (candidates.length < MAX_COARSE_CANDIDATES) {
+    candidates.push(candidate);
+    candidates.sort((left, right) => left.score - right.score);
+    return;
+  }
+  if (candidate.score >= candidates[candidates.length - 1].score) return;
+  candidates[candidates.length - 1] = candidate;
+  candidates.sort((left, right) => left.score - right.score);
+}
+
+function searchScaledTemplate(image, template, scale, probes, positionBudget) {
+  const dimensions = scaledInterfaceDimensions(scale);
+  const maxX = image.width - dimensions.width;
+  const maxY = image.height - dimensions.height;
+  if (maxX < 0 || maxY < 0) return null;
+
+  const positions = (maxX + 1) * (maxY + 1);
+  const stride = Math.max(1, Math.ceil(Math.sqrt(positions / Math.max(1, positionBudget))));
+  const coarse = [];
+  const addAt = (x, y) => {
+    if (x < 0 || y < 0 || x > maxX || y > maxY) return;
+    rememberCoarseCandidate(coarse, { x, y, score: markerScore(image, template, x, y, scale, probes) });
+  };
+
+  addAt(DEFAULT_OFFSET.x, DEFAULT_OFFSET.y);
+  addAt(Math.round((image.width - dimensions.width) / 2), Math.round((image.height - dimensions.height) / 2));
+  for (let y = 0; y <= maxY; y += stride) {
+    for (let x = 0; x <= maxX; x += stride) addAt(x, y);
+    if (maxX % stride) addAt(maxX, y);
+  }
+  if (maxY % stride) {
+    for (let x = 0; x <= maxX; x += stride) addAt(x, maxY);
+    addAt(maxX, maxY);
+  }
+
+  if (!coarse.length || coarse[0].score > SCALED_MARKER_MAX_PROBE_SCORE) return null;
+  let best = null;
+  const checked = new Set();
+  const radius = Math.min(MAX_REFINE_RADIUS, stride);
+  for (const candidate of coarse) {
+    for (let y = Math.max(0, candidate.y - radius); y <= Math.min(maxY, candidate.y + radius); y += 1) {
+      for (let x = Math.max(0, candidate.x - radius); x <= Math.min(maxX, candidate.x + radius); x += 1) {
+        const key = `${x}:${y}`;
+        if (checked.has(key)) continue;
+        checked.add(key);
+        const maximum = best ? Math.min(SCALED_MARKER_MAX_SCORE, best.score) : SCALED_MARKER_MAX_SCORE;
+        const score = markerScore(image, template, x, y, scale, null, maximum);
+        if (!best || score < best.score) best = { x, y, score };
+      }
+    }
+  }
+  if (!best || best.score > SCALED_MARKER_MAX_SCORE) return null;
+  return {
+    x: best.x,
+    y: best.y,
+    width: dimensions.width,
+    height: dimensions.height,
+    scale,
+    score: best.score,
+    tolerant: true,
+  };
+}
+
+function findTemplate(image, template, scaleHint, allowScaleFallback = true, trustScaleHint = false) {
+  // Keep the original exact 100% path first when 100% is plausible. Apart from
+  // avoiding interpolation, it is much stricter than the scaled matcher and
+  // cannot turn a legacy exact capture into a tolerant false positive.
+  // With a measured non-100% hint a full 100%-pixel sweep cannot succeed and is
+  // expensive on large clients, so go straight to the hinted scaled matcher.
+  const hintedScale = normalizeScale(scaleHint);
+  const exact = (!hintedScale || hintedScale === 1) ? findTemplateExactly(image, template) : null;
+  if (exact) {
+    return {
+      x: exact.x,
+      y: exact.y,
+      width: WINTERFACE_WIDTH,
+      height: WINTERFACE_HEIGHT,
+      scale: 1,
+      score: 0,
+      tolerant: false,
+    };
+  }
+
+  const probes = markerProbes(template);
+  let best = null;
+  for (const candidate of fallbackInterfaceScales(scaleHint)) {
+    if (!candidate.hinted && hintedScale && !allowScaleFallback) continue;
+    const match = searchScaledTemplate(
+      image,
+      template,
+      candidate.scale,
+      probes,
+      candidate.hinted ? HINT_SCAN_POSITION_BUDGET : FALLBACK_SCAN_POSITION_BUDGET,
+    );
+    if (!match) continue;
+    if (candidate.hinted) {
+      if (match.score <= HINTED_MARKER_TRUST_SCORE) return match;
+      if (!allowScaleFallback) return trustScaleHint ? match : null;
+      best = match;
+      continue;
+    }
+    if (!best || match.score < best.score) best = match;
+  }
+  return best;
+}
+
+function normalizeInterfaceRegion(image, source) {
+  const data = new Uint8ClampedArray(WINTERFACE_WIDTH * WINTERFACE_HEIGHT * 4);
+  const xRatio = source.width / WINTERFACE_WIDTH;
+  const yRatio = source.height / WINTERFACE_HEIGHT;
+  for (let y = 0; y < WINTERFACE_HEIGHT; y += 1) {
+    const sourceY = source.y + Math.min(source.height - 1, Math.floor((y + 0.5) * yRatio));
+    for (let x = 0; x < WINTERFACE_WIDTH; x += 1) {
+      const sourceX = source.x + Math.min(source.width - 1, Math.floor((x + 0.5) * xRatio));
+      const from = pixelIndex(image, sourceX, sourceY);
+      const to = (y * WINTERFACE_WIDTH + x) * 4;
+      data[to] = image.data[from];
+      data[to + 1] = image.data[from + 1];
+      data[to + 2] = image.data[from + 2];
+      data[to + 3] = image.data[from + 3];
+    }
+  }
+  if (typeof ImageData === "function") return new ImageData(data, WINTERFACE_WIDTH, WINTERFACE_HEIGHT);
+  return { width: WINTERFACE_WIDTH, height: WINTERFACE_HEIGHT, data };
+}
+
+function glyphMatches(image, glyph, offsetX, offsetY, color, tolerance = 20, backgroundTolerance = 0) {
   if (offsetX < 0 || offsetY < 0 || offsetX + glyph.width > image.width || offsetY + glyph.height > image.height) return false;
   for (let y = 0; y < glyph.height; y += 1) {
     for (let x = 0; x < glyph.width; x += 1) {
       const glyphIndex = pixelIndex(glyph, x, y);
       const imageIndex = pixelIndex(image, offsetX + x, offsetY + y);
       const opaque = glyph.data[glyphIndex + 3] === 255;
-      if ((opaque && colorDistanceAt(image, imageIndex, color) > tolerance)
-        || (!opaque && sameRgb(image, imageIndex, color))) return false;
+      const distance = colorDistanceAt(image, imageIndex, color);
+      if ((opaque && distance > tolerance)
+        || (!opaque && (backgroundTolerance > 0 ? distance <= backgroundTolerance : sameRgb(image, imageIndex, color)))) return false;
     }
   }
   return true;
 }
 
-function findFieldStart(image, offset, field, height) {
+function findFieldStart(image, offset, field, glyphs, tolerant = false) {
+  if (tolerant) {
+    for (let x = field.startX; x < field.startX + 50; x += 1) {
+      const absoluteX = offset.x + x;
+      const absoluteY = offset.y + field.y;
+      if (glyphs.some((glyph) => glyphMatches(
+        image,
+        glyph.image,
+        absoluteX,
+        absoluteY,
+        field.color,
+        SCALED_GLYPH_FOREGROUND_DISTANCE,
+        SCALED_GLYPH_BACKGROUND_DISTANCE,
+      ))) return absoluteX;
+    }
+    return -1;
+  }
+  const height = glyphs[0].image.height;
   for (let x = field.startX; x < field.startX + 50; x += 1) {
     for (let y = field.y; y < field.y + height; y += 1) {
       if (sameRgb(image, pixelIndex(image, offset.x + x, offset.y + y), field.color)) return offset.x + x;
@@ -128,13 +392,21 @@ function findFieldStart(image, offset, field, height) {
   return -1;
 }
 
-function readField(image, offset, field, fonts) {
+function readField(image, offset, field, fonts, tolerant = false) {
   const glyphs = fonts[field.font];
-  let x = findFieldStart(image, offset, field, glyphs[0].image.height);
+  let x = findFieldStart(image, offset, field, glyphs, tolerant);
   if (x < 0) return "";
   let value = "";
   for (let guard = 0; guard < 20; guard += 1) {
-    const match = glyphs.find((glyph) => glyphMatches(image, glyph.image, x, offset.y + field.y, field.color));
+    const match = glyphs.find((glyph) => glyphMatches(
+      image,
+      glyph.image,
+      x,
+      offset.y + field.y,
+      field.color,
+      tolerant ? SCALED_GLYPH_FOREGROUND_DISTANCE : 20,
+      tolerant ? SCALED_GLYPH_BACKGROUND_DISTANCE : 0,
+    ));
     if (!match) break;
     value += match.value;
     x += match.image.width;
@@ -192,15 +464,42 @@ export class WinterfaceReader {
   }
 
   readWithOffset(image, extra = {}) {
-    const offset = findTemplate(image, this.marker);
-    if (!offset) return null;
-    const result = Object.fromEntries(FIELDS.map((field) => [field.name, readField(image, offset, field, this.fonts)]));
+    const source = findTemplate(
+      image,
+      this.marker,
+      extra.interfaceScale,
+      extra.allowScaleFallback !== false,
+      Boolean(extra.trustScaleHint),
+    );
+    if (!source) return null;
+    const tolerant = Boolean(source.tolerant);
+    const ocrImage = tolerant ? normalizeInterfaceRegion(image, source) : image;
+    const ocrOffset = tolerant ? { x: 0, y: 0 } : { x: source.x, y: source.y };
+    const result = Object.fromEntries(FIELDS.map((field) => [field.name, readField(ocrImage, ocrOffset, field, this.fonts, tolerant)]));
     result.FloorSize = deriveFloorSize({ detected: extra.floorSize, sizeMod: result.SizeMod });
-    result.BonusMod = `${(readBonus(image, offset) * 100).toFixed(1)}%`;
+    result.BonusMod = `${(readBonus(ocrImage, ocrOffset) * 100).toFixed(1)}%`;
     result.Roomcount = String(extra.roomcount ?? "");
     result.DeadEnds = String(extra.deadEnds ?? "");
     result.Timestamp = (extra.timestamp instanceof Date ? extra.timestamp : new Date()).toLocaleString();
-    return { result, offset, width: WINTERFACE_WIDTH, height: WINTERFACE_HEIGHT };
+    const sourceOffset = { x: source.x, y: source.y };
+    return {
+      result,
+      // Keep the legacy crop fields pointed at the literal RuneScape pixels so
+      // app.js saves a 768x501 source crop at 150%, not the normalized OCR copy.
+      offset: sourceOffset,
+      width: source.width,
+      height: source.height,
+      scale: source.scale,
+      markerScore: source.score,
+      sourceOffset: { ...sourceOffset },
+      sourceWidth: source.width,
+      sourceHeight: source.height,
+      sourceScale: source.scale,
+      rawOffset: { ...sourceOffset },
+      rawWidth: source.width,
+      rawHeight: source.height,
+      rawScale: source.scale,
+    };
   }
 
   read(image, extra = {}) {

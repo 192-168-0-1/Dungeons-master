@@ -17,7 +17,7 @@ This is the Alt1 version of the `Dungeons` project. It does not use or modify `A
 - A five-player Dungeoneering party panel that assigns the fixed red, cyan, green, yellow and grey player colors by join order. Labels and G1/G2 markers use the owner's current party color on every connected screen.
 - Optional RuneScape party-interface scanning uses the official Alt1 sprite OCR to read the five colored RSN rows. A successfully read row overrides join order locally; closing the interface or an OCR miss safely falls back to the synced roster.
 - PNG export of the visible map.
-- Dungeoneering results-screen OCR for time, floor, modifiers, bonus and XP.
+- Dungeoneering results-screen OCR for time, floor, modifiers, bonus and XP at 100–200% interface scale. Result PNGs wait for final stable values and preserve the full physical interface crop.
 
 ## Run locally
 

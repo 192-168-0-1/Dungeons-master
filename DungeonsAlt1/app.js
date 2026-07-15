@@ -8,21 +8,21 @@ import {
   isOpened,
   mapToImage,
   toChess,
-} from "./src/map-core.js?v=20260625-30";
+} from "./src/map-core.js?v=20260715-31";
 import {
   MAP_SCALE_CANDIDATES,
   findMapByAlt1Anchor,
   findMapByScaledCorners,
   readMapAtCalibration,
   scaledFloorDimensions,
-} from "./src/alt1-map-locator.js?v=20260625-30";
-import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js";
+} from "./src/alt1-map-locator.js?v=20260715-31";
+import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js?v=20260715-31";
 import {
   buildMapOverlayCommands,
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260625-30";
+} from "./src/alt1-overlay.js?v=20260715-31";
 import {
   DEFAULT_FLOOR_TARGET_SECONDS,
   elapsedFloorMinutes,
@@ -33,8 +33,9 @@ import {
   formatElapsedClock,
   parseFloorTargetSeconds,
   rpmValue,
-} from "./src/rpm-state.js?v=20260625-30";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-30";
+  trackedBaseAfterTransition,
+} from "./src/rpm-state.js?v=20260715-31";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260715-31";
 import {
   PARTY_COLORS,
   automaticPartyRoomStatus,
@@ -43,9 +44,9 @@ import {
   partyColor,
   reconcileObservedParty,
   roomStatusLine,
-} from "./src/party-core.js?v=20260625-30";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-30";
-import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-30";
+} from "./src/party-core.js?v=20260715-31";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260715-31";
+import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260715-31";
 import {
   RESULT_COLUMNS,
   RESULT_DISPLAY_COLUMNS,
@@ -54,6 +55,8 @@ import {
   orderedResultsForDisplay,
   resultDisplayValue,
   plannedResultExports,
+  resultCaptureRect,
+  resultMapSnapshotIsFresh,
   resultAlreadyRecorded,
   resultLooksComplete,
   resultBatchIsComplete,
@@ -62,7 +65,7 @@ import {
   normalizeResultBatchTarget,
   safeFilePart,
   safeTimestampForFilename,
-} from "./src/results-core.js?v=20260625-30";
+} from "./src/results-core.js?v=20260715-31";
 import {
   chooseSaveFolder,
   clearStoredSaveFolder,
@@ -71,10 +74,10 @@ import {
   requestSaveFolderPermission,
   supportsFolderSaving,
   writeDataUrlToFolder,
-} from "./src/file-saver.js?v=20260625-30";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-30";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-30";
-import { WinterfaceReader } from "./src/winterface.js?v=20260625-30";
+} from "./src/file-saver.js?v=20260715-31";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260715-31";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260715-31";
+import { WinterfaceReader } from "./src/winterface.js?v=20260715-31";
 
 const SCAN_INTERVAL = 600;
 const AUTO_CALIBRATION_INTERVAL = 2500;
@@ -87,6 +90,11 @@ const OVERLAY_DURATION = 30000;
 const OVERLAY_REFRESH_INTERVAL = 20000;
 const PARTY_SCAN_INTERVAL = 5000;
 const RESULTS_AUTO_INTERVAL = 1500;
+const RESULTS_MANUAL_MAX_SCANS = 20;
+const RESULTS_SCALE_FALLBACK_ACTIVE_INTERVAL = 3000;
+const RESULTS_SCALE_FALLBACK_IDLE_INTERVAL = 30000;
+const RESULT_MAP_MAX_AGE_MS = 15000;
+const MAX_PENDING_RESULTS_PNGS = 20;
 
 // High-resolution timer for the optional in-app performance readout (debug mode).
 const perfNow = (typeof performance !== "undefined" && typeof performance.now === "function")
@@ -176,6 +184,11 @@ const state = {
   floorStart: null,
   lastBase: null,
   lastRoomCount: 0,
+  lastFloorName: null,
+  lastMapReadAt: 0,
+  lastResultMapConsumedAt: 0,
+  mapLostAt: null,
+  awaitingNewFloor: false,
   invalidCaptures: 0,
   autoScan: true,
   busy: false,
@@ -192,6 +205,13 @@ const state = {
   autoResultState: { visible: false, key: "", handled: false, missing: 0, stable: 0 },
   autoResultKeys: new Set(),
   lastAutoResultScan: 0,
+  resultsInterfaceScale: null,
+  lastResultsScaleFallback: 0,
+  pendingResultsPngs: [],
+  droppedResultsPngs: 0,
+  retryingResultsPngs: false,
+  retryResultsPngsRequested: false,
+  retryResultsPngsNotify: false,
   pendingFloorReset: null,
   saveFolders: {
     supported: false,
@@ -443,6 +463,8 @@ async function updateMap() {
       if (relocated) read = readMapAtCalibration(captureRegion, relocated, { floors: [relocated.floor] });
     }
     if (!read) {
+      if (!state.mapLostAt) state.mapLostAt = Date.now();
+      state.pendingFloorReset = null;
       state.invalidCaptures += 1;
       setStatus(`Map image lost (${state.invalidCaptures}/${INVALID_CAPTURES_BEFORE_RECALIBRATION})`, "warn");
       shouldRecalibrate = state.invalidCaptures >= INVALID_CAPTURES_BEFORE_RECALIBRATION;
@@ -458,6 +480,8 @@ async function updateMap() {
     // trades C#'s show-degraded-data for holding the last good read.
     const readableRooms = read.gameMap.openedRoomCount + read.gameMap.mysteryCount;
     if (readableRooms < 1) {
+      if (!state.mapLostAt) state.mapLostAt = Date.now();
+      state.pendingFloorReset = null;
       state.invalidCaptures = 0;
       setStatus("Map framed but rooms unreadable (interface scaling?) — keeping the last good read", "warn");
       updateStats();
@@ -479,16 +503,30 @@ async function updateMap() {
     state.invalidCaptures = 0;
     const gameMap = scoredMap.gameMap;
     const now = Date.now();
+    const mapGapMs = state.mapLostAt ? Math.max(0, now - state.mapLostAt) : 0;
     const transition = evaluateMapTransition({
       floorStart: state.floorStart,
       lastBase: state.lastBase,
       lastRoomCount: state.lastRoomCount,
+      lastFloorName: state.lastFloorName,
+      mapGapMs,
+      // The pure transition gate combines this results-screen lifecycle latch
+      // with mapGapMs and never trusts a single returning map frame.
+      awaitingNewFloor: state.awaitingNewFloor,
       pendingReset: state.pendingFloorReset,
     }, gameMap, nextCalibration, now);
+    // Gap evidence belongs to this first readable frame. A genuine gap-based
+    // candidate carries its reason in pendingReset for the confirmation frame.
+    state.mapLostAt = null;
     state.pendingFloorReset = transition.pendingReset;
     state.lastTransition = transition.reason;
     if (!transition.accept) {
-      const pendingReason = transition.reason === "pending-base-change" ? "base moved" : "single base room";
+      const pendingReason = {
+        "pending-base-change": "base moved",
+        "pending-floor-change": "floor size changed",
+        "pending-map-gap-regression": "room count dropped after map loss",
+        "pending-single-base": "single base room",
+      }[transition.reason] || transition.reason;
       setStatus(`Possible new floor detected (${pendingReason}); waiting for confirmation`, "warn");
       // Keep the elapsed clock / rpm ticking off the still-valid floor while the
       // new read awaits confirmation, matching the C# reference which refreshes
@@ -500,13 +538,26 @@ async function updateMap() {
       state.calibration = nextCalibration;
       saveCalibration();
     }
-    if (transition.reset) resetFloor(transition.resetAt ?? now, gameMap.openedRoomCount);
+    if (transition.reset) {
+      resetFloor(transition.resetAt ?? now, transition.resetRoomCount ?? gameMap.openedRoomCount);
+      state.awaitingNewFloor = false;
+    } else if (gameMap.openedRoomCount < state.lastRoomCount) {
+      // Opened rooms are monotonic within a floor. A small classifier dip is
+      // display noise, not real progress and not a reason for RPM to go back.
+      // Larger/new-floor regressions are handled by the transition gate above.
+      state.lastTransition = "same-floor-room-regression-held";
+      setStatus(`Room read dipped ${state.lastRoomCount}→${gameMap.openedRoomCount}; keeping the last good RPM`, "warn");
+      updateStats();
+      return;
+    }
 
     const tReadMs = perfNow() - tRead0;
     state.image = image;
     state.gameMap = gameMap;
-    state.lastBase = gameMap.base ?? state.lastBase;
+    state.lastBase = trackedBaseAfterTransition(state.lastBase, gameMap.base, transition.reset);
     state.lastRoomCount = gameMap.openedRoomCount;
+    state.lastFloorName = floor.name;
+    state.lastMapReadAt = now;
     const tDetect0 = perfNow();
     updateLocalGatestones(detectGatestones(image, gameMap));
     const tDetectMs = perfNow() - tDetect0;
@@ -1098,6 +1149,13 @@ function saveFolderState(kind) {
 function updateSaveFolderStatus(kind) {
   const target = saveFolderTarget(kind);
   const folder = saveFolderState(kind);
+  const pendingCount = kind === "results" ? state.pendingResultsPngs.length : 0;
+  const pendingText = pendingCount
+    ? ` · ${pendingCount} result PNG${pendingCount === 1 ? "" : "s"} waiting to retry`
+    : "";
+  const droppedText = kind === "results" && state.droppedResultsPngs
+    ? ` · ${state.droppedResultsPngs} older PNG${state.droppedResultsPngs === 1 ? "" : "s"} could not be retained`
+    : "";
   elements[target.choose].disabled = folder.loading || !state.saveFolders.supported;
   elements[target.clear].disabled = folder.loading || !folder.handle;
   // Offer the one-click re-grant only when a folder is remembered but its grant
@@ -1105,22 +1163,22 @@ function updateSaveFolderStatus(kind) {
   elements[target.reallow].hidden = !(!folder.loading && state.saveFolders.supported
     && folder.handle && folder.permission !== "granted");
   if (folder.loading) {
-    elements[target.status].textContent = `Checking ${target.label} save folder...`;
+    elements[target.status].textContent = `Checking ${target.label} save folder...${pendingText}${droppedText}`;
     return;
   }
   if (!state.saveFolders.supported) {
-    elements[target.status].textContent = "Folder saving is not supported in this Alt1 browser";
+    elements[target.status].textContent = `Folder saving is not supported in this Alt1 browser${pendingText}${droppedText}`;
     return;
   }
   if (folder.handle && folder.permission === "granted") {
-    elements[target.status].textContent = `Saving ${target.label} PNGs to: ${folder.name || "selected folder"}`;
+    elements[target.status].textContent = `Saving ${target.label} PNGs to: ${folder.name || "selected folder"}${pendingText}${droppedText}`;
     return;
   }
   if (folder.handle) {
-    elements[target.status].textContent = `${target.label} folder access expired — click Re-allow folder`;
+    elements[target.status].textContent = `${target.label} folder access expired — click Re-allow folder${pendingText}${droppedText}`;
     return;
   }
-  elements[target.status].textContent = `Choose a ${target.label} folder before ${target.label} PNG auto-save`;
+  elements[target.status].textContent = `Choose a ${target.label} folder before ${target.label} PNG auto-save${pendingText}${droppedText}`;
 }
 
 function updateAllSaveFolderStatuses() {
@@ -1152,6 +1210,9 @@ async function refreshStoredSaveFolder(kind) {
     folder.loading = false;
     updateSaveFolderStatus(kind);
   }
+  if (kind === "results" && folder.permission === "granted") {
+    await retryPendingResultsPngs();
+  }
 }
 
 function refreshStoredSaveFolders() {
@@ -1163,6 +1224,7 @@ function refreshStoredSaveFolders() {
 async function selectSaveFolder(kind) {
   const target = saveFolderTarget(kind);
   const folder = saveFolderState(kind);
+  if (folder.loading) return;
   if (!state.saveFolders.supported) {
     setStatus("Folder saving is not supported in this Alt1 browser", "error");
     updateSaveFolderStatus(kind);
@@ -1184,30 +1246,53 @@ async function selectSaveFolder(kind) {
     folder.loading = false;
     updateSaveFolderStatus(kind);
   }
+  if (kind === "results" && folder.permission === "granted") {
+    await retryPendingResultsPngs();
+  }
 }
 
 async function clearSelectedSaveFolder(kind) {
   const target = saveFolderTarget(kind);
   const folder = saveFolderState(kind);
-  await clearStoredSaveFolder(window, target.key);
-  folder.handle = null;
-  folder.name = "";
-  folder.permission = "unknown";
+  if (folder.loading || !folder.handle) return;
+  const handle = folder.handle;
+  folder.loading = true;
   updateSaveFolderStatus(kind);
-  setStatus(`${target.label} save folder cleared`, "warn");
+  try {
+    await clearStoredSaveFolder(window, target.key);
+    if (folder.handle !== handle) return;
+    folder.handle = null;
+    folder.name = "";
+    folder.permission = "unknown";
+    setStatus(`${target.label} save folder cleared`, "warn");
+  } finally {
+    folder.loading = false;
+    updateSaveFolderStatus(kind);
+  }
 }
 
 async function reallowSaveFolder(kind) {
   const target = saveFolderTarget(kind);
   const folder = saveFolderState(kind);
-  if (!folder.handle) return;
+  if (folder.loading || !folder.handle) return;
+  const handle = folder.handle;
+  folder.loading = true;
+  updateSaveFolderStatus(kind);
   // The auto-save loop runs outside a user gesture and may not prompt; this
   // click is the gesture that restores the persisted grant.
-  folder.permission = await requestSaveFolderPermission(folder.handle);
+  const permission = await requestSaveFolderPermission(handle);
+  if (folder.handle !== handle) {
+    folder.loading = false;
+    updateSaveFolderStatus(kind);
+    return;
+  }
+  folder.permission = permission;
+  folder.loading = false;
   updateSaveFolderStatus(kind);
   const label = target.label.charAt(0).toUpperCase() + target.label.slice(1);
   if (folder.permission === "granted") {
     setStatus(`${label} folder re-allowed — PNG auto-save active`, "ok");
+    if (kind === "results") await retryPendingResultsPngs();
   } else {
     setStatus(`${label} folder access still blocked — pick the folder again`, "warn");
   }
@@ -1221,19 +1306,26 @@ async function writePngToSaveFolder(kind, filename, dataUrl, label, options = {}
     if (!quiet) setStatus("Folder saving is not supported in this Alt1 browser", "error");
     return { saved: false, reason: "unsupported" };
   }
-  if (!folder.handle) {
+  const handle = folder.handle;
+  if (!handle) {
     if (!quiet) setStatus(`Choose a ${target.label} folder before saving ${label}`, "warn");
     updateSaveFolderStatus(kind);
     return { saved: false, reason: "no-folder" };
   }
-  let permission = await querySaveFolderPermission(folder.handle);
+  let permission = await querySaveFolderPermission(handle);
+  // A Re-allow click may have completed while the background query was in
+  // flight. Do not let that older "prompt" result overwrite a fresh grant.
+  if (folder.handle === handle && folder.permission === "granted" && permission !== "granted") {
+    permission = await querySaveFolderPermission(handle);
+  }
   // The File System Access grant does not survive a reload, so a restored handle
   // reads back as "prompt". A manual save is a user gesture, so we can re-request
   // the grant in place instead of forcing the user to pick the folder again.
   // (The quiet auto-save path cannot prompt — it runs outside a user gesture.)
   if (permission === "prompt" && !quiet) {
-    permission = await requestSaveFolderPermission(folder.handle);
+    permission = await requestSaveFolderPermission(handle);
   }
+  if (folder.handle !== handle) return { saved: false, reason: "handle-changed" };
   folder.permission = permission;
   updateSaveFolderStatus(kind);
   if (permission !== "granted") {
@@ -1241,7 +1333,9 @@ async function writePngToSaveFolder(kind, filename, dataUrl, label, options = {}
     return { saved: false, reason: "permission" };
   }
   try {
-    await writeDataUrlToFolder(folder.handle, filename, dataUrl);
+    // Keep using the permission-checked handle even if another UI event changes
+    // the selected folder while this asynchronous write is in progress.
+    await writeDataUrlToFolder(handle, filename, dataUrl);
     if (!quiet) setStatus(`${label} saved to ${folder.name || "selected folder"}`, "ok");
     return { saved: true, filename };
   } catch (error) {
@@ -1297,17 +1391,115 @@ function imageDataToDataUrl(image) {
   return canvas.toDataURL("image/png");
 }
 
-async function saveResultsInterfacePng(capture, date = new Date(), options = {}) {
-  const { image, offset, width, height, result } = capture;
+function prepareResultsInterfacePng(capture, date = new Date()) {
+  const { image, result } = capture;
+  const rect = resultCaptureRect(capture);
+  if (!rect) return null;
+  const { offset, width, height } = rect;
   const cropped = cropImageData(image, offset.x, offset.y, width, height);
-  if (!cropped) return { saved: false, reason: "no-results-crop" };
-  return writePngToSaveFolder(
+  if (!cropped) return null;
+  return {
+    filename: resultsPngFilename(result, date),
+    dataUrl: imageDataToDataUrl(cropped),
+  };
+}
+
+async function saveResultsInterfacePng(capture, date = new Date(), options = {}) {
+  const prepared = options?.prepared || prepareResultsInterfacePng(capture, date);
+  if (!prepared) return { saved: false, reason: "no-results-crop", prepared: null };
+  const saved = await writePngToSaveFolder(
     "results",
-    resultsPngFilename(result, date),
-    imageDataToDataUrl(cropped),
+    prepared.filename,
+    prepared.dataUrl,
     "Results interface PNG",
     options,
   );
+  return { ...saved, prepared };
+}
+
+function queuePendingResultsPng(artifact) {
+  const prepared = artifact?.prepared;
+  const retryable = ["no-folder", "permission", "error", "handle-changed"].includes(artifact?.reason);
+  if (artifact?.saved || !retryable || !prepared?.filename || !prepared?.dataUrl) return;
+  const existing = state.pendingResultsPngs.findIndex((item) => item.filename === prepared.filename);
+  if (existing >= 0) state.pendingResultsPngs[existing] = prepared;
+  else {
+    if (state.pendingResultsPngs.length >= MAX_PENDING_RESULTS_PNGS) {
+      state.pendingResultsPngs.shift();
+      state.droppedResultsPngs += 1;
+    }
+    state.pendingResultsPngs.push(prepared);
+  }
+  updateSaveFolderStatus("results");
+  if (saveFolderState("results").permission === "granted") {
+    // One asynchronous retry covers transient write errors. A repeated failure
+    // remains visible in the queue until the user chooses/re-allows the folder.
+    setTimeout(() => { retryPendingResultsPngs({ quiet: true }); }, 0);
+  }
+}
+
+async function retryPendingResultsPngs({ quiet = false } = {}) {
+  if (state.retryingResultsPngs) {
+    state.retryResultsPngsRequested = true;
+    if (!quiet) state.retryResultsPngsNotify = true;
+    return { saved: 0, remaining: state.pendingResultsPngs.length };
+  }
+  if (!state.pendingResultsPngs.length) return { saved: 0, remaining: 0 };
+  const folder = saveFolderState("results");
+  // Avoid querying/walking the complete queue before every new floor when the
+  // same missing or expired folder makes every write predictably impossible.
+  if (!state.saveFolders.supported || !folder.handle || folder.permission !== "granted") {
+    return { saved: 0, remaining: state.pendingResultsPngs.length };
+  }
+  state.retryingResultsPngs = true;
+  let saved = 0;
+  try {
+    do {
+      state.retryResultsPngsRequested = false;
+      const pending = state.pendingResultsPngs.splice(0);
+      const remaining = [];
+      for (let index = 0; index < pending.length; index += 1) {
+        const prepared = pending[index];
+        const result = await writePngToSaveFolder(
+          "results",
+          prepared.filename,
+          prepared.dataUrl,
+          "Results interface PNG",
+          { quiet: true },
+        );
+        if (result.saved) saved += 1;
+        else {
+          remaining.push(prepared);
+          if (["no-folder", "permission", "handle-changed", "unsupported"].includes(result.reason)) {
+            remaining.push(...pending.slice(index + 1));
+            break;
+          }
+        }
+      }
+      // Merge by filename so a concurrent failed capture or retry cannot leave
+      // duplicate writes queued for the same already-frozen PNG bytes.
+      const merged = new Map();
+      for (const prepared of [...remaining, ...state.pendingResultsPngs]) {
+        if (prepared?.filename && prepared?.dataUrl) merged.set(prepared.filename, prepared);
+      }
+      const mergedItems = [...merged.values()];
+      const overflow = Math.max(0, mergedItems.length - MAX_PENDING_RESULTS_PNGS);
+      if (overflow) state.droppedResultsPngs += overflow;
+      state.pendingResultsPngs = overflow ? mergedItems.slice(overflow) : mergedItems;
+    } while (state.retryResultsPngsRequested && state.pendingResultsPngs.length);
+  } finally {
+    state.retryingResultsPngs = false;
+    updateSaveFolderStatus("results");
+  }
+  const notifyRetry = !quiet || state.retryResultsPngsNotify;
+  state.retryResultsPngsNotify = false;
+  if (notifyRetry && saved > 0) {
+    const suffix = state.pendingResultsPngs.length
+      ? `; ${state.pendingResultsPngs.length} still waiting`
+      : "";
+    setStatus(`Retried and saved ${saved} results PNG${saved === 1 ? "" : "s"}${suffix}`, state.pendingResultsPngs.length ? "warn" : "ok");
+  }
+  return { saved, remaining: state.pendingResultsPngs.length };
 }
 
 function resultExtraFields() {
@@ -1320,11 +1512,91 @@ function resultExtraFields() {
   };
 }
 
-async function readDungeonResultsCapture(date = new Date()) {
-  const image = captureFullRuneScape();
+async function readDungeonResultsCapture(date = new Date(), {
+  allowScaleFallback = true,
+  interfaceScale = null,
+} = {}) {
   const reader = await winterfaceReader;
-  const capture = reader.readWithOffset(image, { ...resultExtraFields(), timestamp: date });
-  return capture ? { ...capture, image, date } : null;
+  // Do not capture until the lazily-loaded OCR assets are ready. On a cold
+  // start, capturing first could leave us parsing an interface frame that was
+  // already animating or closed by the time the reader finished loading.
+  const image = captureFullRuneScape();
+  const calibratedScale = Number(state.calibration?.scale) || null;
+  if (state.resultsInterfaceScale && calibratedScale
+    && Math.abs(state.resultsInterfaceScale - calibratedScale) >= 0.025) {
+    // Map calibration is a fresher measurement of RuneScape's global UI scale
+    // than a results screen cached from an earlier floor/session.
+    state.resultsInterfaceScale = null;
+  }
+  const capture = reader.readWithOffset(image, {
+    ...resultExtraFields(),
+    timestamp: date,
+    // The map locator already knows RuneScape's interface scale. The results
+    // reader uses it first, then falls back across supported scales when no map
+    // has been calibrated yet.
+    interfaceScale: interfaceScale ?? state.resultsInterfaceScale ?? calibratedScale,
+    allowScaleFallback,
+    trustScaleHint: Boolean(state.resultsInterfaceScale),
+  });
+  if (!capture) return null;
+  state.resultsInterfaceScale = capture.scale || state.resultsInterfaceScale;
+  // Seeing the winterface marker is an authoritative end-of-floor signal. The
+  // RPM transition consumes it only after the map has also disappeared once,
+  // preventing the old map behind this screen from resetting early.
+  if (!state.awaitingNewFloor) state.pendingFloorReset = null;
+  state.awaitingNewFloor = true;
+  return {
+    ...capture,
+    image,
+    date,
+    mapReadAt: state.lastMapReadAt,
+    mapFloorName: state.gameMap?.floor?.name ?? null,
+  };
+}
+
+function waitForNextResultScan() {
+  return new Promise((resolve) => setTimeout(resolve, SCAN_INTERVAL));
+}
+
+async function readSettledDungeonResultsCapture() {
+  let gate = { visible: false, key: "", handled: false, missing: 0, stable: 0 };
+  let latest = null;
+  let found = false;
+  for (let scan = 0; scan < RESULTS_MANUAL_MAX_SCANS; scan += 1) {
+    const capture = await readDungeonResultsCapture(new Date());
+    if (capture) {
+      found = true;
+      latest = capture;
+    }
+    gate = nextAutoResultState(gate, capture?.result ?? null);
+    if (capture && gate.shouldAdd) return { capture, found: true, settled: true, lost: false, gate };
+    if (!found && scan >= 2) return { capture: null, found: false, settled: false, lost: false, gate };
+    if (found && !capture && !gate.visible) return { capture: latest, found: true, settled: false, lost: true, gate };
+    if (scan + 1 < RESULTS_MANUAL_MAX_SCANS) await waitForNextResultScan();
+  }
+  return { capture: latest, found, settled: false, lost: false, gate };
+}
+
+async function requestManualArtifactPermissions() {
+  const requestedKinds = [];
+  if (elements.autoSaveResultsPng.checked) requestedKinds.push("results");
+  if (elements.autoSaveMapPng.checked) requestedKinds.push("map");
+  const attempts = requestedKinds.map((kind) => {
+    const folder = saveFolderState(kind);
+    if (!folder.handle) return null;
+    // Run this before the settling delay while the Read-results click still
+    // carries user activation; start every request before the first await. A
+    // background/auto scan is not allowed to prompt.
+    const handle = folder.handle;
+    return { kind, folder, handle, request: requestSaveFolderPermission(handle) };
+  }).filter(Boolean);
+  const permissions = await Promise.all(attempts.map((attempt) => attempt.request));
+  attempts.forEach((attempt, index) => {
+    // A folder can be changed while its permission prompt is open; never apply
+    // the old handle's answer to the newly selected handle.
+    if (attempt.folder.handle === attempt.handle) attempt.folder.permission = permissions[index];
+    updateSaveFolderStatus(attempt.kind);
+  });
 }
 
 function appendResult(result) {
@@ -1396,7 +1668,16 @@ function prepareResultBatch(result) {
   return { accepted: true };
 }
 
-async function saveResultArtifacts(capture) {
+async function saveResultArtifacts(capture, { quiet = true } = {}) {
+  const capturedAt = capture?.date instanceof Date ? capture.date.getTime() : Date.now();
+  const mapAgeMs = capturedAt - Number(capture?.mapReadAt || 0);
+  const hasFreshMatchingMap = Boolean(capture?.mapSnapshotClaimed)
+    && Boolean(state.image)
+    && capture?.mapReadAt === state.lastMapReadAt
+    && capture?.mapFloorName === state.gameMap?.floor?.name
+    && capture?.mapFloorName === capture?.result?.FloorSize
+    && mapAgeMs >= 0
+    && mapAgeMs <= RESULT_MAP_MAX_AGE_MS;
   const exports = plannedResultExports({
     autoSaveMap: elements.autoSaveMapPng.checked,
     autoSaveResults: elements.autoSaveResultsPng.checked,
@@ -1404,13 +1685,45 @@ async function saveResultArtifacts(capture) {
     // are for. The last map read is sticky, so if the floor-B winterface was
     // reached without ever locking floor B's map, state.image is still floor A —
     // pairing a stale floor-A map PNG with a floor-B results row on disk.
-    hasMap: Boolean(state.image) && state.gameMap?.floor?.name === capture?.result?.FloorSize,
-    hasResultsOffset: Boolean(capture?.offset),
+    hasMap: hasFreshMatchingMap,
+    hasResultsOffset: Boolean(resultCaptureRect(capture)),
   });
   const results = [];
-  if (exports.includes("map")) results.push(await saveMap({ date: capture.date, quiet: true }));
-  if (exports.includes("results")) results.push(await saveResultsInterfacePng(capture, capture.date, { quiet: true }));
+  if (exports.includes("map")) {
+    results.push({ kind: "map", ...await saveMap({ date: capture.date, quiet }) });
+  }
+  if (exports.includes("results")) {
+    // A prior permission/no-folder failure keeps its already-captured PNG bytes.
+    // Retry those first; never recapture an old results screen from live pixels.
+    await retryPendingResultsPngs({ quiet: true });
+    const artifact = {
+      kind: "results",
+      ...await saveResultsInterfacePng(capture, capture.date, { quiet }),
+    };
+    results.push(artifact);
+    queuePendingResultsPng(artifact);
+    if (artifact.saved && state.pendingResultsPngs.length) {
+      await retryPendingResultsPngs({ quiet: true });
+    }
+  }
   return results;
+}
+
+function claimResultMapSnapshot(capture) {
+  const mapReadAt = Number(capture?.mapReadAt || 0);
+  const claimed = resultMapSnapshotIsFresh(capture, {
+    currentMapReadAt: state.lastMapReadAt,
+    currentFloorName: state.gameMap?.floor?.name,
+    lastConsumedAt: state.lastResultMapConsumedAt,
+    hasMap: Boolean(state.image),
+    maxAgeMs: RESULT_MAP_MAX_AGE_MS,
+  });
+  // A stable results screen consumes this exact map generation even when the
+  // row is filtered/duplicate or map export is disabled; it can never be paired
+  // with a later same-size floor.
+  if (mapReadAt > 0) state.lastResultMapConsumedAt = Math.max(state.lastResultMapConsumedAt, mapReadAt);
+  capture.mapSnapshotClaimed = claimed;
+  return claimed;
 }
 
 function resultArtifactSuffix(results) {
@@ -1422,6 +1735,7 @@ function resultArtifactSuffix(results) {
     unsupported: "folder saving unsupported",
     "no-folder": "choose a save folder",
     permission: "folder permission needed",
+    "handle-changed": "save folder changed; retry queued",
     error: "save failed",
     "no-map": "no map image",
     "no-results-crop": "results crop failed",
@@ -1436,12 +1750,13 @@ function resultArtifactTone(results) {
 
 async function commitDungeonResultsCapture(capture, source = "manual") {
   const { result } = capture;
+  claimResultMapSnapshot(capture);
   const batch = prepareResultBatch(result);
   if (!batch.accepted) {
     return batch;
   }
   appendResult(result);
-  const artifacts = await saveResultArtifacts(capture);
+  const artifacts = await saveResultArtifacts(capture, { quiet: source === "auto" });
   const status = resultBatchStatus(state.results, {
     target: resultBatchTarget(),
     filter: resultBatchFilter(),
@@ -1465,9 +1780,11 @@ async function captureDungeonResults() {
   elements.captureResults.disabled = true;
   try {
     assertAlt1Ready();
-    setStatus("Reading the Dungeoneering results screen…");
-    const capture = await readDungeonResultsCapture(new Date());
-    if (!capture) {
+    await requestManualArtifactPermissions();
+    setStatus("Reading the Dungeoneering results screen and waiting for final values…");
+    const settled = await readSettledDungeonResultsCapture();
+    const capture = settled.capture;
+    if (!settled.found || !capture) {
       setStatus("Results screen not found — keep the XP overview visible", "error");
       return;
     }
@@ -1477,7 +1794,24 @@ async function captureDungeonResults() {
       setStatus("Results not fully visible yet — press Skip in game, then read again", "warn");
       return;
     }
+    if (!settled.settled) {
+      setStatus(settled.lost
+        ? "Results screen closed before final values stabilized — keep it open and read again"
+        : "Results were still changing after 12 seconds — press Skip in game or wait for final values, then read again", "warn");
+      return;
+    }
     const committed = await commitDungeonResultsCapture(capture, "manual");
+    // The manual reader already passed the same stability gate as auto mode.
+    // Mark this still-visible screen handled so auto tracking does not perform
+    // three more full-screen captures only to discover the same duplicate.
+    state.autoResultState = {
+      visible: true,
+      key: settled.gate?.key || "",
+      handled: true,
+      missing: 0,
+      stable: settled.gate?.stable || 3,
+    };
+    if (committed.accepted && settled.gate?.key) state.autoResultKeys.add(settled.gate.key);
     setStatus(committed.status, committed.tone);
   } catch (error) {
     setStatus(`Could not read the results screen: ${error.message || error}`, "error");
@@ -1495,7 +1829,7 @@ async function autoCaptureDungeonResults() {
   if (state.resultsBusy || !hasAlt1() || !window.alt1.rsLinked) return;
   const now = Date.now();
   // While a results screen is up but not yet committed, scan at the loop's full
-  // 600ms cadence so the two stable reads land ~1.2s after the values appear
+  // 600ms cadence so three stable reads span ~1.2s after the values appear
   // instead of ~3s. The 1500ms gate stays for the idle case (no screen visible),
   // which is the expensive full-screen search.
   const awaitingResults = Boolean(state.autoResultState?.visible) && !state.autoResultState?.handled;
@@ -1504,7 +1838,22 @@ async function autoCaptureDungeonResults() {
 
   state.resultsBusy = true;
   try {
-    const capture = await readDungeonResultsCapture(new Date());
+    const calibratedScale = Number(state.calibration?.scale) || null;
+    if (state.resultsInterfaceScale && calibratedScale
+      && Math.abs(state.resultsInterfaceScale - calibratedScale) >= 0.025) {
+      state.resultsInterfaceScale = null;
+    }
+    const measuredScale = state.resultsInterfaceScale ?? state.calibration?.scale;
+    const scaleHint = measuredScale || 1;
+    // Full 100..200% fallback is intentionally expensive. Run it promptly only
+    // while a results/loading phase is plausible (or no scale was measured),
+    // and very rarely while the live map proves the normal game UI is active.
+    const fallbackInterval = (!measuredScale || state.mapLostAt || state.awaitingNewFloor)
+      ? RESULTS_SCALE_FALLBACK_ACTIVE_INTERVAL
+      : RESULTS_SCALE_FALLBACK_IDLE_INTERVAL;
+    const allowScaleFallback = now - state.lastResultsScaleFallback >= fallbackInterval;
+    if (allowScaleFallback) state.lastResultsScaleFallback = now;
+    const capture = await readDungeonResultsCapture(new Date(), { allowScaleFallback, interfaceScale: scaleHint });
     const next = nextAutoResultState(state.autoResultState, capture?.result ?? null);
     state.autoResultState = {
       visible: next.visible,

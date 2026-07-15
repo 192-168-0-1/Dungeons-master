@@ -10,6 +10,7 @@ import {
   formatElapsedClock,
   parseFloorTargetSeconds,
   rpmValue,
+  trackedBaseAfterTransition,
 } from "../src/rpm-state.js";
 
 function gameMap({ rooms, base = { x: 0, y: 0 }, mystery = 0 } = {}) {
@@ -92,6 +93,7 @@ test("first valid map starts a new floor immediately", () => {
   assert.equal(result.accept, true);
   assert.equal(result.reset, true);
   assert.equal(result.resetAt, 10_000);
+  assert.equal(result.resetRoomCount, 1);
   assert.equal(result.pendingReset, null);
   assert.equal(result.reason, "first-map");
 });
@@ -134,6 +136,7 @@ test("single-base false locks do not update displayed rpm until confirmed", () =
   assert.equal(confirmed.accept, true);
   assert.equal(confirmed.reset, true);
   assert.equal(confirmed.resetAt, 30_000);
+  assert.equal(confirmed.resetRoomCount, 1);
   assert.equal(confirmed.pendingReset, null);
   assert.equal(confirmed.reason, "confirmed-single-base");
 });
@@ -159,6 +162,7 @@ test("base changes require a confirmation before resetting the floor timer", () 
   assert.equal(confirmed.accept, true);
   assert.equal(confirmed.reset, true);
   assert.equal(confirmed.resetAt, 40_000);
+  assert.equal(confirmed.resetRoomCount, 6);
   assert.equal(confirmed.reason, "confirmed-base-change");
 });
 
@@ -188,6 +192,7 @@ test("a new floor reusing the base resets even when the one-room frame is missed
   assert.equal(confirmed.accept, true);
   assert.equal(confirmed.reset, true);
   assert.equal(confirmed.resetAt, 60_000);
+  assert.equal(confirmed.resetRoomCount, 3);
   assert.equal(confirmed.reason, "confirmed-single-base");
 });
 
@@ -213,6 +218,155 @@ test("a new floor whose base is not yet readable still confirms and resets", () 
   assert.equal(confirmed.accept, true);
   assert.equal(confirmed.reset, true);
   assert.equal(confirmed.resetAt, 60_000);
+  assert.equal(confirmed.resetRoomCount, 8);
+});
+
+test("a base-less reset forgets the previous floor base before the new base appears", () => {
+  const previousBase = { x: 5, y: 5 };
+  assert.equal(trackedBaseAfterTransition(previousBase, null, true), null);
+  assert.deepEqual(trackedBaseAfterTransition(previousBase, null, false), previousBase);
+
+  const newBase = { x: 2, y: 2 };
+  assert.equal(trackedBaseAfterTransition(previousBase, newBase, true), newBase);
+  const afterReset = evaluateMapTransition({
+    floorStart: 58_000,
+    lastBase: trackedBaseAfterTransition(previousBase, null, true),
+    lastRoomCount: 10,
+    pendingReset: null,
+  }, gameMap({ rooms: 12, base: newBase }), calibration, 62_000);
+
+  assert.equal(afterReset.accept, true);
+  assert.equal(afterReset.reset, false);
+  assert.equal(afterReset.reason, "same-floor");
+});
+
+test("a results-screen latch holds an identical map until new-floor progress is confirmed", () => {
+  const previous = {
+    floorStart: 10_000,
+    lastBase: { x: 0, y: 0 },
+    lastRoomCount: 8,
+    lastFloorName: "Large",
+    mapGapMs: 2_500,
+    awaitingNewFloor: true,
+  };
+  const first = evaluateMapTransition(previous,
+    gameMap({ rooms: 8, base: { x: 0, y: 0 } }), calibration, 60_000);
+
+  assert.equal(first.accept, false);
+  assert.equal(first.reset, false);
+  assert.equal(first.reason, "pending-results-lifecycle");
+
+  const oneRoom = evaluateMapTransition({ ...previous, mapGapMs: 0, pendingReset: first.pendingReset },
+    gameMap({ rooms: 9, base: { x: 0, y: 0 } }), calibration, 60_600);
+  assert.equal(oneRoom.accept, false);
+  assert.equal(oneRoom.reset, false);
+
+  const confirmed = evaluateMapTransition({ ...previous, mapGapMs: 0, pendingReset: oneRoom.pendingReset },
+    gameMap({ rooms: 10, base: { x: 0, y: 0 } }), calibration, 61_200);
+
+  assert.equal(confirmed.accept, true);
+  assert.equal(confirmed.reset, true);
+  assert.equal(confirmed.pendingReset, null);
+  assert.equal(confirmed.resetAt, 60_000);
+  assert.equal(confirmed.resetRoomCount, 8);
+  assert.equal(confirmed.reason, "confirmed-results-lifecycle");
+});
+
+test("a post-results classifier dip recovering to the old count cannot reset twice", () => {
+  const previous = {
+    floorStart: 10_000,
+    lastBase: { x: 0, y: 0 },
+    lastRoomCount: 15,
+    lastFloorName: "Large",
+    mapGapMs: 2_500,
+    awaitingNewFloor: true,
+  };
+  const dip = evaluateMapTransition(previous,
+    gameMap({ rooms: 13, base: { x: 0, y: 0 } }), calibration, 60_000);
+  assert.equal(dip.accept, false);
+  assert.equal(dip.reason, "pending-results-lifecycle");
+
+  const recovered = evaluateMapTransition({ ...previous, mapGapMs: 0, pendingReset: dip.pendingReset },
+    gameMap({ rooms: 15, base: { x: 0, y: 0 } }), calibration, 60_600);
+  assert.equal(recovered.accept, false);
+  assert.equal(recovered.reset, false);
+  assert.equal(recovered.reason, "pending-results-lifecycle");
+});
+
+test("a loading gap restarts results-lifecycle timing on the actual new map", () => {
+  const previous = {
+    floorStart: 10_000,
+    lastBase: { x: 0, y: 0 },
+    lastRoomCount: 8,
+    lastFloorName: "Large",
+    mapGapMs: 2_500,
+    awaitingNewFloor: true,
+  };
+  const oldMap = evaluateMapTransition(previous,
+    gameMap({ rooms: 8, base: { x: 0, y: 0 } }), calibration, 60_000);
+  // app.js discards the old lifecycle candidate on any lost frame; even a short
+  // real gap can safely arm a fresh hold because the hold itself is not a reset.
+  const newMap = evaluateMapTransition({ ...previous, mapGapMs: 600, pendingReset: null },
+    gameMap({ rooms: 8, base: { x: 0, y: 0 } }), calibration, 65_000);
+  const progressed = evaluateMapTransition({ ...previous, mapGapMs: 0, pendingReset: newMap.pendingReset },
+    gameMap({ rooms: 10, base: { x: 0, y: 0 } }), calibration, 65_600);
+
+  assert.equal(progressed.reset, true);
+  assert.equal(progressed.resetAt, 65_000);
+  assert.equal(progressed.resetRoomCount, 8);
+});
+
+test("a detected floor-size change requires two frames and preserves first-frame timing", () => {
+  const first = evaluateMapTransition({
+    floorStart: 10_000,
+    lastBase: { x: 0, y: 0 },
+    lastRoomCount: 12,
+    lastFloorName: "Small",
+    pendingReset: null,
+  }, gameMap({ rooms: 14, base: { x: 0, y: 0 } }), calibration, 60_000);
+
+  assert.equal(first.accept, false);
+  assert.equal(first.reason, "pending-floor-change");
+
+  const confirmed = evaluateMapTransition({
+    floorStart: 10_000,
+    lastBase: { x: 0, y: 0 },
+    lastRoomCount: 12,
+    lastFloorName: "Small",
+    pendingReset: first.pendingReset,
+  }, gameMap({ rooms: 15, base: { x: 0, y: 0 } }), calibration, 60_600);
+
+  assert.equal(confirmed.accept, true);
+  assert.equal(confirmed.reset, true);
+  assert.equal(confirmed.resetAt, 60_000);
+  assert.equal(confirmed.resetRoomCount, 14);
+  assert.equal(confirmed.reason, "confirmed-floor-change");
+});
+
+test("a two-second map gap confirms a 15 to 8 same-base floor regression", () => {
+  const previous = {
+    floorStart: 10_000,
+    lastBase: { x: 2, y: 3 },
+    lastRoomCount: 15,
+    lastFloorName: "Large",
+    mapGapMs: 2_500,
+  };
+  const first = evaluateMapTransition(previous,
+    gameMap({ rooms: 8, base: { x: 2, y: 3 } }), calibration, 60_000);
+
+  assert.equal(first.accept, false);
+  assert.equal(first.reason, "pending-map-gap-regression");
+
+  // The caller may clear its live gap duration as soon as pixels return; the
+  // pending candidate must retain that first-frame gap evidence for frame two.
+  const confirmed = evaluateMapTransition({ ...previous, mapGapMs: 0, pendingReset: first.pendingReset },
+    gameMap({ rooms: 9, base: { x: 2, y: 3 } }), calibration, 60_600);
+
+  assert.equal(confirmed.accept, true);
+  assert.equal(confirmed.reset, true);
+  assert.equal(confirmed.resetAt, 60_000);
+  assert.equal(confirmed.resetRoomCount, 8);
+  assert.equal(confirmed.reason, "confirmed-map-gap-regression");
 });
 
 test("a jittering base cannot stall a collapsed-count floor change forever", () => {
@@ -232,6 +386,7 @@ test("a jittering base cannot stall a collapsed-count floor change forever", () 
   assert.equal(result.reset, true);
   assert.equal(result.reason, "confirmed-room-collapse");
   assert.equal(result.resetAt, 60_000);
+  assert.equal(result.resetRoomCount, 8);
 });
 
 test("a stale pending from before lost reads does not instantly confirm", () => {
@@ -310,6 +465,8 @@ test("confirmed new floors keep the first-seen pending time for rpm accuracy", (
   assert.equal(confirmed.accept, true);
   assert.equal(confirmed.reset, true);
   assert.equal(confirmed.resetAt, 60_000);
-  assert.equal(floorStartForDetectedMap(confirmed.resetAt), 58_000);
-  assert.equal(elapsedFloorSeconds(floorStartForDetectedMap(confirmed.resetAt), 62_000), 4);
+  assert.equal(confirmed.resetRoomCount, 1);
+  assert.equal(floorStartForDetectedMap(confirmed.resetAt, confirmed.resetRoomCount), 58_000);
+  assert.equal(elapsedFloorSeconds(
+    floorStartForDetectedMap(confirmed.resetAt, confirmed.resetRoomCount), 62_000), 4);
 });

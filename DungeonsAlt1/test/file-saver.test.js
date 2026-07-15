@@ -66,3 +66,16 @@ test("PNG saves do not use download anchors or synthetic clicks", () => {
   assert.doesNotMatch(app, /\.click\(\)/);
   assert.match(app, /writePngToSaveFolder/);
 });
+
+test("results PNG retries are bounded and folder actions guard handle races", () => {
+  const app = readFileSync(new URL("../app.js", import.meta.url), "utf8");
+  assert.match(app, /MAX_PENDING_RESULTS_PNGS = 20/);
+  assert.match(app, /pendingResultsPngs\.length >= MAX_PENDING_RESULTS_PNGS/);
+  assert.match(app, /if \(folder\.loading \|\| !folder\.handle\) return/);
+  assert.match(app, /if \(folder\.handle !== handle\)/);
+  assert.match(app, /capture\?\.mapReadAt === state\.lastMapReadAt/);
+  assert.match(app, /mapAgeMs <= RESULT_MAP_MAX_AGE_MS/);
+  assert.match(app, /lastConsumedAt: state\.lastResultMapConsumedAt/);
+  assert.match(app, /resultMapSnapshotIsFresh\(capture/);
+  assert.match(app, /capture\.mapSnapshotClaimed = claimed/);
+});

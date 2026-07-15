@@ -113,6 +113,7 @@ if (($mapCore -notmatch 'function isBossMarkerAt\(image, originX, originY\)') -o
 $html = Get-Content (Join-Path $appRoot 'index.html') -Raw
 $styles = Get-Content (Join-Path $appRoot 'styles.css') -Raw
 $app = Get-Content (Join-Path $appRoot 'app.js') -Raw
+$capture = Get-Content (Join-Path $appRoot 'src\alt1-capture.js') -Raw
 $overlay = Get-Content (Join-Path $appRoot 'src\alt1-overlay.js') -Raw
 $partyCore = Get-Content (Join-Path $appRoot 'src\party-core.js') -Raw
 $partyInterface = Get-Content (Join-Path $appRoot 'src\party-interface.js') -Raw
@@ -126,7 +127,7 @@ $mapLocator = Get-Content (Join-Path $appRoot 'src\alt1-map-locator.js') -Raw
 $rpmState = Get-Content (Join-Path $appRoot 'src\rpm-state.js') -Raw
 $partyAnchor = Get-Content (Join-Path $appRoot 'src\party-anchor.js') -Raw
 $nativeOverlaySource = $app + "`n" + $overlay
-$runtimeSource = $app + "`n" + $overlay + "`n" + $partyCore + "`n" + $partyInterface + "`n" + $teamSync + "`n" + $teamGates + "`n" + $partyMenu + "`n" + $resultsCore + "`n" + $fileSaver + "`n" + $winterface + "`n" + $mapLocator + "`n" + $rpmState + "`n" + $partyAnchor
+$runtimeSource = $app + "`n" + $capture + "`n" + $overlay + "`n" + $partyCore + "`n" + $partyInterface + "`n" + $teamSync + "`n" + $teamGates + "`n" + $partyMenu + "`n" + $resultsCore + "`n" + $fileSaver + "`n" + $winterface + "`n" + $mapLocator + "`n" + $rpmState + "`n" + $partyAnchor
 $domIds = @([regex]::Matches($app, 'querySelector\("#(?<id>[a-z0-9-]+)"\)') | ForEach-Object { $_.Groups['id'].Value })
 $missingDomIds = @($domIds | Where-Object { $html -notmatch ('id="' + [regex]::Escape($_) + '"') })
 if ($missingDomIds.Count -ne 0) {
@@ -289,12 +290,23 @@ if (($app -notmatch 'autoCaptureDungeonResults') -or
     ($resultsCore -notmatch 'nextAutoResultState') -or
     ($resultsCore -notmatch 'AUTO_RESULT_MISSES_BEFORE_HIDDEN') -or
     ($resultsCore -notmatch 'AUTO_RESULT_STABLE_SCANS') -or
+    ($resultsCore -notmatch 'AUTO_RESULT_STABLE_SCANS = 3') -or
+    ($resultsCore -notmatch '"Timestamp", "Time", "Roomcount", "DeadEnds"') -or
     ($resultsCore -notmatch 'stableScansRequired') -or
     ($app -notmatch 'missing:\s*next\.missing') -or
     ($app -notmatch 'stable:\s*next\.stable') -or
     ($resultsCore -notmatch 'resultStabilityKey') -or
     ($resultsCore -notmatch 'resultLooksComplete') -or
     ($app -notmatch 'resultLooksComplete') -or
+    ($app -notmatch 'readSettledDungeonResultsCapture') -or
+    ($app -notmatch 'pendingResultsPngs') -or
+    ($app -notmatch 'MAX_PENDING_RESULTS_PNGS = 20') -or
+    ($app -notmatch 'retryPendingResultsPngs') -or
+    ($app -notmatch 'RESULT_MAP_MAX_AGE_MS = 15000') -or
+    ($app -notmatch 'capture\?\.mapReadAt === state\.lastMapReadAt') -or
+    ($app -notmatch 'lastConsumedAt:\s*state\.lastResultMapConsumedAt') -or
+    ($resultsCore -notmatch 'function resultMapSnapshotIsFresh') -or
+    ($app -notmatch 'RESULTS_SCALE_FALLBACK_IDLE_INTERVAL = 30000') -or
     ($resultsCore -notmatch 'plannedResultExports')) {
     throw 'Automatic dungeon-results capture, dedupe, stability gate and folder-based PNG export are incomplete.'
 }
@@ -309,8 +321,22 @@ if (($resultsCore -notmatch 'RESULT_DISPLAY_COLUMNS') -or
 if (($winterface -notmatch 'readWithOffset') -or
     ($winterface -notmatch 'WINTERFACE_WIDTH = 512') -or
     ($winterface -notmatch 'WINTERFACE_HEIGHT = 334') -or
-    ($app -notmatch 'offset\.x, offset\.y, width, height')) {
+    ($winterface -notmatch 'fallbackInterfaceScales') -or
+    ($winterface -notmatch 'allowScaleFallback') -or
+    ($winterface -notmatch 'HINTED_MARKER_TRUST_SCORE') -or
+    ($winterface -notmatch 'defaultCropFits') -or
+    ($winterface -notmatch 'normalizeInterfaceRegion') -or
+    ($winterface -notmatch 'rawOffset') -or
+    ($winterface -notmatch 'rawWidth') -or
+    ($winterface -notmatch 'rawHeight') -or
+    ($resultsCore -notmatch 'function resultCaptureRect') -or
+    ($app -notmatch 'resultCaptureRect\(capture\)')) {
     throw 'Winterface reads must expose their offset so the cropped results PNG matches the detected interface.'
+}
+if (($capture -notmatch 'bindRegion\(x, y, width, height\)') -or
+    ($capture -notmatch 'bindGetRegion') -or
+    ($capture -notmatch 'transferRegionInRows')) {
+    throw 'Large results captures must bind one RuneScape frame before transferring image stripes.'
 }
 if (($winterface -notmatch 'function deriveFloorSize') -or
     ($winterface -notmatch '\+500') -or
@@ -319,10 +345,16 @@ if (($winterface -notmatch 'function deriveFloorSize') -or
     throw 'Floor size must come from detected map geometry, not the stale Dungeon Size XP modifier text.'
 }
 if (($rpmState -notmatch 'function evaluateMapTransition') -or
-    ($rpmState -notmatch 'pending-single-base') -or
+    ($rpmState -notmatch 'pending-\$\{candidateReason\}') -or
     ($rpmState -notmatch 'confirmed-base-change') -or
     ($rpmState -notmatch 'roomCountDropped') -or
     ($rpmState -notmatch 'confirmed-room-collapse') -or
+    ($rpmState -notmatch 'map-gap-regression') -or
+    ($rpmState -notmatch 'results-lifecycle') -or
+    ($rpmState -notmatch 'mapGapMs >= 2_000') -or
+    ($rpmState -notmatch 'lastFloorName') -or
+    ($rpmState -notmatch 'resetRoomCount') -or
+    ($rpmState -notmatch 'function trackedBaseAfterTransition') -or
     ($rpmState -notmatch 'firstSeenAt') -or
     ($rpmState -notmatch 'function floorPaceStatus') -or
     ($rpmState -notmatch 'function parseFloorTargetSeconds') -or
@@ -333,7 +365,11 @@ if (($rpmState -notmatch 'function evaluateMapTransition') -or
     ($rpmState -notmatch 'MAX_RESET_RPM = 8') -or
     ($rpmState -notmatch 'function rpmValue') -or
     ($app -notmatch 'evaluateMapTransition') -or
-    ($app -notmatch 'resetFloor\(transition\.resetAt \?\? now, gameMap\.openedRoomCount\)') -or
+    ($app -notmatch 'resetFloor\(transition\.resetAt \?\? now, transition\.resetRoomCount \?\? gameMap\.openedRoomCount\)') -or
+    ($app -notmatch 'trackedBaseAfterTransition') -or
+    ($app -notmatch 'awaitingNewFloor: state\.awaitingNewFloor') -or
+    ($app -notmatch 'state\.awaitingNewFloor = true') -or
+    ($app -notmatch 'same-floor-room-regression-held') -or
     ($app -notmatch 'transition\.accept') -or
     ($app -notmatch 'transition\.resetAt') -or
     ($app -notmatch 'Possible new floor detected') -or
@@ -341,24 +377,28 @@ if (($rpmState -notmatch 'function evaluateMapTransition') -or
     ($overlay -notmatch 'rpmValue')) {
     throw 'RPM state must be centralized and must gate suspicious floor resets before updating visible stats.'
 }
-if (($app -notmatch 'map-core\.js\?v=20260625-30') -or
-    ($app -notmatch 'alt1-map-locator\.js\?v=20260625-30') -or
-    ($app -notmatch 'rpm-state\.js\?v=20260625-30') -or
-    ($app -notmatch 'team-sync\.js\?v=20260625-30') -or
-    ($app -notmatch 'party-core\.js\?v=20260625-30') -or
-    ($app -notmatch 'results-core\.js\?v=20260625-30') -or
-    ($app -notmatch 'party-menu\.js\?v=20260625-30') -or
-    ($app -notmatch 'team-gates\.js\?v=20260625-30') -or
-    ($app -notmatch 'file-saver\.js\?v=20260625-30') -or
-    ($app -notmatch 'party-anchor\.js\?v=20260625-30') -or
-    ($app -notmatch 'winterface\.js\?v=20260625-30') -or
-    ($overlay -notmatch 'map-core\.js\?v=20260625-30') -or
-    ($overlay -notmatch 'rpm-state\.js\?v=20260625-30') -or
-    ($teamSync -notmatch 'party-core\.js\?v=20260625-30') -or
-    ($teamGates -notmatch 'party-core\.js\?v=20260625-30') -or
-    ($teamGates -notmatch 'alt1-overlay\.js\?v=20260625-30') -or
-    ($partyAnchor -notmatch 'party-interface\.js\?v=20260625-30') -or
-    ($mapLocator -notmatch 'map-core\.js\?v=20260625-30')) {
+if (($app -notmatch 'map-core\.js\?v=20260715-31') -or
+    ($app -notmatch 'alt1-map-locator\.js\?v=20260715-31') -or
+    ($app -notmatch 'alt1-capture\.js\?v=20260715-31') -or
+    ($app -notmatch 'alt1-overlay\.js\?v=20260715-31') -or
+    ($app -notmatch 'rpm-state\.js\?v=20260715-31') -or
+    ($app -notmatch 'team-sync\.js\?v=20260715-31') -or
+    ($app -notmatch 'party-core\.js\?v=20260715-31') -or
+    ($app -notmatch 'party-interface\.js\?v=20260715-31') -or
+    ($app -notmatch 'results-core\.js\?v=20260715-31') -or
+    ($app -notmatch 'party-menu\.js\?v=20260715-31') -or
+    ($app -notmatch 'team-gates\.js\?v=20260715-31') -or
+    ($app -notmatch 'file-saver\.js\?v=20260715-31') -or
+    ($app -notmatch 'party-anchor\.js\?v=20260715-31') -or
+    ($app -notmatch 'winterface\.js\?v=20260715-31') -or
+    ($overlay -notmatch 'map-core\.js\?v=20260715-31') -or
+    ($overlay -notmatch 'rpm-state\.js\?v=20260715-31') -or
+    ($teamSync -notmatch 'party-core\.js\?v=20260715-31') -or
+    ($teamGates -notmatch 'party-core\.js\?v=20260715-31') -or
+    ($teamGates -notmatch 'alt1-overlay\.js\?v=20260715-31') -or
+    ($partyAnchor -notmatch 'party-interface\.js\?v=20260715-31') -or
+    ($partyAnchor -notmatch 'chatbox-font-data\.js\?v=20260715-31') -or
+    ($mapLocator -notmatch 'map-core\.js\?v=20260715-31')) {
     throw 'Changed Alt1 runtime modules must be cache-busted for existing Alt1 installations.'
 }
 if (($app -notmatch 'buildVisibleRemoteGatestones') -or
