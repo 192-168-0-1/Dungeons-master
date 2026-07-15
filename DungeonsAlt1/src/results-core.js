@@ -65,14 +65,11 @@ export const RESULT_THEME_RANGES = Object.freeze({
   warped: [[48, 60]],
 });
 
-// A result's identity is the winterface (results screen) content only. Timestamp
-// changes on every read, and Roomcount/DeadEnds are taken from the live map,
-// which keeps updating (or is briefly lost) while the static results screen stays
-// open. Including those volatile fields gave the same screen different
-// fingerprints between auto-scans, which slipped past every dedupe layer and
-// added the floor to the table twice. The winterface OCR fields are deterministic
-// for a given screen, so they alone identify a completed floor.
-const RESULT_VOLATILE_COLUMNS = new Set(["Timestamp", "Roomcount", "DeadEnds"]);
+// A result's identity excludes values that change while the same results screen
+// remains visible. Timestamp changes on every read, Time keeps ticking, and
+// Roomcount/DeadEnds come from the live map. Including any of them lets one
+// physical completion screen acquire multiple fingerprints and be saved twice.
+const RESULT_VOLATILE_COLUMNS = new Set(["Timestamp", "Time", "Roomcount", "DeadEnds"]);
 const RESULT_ID_COLUMNS = RESULT_COLUMNS.filter((column) => !RESULT_VOLATILE_COLUMNS.has(column));
 export const AUTO_RESULT_MISSES_BEFORE_HIDDEN = 2;
 // The Dungeoneering results screen animates its XP counters up after it opens
@@ -81,23 +78,15 @@ export const AUTO_RESULT_MISSES_BEFORE_HIDDEN = 2;
 // the winterface OCR to read identically across this many consecutive scans
 // before committing, so every value is final regardless of whether the player
 // waited out the animation or skipped it.
-export const AUTO_RESULT_STABLE_SCANS = 2;
+export const AUTO_RESULT_STABLE_SCANS = 3;
 
 export function resultFingerprint(result) {
   if (!result || typeof result !== "object") return "";
   return RESULT_ID_COLUMNS.map((column) => String(result[column] ?? "").trim()).join("\u001f");
 }
 
-// The stability gate compares consecutive reads; the fingerprint above is the
-// table dedupe identity. They differ only in the Time column: keep it out of the
-// stability comparison because the on-screen timer ticks every second, so
-// including it makes two consecutive scans never match and stalls the gate.
-const RESULT_TICKING_COLUMNS = new Set(["Time"]);
-const RESULT_STABILITY_COLUMNS = RESULT_ID_COLUMNS.filter((column) => !RESULT_TICKING_COLUMNS.has(column));
-
 export function resultStabilityKey(result) {
-  if (!result || typeof result !== "object") return "";
-  return RESULT_STABILITY_COLUMNS.map((column) => String(result[column] ?? "").trim()).join("\u001f");
+  return resultFingerprint(result);
 }
 
 // The pre-skip completion screen matches the winterface marker with every field
@@ -177,6 +166,40 @@ export function plannedResultExports({ autoSaveMap = false, autoSaveResults = fa
   if (autoSaveMap && hasMap) exports.push("map");
   if (autoSaveResults && hasResultsOffset) exports.push("results");
   return exports;
+}
+
+export function resultCaptureRect(capture) {
+  const offset = capture?.rawOffset ?? capture?.sourceOffset ?? capture?.offset;
+  const width = Number(capture?.rawWidth ?? capture?.sourceWidth ?? capture?.width);
+  const height = Number(capture?.rawHeight ?? capture?.sourceHeight ?? capture?.height);
+  const x = Number(offset?.x);
+  const y = Number(offset?.y);
+  if (![x, y, width, height].every(Number.isFinite) || x < 0 || y < 0 || width <= 0 || height <= 0) return null;
+  return {
+    offset: { x: Math.round(x), y: Math.round(y) },
+    width: Math.round(width),
+    height: Math.round(height),
+  };
+}
+
+export function resultMapSnapshotIsFresh(capture, {
+  currentMapReadAt = 0,
+  currentFloorName = "",
+  lastConsumedAt = 0,
+  hasMap = false,
+  maxAgeMs = 15_000,
+} = {}) {
+  const capturedAt = capture?.date instanceof Date ? capture.date.getTime() : Number.NaN;
+  const mapReadAt = Number(capture?.mapReadAt || 0);
+  const mapAgeMs = capturedAt - mapReadAt;
+  return Boolean(hasMap)
+    && mapReadAt > Number(lastConsumedAt || 0)
+    && mapReadAt === Number(currentMapReadAt || 0)
+    && capture?.mapFloorName === currentFloorName
+    && capture?.mapFloorName === capture?.result?.FloorSize
+    && Number.isFinite(mapAgeMs)
+    && mapAgeMs >= 0
+    && mapAgeMs <= Math.max(0, Number(maxAgeMs) || 0);
 }
 
 export function parseResultTimeSeconds(value) {

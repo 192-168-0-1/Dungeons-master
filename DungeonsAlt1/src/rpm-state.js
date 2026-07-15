@@ -84,6 +84,25 @@ function samePoint(left, right) {
   return Boolean(left && right && left.x === right.x && left.y === right.y);
 }
 
+// The base marker is allowed to disappear temporarily within one floor (player
+// arrows and scaling can cover its probe), but a confirmed reset starts a new
+// identity. In that case carrying the previous floor's base forward would make
+// the new base look like a second floor change when it becomes readable later.
+export function trackedBaseAfterTransition(previousBase, currentBase, didReset = false) {
+  if (didReset) return currentBase ?? null;
+  return currentBase ?? previousBase ?? null;
+}
+
+function confirmedReason(candidateReason) {
+  switch (candidateReason) {
+    case "base-change": return "confirmed-base-change";
+    case "floor-change": return "confirmed-floor-change";
+    case "map-gap-regression": return "confirmed-map-gap-regression";
+    case "single-base":
+    default: return "confirmed-single-base";
+  }
+}
+
 function resetCandidateKey(gameMap, calibration) {
   if (!calibration) return "";
   // A base-less read still gets a stable key. In the first seconds of a new
@@ -107,10 +126,12 @@ export function evaluateMapTransition(previous = {}, gameMap, calibration, now =
       reset: false,
       pendingReset: previous.pendingReset ?? null,
       resetAt: null,
+      resetRoomCount: null,
       reason: "missing-map",
     };
   }
 
+  const openedRoomCount = Math.max(0, Number(gameMap.openedRoomCount) || 0);
   const floorStart = Number(previous.floorStart) || 0;
   if (!floorStart) {
     return {
@@ -118,13 +139,16 @@ export function evaluateMapTransition(previous = {}, gameMap, calibration, now =
       reset: true,
       pendingReset: null,
       resetAt: timestamp,
+      resetRoomCount: openedRoomCount,
       reason: "first-map",
     };
   }
 
   const lastRoomCount = Math.max(0, Number(previous.lastRoomCount) || 0);
-  const openedRoomCount = Math.max(0, Number(gameMap.openedRoomCount) || 0);
   const baseChanged = Boolean(previous.lastBase && gameMap.base && !samePoint(previous.lastBase, gameMap.base));
+  const lastFloorName = String(previous.lastFloorName ?? "");
+  const detectedFloorName = String(calibration?.floor?.name ?? "");
+  const floorChanged = Boolean(lastFloorName && detectedFloorName && lastFloorName !== detectedFloorName);
   const singleBaseAfterProgress = lastRoomCount > 1 && openedRoomCount === 1 && Boolean(gameMap.base);
   // A new floor is entered with just the base room. On a slow/jittery scanner
   // the exact 1-room frame is often missed and the first clean read already
@@ -139,12 +163,39 @@ export function evaluateMapTransition(previous = {}, gameMap, calibration, now =
   const roomCountDropped = lastRoomCount > 1 && openedRoomCount > 0
     && openedRoomCount < lastRoomCount
     && (lastRoomCount - openedRoomCount) >= Math.max(2, Math.ceil(lastRoomCount / 2));
-  const key = resetCandidateKey(gameMap, calibration);
   const pending = previous.pendingReset ?? null;
+  const mapGapMs = Math.max(0, Number(previous.mapGapMs) || 0);
+  // After a real capture gap, a smaller-but-not-quite-half room count is still
+  // strong floor-change evidence. Requiring a >=2 room loss, <=75% of the old
+  // count and the normal two-frame confirmation keeps a brief read miss from
+  // resetting an active floor.
+  const gapRoomRegression = (mapGapMs >= 2_000 || pending?.reason === "map-gap-regression")
+    && lastRoomCount - openedRoomCount >= 2
+    && openedRoomCount > 0
+    && openedRoomCount <= lastRoomCount * 0.75;
+  const candidateReason = floorChanged
+    ? "floor-change"
+    : gapRoomRegression
+      ? "map-gap-regression"
+      : baseChanged
+        ? "base-change"
+        : "single-base";
+  const key = resetCandidateKey(gameMap, calibration);
   const samePending = Boolean(key && pending?.key === key);
-  const pendingRoomCount = Math.max(0, Number(pending?.openedRoomCount) || 0);
+  const hasPendingRoomCount = pending?.openedRoomCount !== null
+    && pending?.openedRoomCount !== undefined
+    && Number.isFinite(Number(pending.openedRoomCount));
+  const pendingRoomCount = hasPendingRoomCount
+    ? Math.max(0, Number(pending.openedRoomCount))
+    : openedRoomCount;
   const pendingSeenAt = Number(pending?.seenAt);
-  const resetAt = Number.isFinite(pendingSeenAt) && pendingSeenAt > 0 ? pendingSeenAt : timestamp;
+  const hasPendingSeenAt = Number.isFinite(pendingSeenAt) && pendingSeenAt > 0;
+  const hasPendingFrame = hasPendingSeenAt && hasPendingRoomCount;
+  const resetAt = hasPendingFrame ? pendingSeenAt : timestamp;
+  // Keep the room count paired with the frame that supplied resetAt. Combining
+  // the first-seen time with a later confirmation frame's larger room count
+  // backdates the timer far too much when floorStartForDetectedMap caps RPM.
+  const resetRoomCount = hasPendingFrame ? pendingRoomCount : openedRoomCount;
   const confirmationWindowMs = 10_000;
   const recentEnough = !Number.isFinite(Number(pending?.seenAt))
     || timestamp - Number(pending.seenAt) <= confirmationWindowMs;
@@ -153,7 +204,62 @@ export function evaluateMapTransition(previous = {}, gameMap, calibration, now =
   // a partial room-count misread (e.g. 12 -> 5 -> 7) that fired roomCountDropped
   // on the glitch frame would be confirmed by a recovery frame that is not a
   // reset candidate at all, spuriously resetting the timer mid-floor.
-  const isResetCandidate = baseChanged || singleBaseAfterProgress || roomCountDropped;
+  const isResetCandidate = floorChanged || gapRoomRegression
+    || baseChanged || singleBaseAfterProgress || roomCountDropped;
+
+  // A results screen plus a real map gap proves that a new floor is expected,
+  // but the first pixels after the gap can still be the old completed map. Hold
+  // an otherwise-identical map instead of accepting or immediately resetting
+  // it. A genuine same-identity new floor confirms once its room count advances
+  // at least two beyond both the first candidate frame and the old floor; a
+  // one/two-room classifier dip recovering to the old count cannot satisfy it.
+  const lifecyclePending = pending?.reason === "results-lifecycle";
+  // Unlike the generic gap-regression heuristic, this lifecycle candidate is
+  // not a reset by itself, so even one genuinely lost frame can arm it safely.
+  const lifecycleArmed = Boolean(previous.awaitingNewFloor) && mapGapMs > 0;
+  if (!isResetCandidate && (lifecyclePending || lifecycleArmed)) {
+    const lifecycleLastSeenAt = Number(pending?.seenAt);
+    const lifecycleContinuous = lifecyclePending && Number.isFinite(lifecycleLastSeenAt)
+      && timestamp - lifecycleLastSeenAt <= 2_000;
+    const firstSeenAt = lifecycleContinuous && Number(pending?.firstSeenAt) > 0
+      ? Number(pending.firstSeenAt)
+      : timestamp;
+    const hasLifecycleFirstCount = pending?.firstOpenedRoomCount !== null
+      && pending?.firstOpenedRoomCount !== undefined
+      && Number.isFinite(Number(pending.firstOpenedRoomCount));
+    const firstRoomCount = lifecycleContinuous && hasLifecycleFirstCount
+      ? Math.max(0, Number(pending.firstOpenedRoomCount))
+      : openedRoomCount;
+    const lifecycleProgressed = lifecycleContinuous && samePending
+      && openedRoomCount >= firstRoomCount + 2
+      && openedRoomCount > lastRoomCount;
+    if (lifecycleProgressed) {
+      return {
+        accept: true,
+        reset: true,
+        pendingReset: null,
+        resetAt: firstSeenAt,
+        resetRoomCount: firstRoomCount,
+        reason: "confirmed-results-lifecycle",
+      };
+    }
+    return {
+      accept: false,
+      reset: false,
+      resetAt: null,
+      resetRoomCount: null,
+      pendingReset: {
+        key,
+        openedRoomCount: firstRoomCount,
+        base: gameMap.base ? { x: gameMap.base.x, y: gameMap.base.y } : null,
+        seenAt: timestamp,
+        firstSeenAt,
+        firstOpenedRoomCount: firstRoomCount,
+        reason: "results-lifecycle",
+      },
+      reason: "pending-results-lifecycle",
+    };
+  }
 
   if (samePending && pending?.reason === "single-base" && recentEnough && plausibleSingleBase && isResetCandidate) {
     return {
@@ -161,29 +267,33 @@ export function evaluateMapTransition(previous = {}, gameMap, calibration, now =
       reset: true,
       pendingReset: null,
       resetAt,
+      resetRoomCount,
       reason: "confirmed-single-base",
     };
   }
 
-  if (!baseChanged && !singleBaseAfterProgress && !roomCountDropped) {
+  if (!isResetCandidate) {
     return {
       accept: true,
       reset: false,
       pendingReset: null,
       resetAt: null,
+      resetRoomCount: null,
       reason: "same-floor",
     };
   }
 
   const plausibleResetCandidate = !singleBaseAfterProgress || plausibleSingleBase;
 
-  if (samePending && recentEnough && plausibleResetCandidate && isResetCandidate) {
+  if (samePending && pending?.reason === candidateReason
+    && recentEnough && plausibleResetCandidate && isResetCandidate) {
     return {
       accept: true,
       reset: true,
       pendingReset: null,
       resetAt,
-      reason: baseChanged ? "confirmed-base-change" : "confirmed-single-base",
+      resetRoomCount,
+      reason: confirmedReason(pending?.reason ?? candidateReason),
     };
   }
 
@@ -196,15 +306,27 @@ export function evaluateMapTransition(previous = {}, gameMap, calibration, now =
   // oscillation without a count collapse never reaches this path.
   const collapseStreakMs = 2_500;
   const streakLastSeen = Number(pending?.seenAt);
-  const streakAlive = Number.isFinite(streakLastSeen) && timestamp - streakLastSeen <= 2_000;
+  const streakAlive = pending?.reason === candidateReason
+    && Number.isFinite(streakLastSeen) && timestamp - streakLastSeen <= 2_000;
   const streakStart = Number(pending?.firstSeenAt);
+  const pendingFirstRoomCount = Number(pending?.firstOpenedRoomCount);
+  const hasFirstPendingFrame = Number.isFinite(streakStart) && streakStart > 0
+    && pending?.firstOpenedRoomCount !== null
+    && pending?.firstOpenedRoomCount !== undefined
+    && Number.isFinite(pendingFirstRoomCount);
+  const firstOpenedRoomCount = streakAlive && streakStart > 0
+    ? (hasFirstPendingFrame
+      ? Math.max(0, pendingFirstRoomCount)
+      : pendingRoomCount)
+    : openedRoomCount;
   if (roomCountDropped && streakAlive && Number.isFinite(streakStart) && streakStart > 0
     && timestamp - streakStart >= collapseStreakMs) {
     return {
       accept: true,
       reset: true,
       pendingReset: null,
-      resetAt: streakStart,
+      resetAt: hasFirstPendingFrame ? streakStart : resetAt,
+      resetRoomCount: hasFirstPendingFrame ? firstOpenedRoomCount : resetRoomCount,
       reason: "confirmed-room-collapse",
     };
   }
@@ -213,6 +335,7 @@ export function evaluateMapTransition(previous = {}, gameMap, calibration, now =
     accept: false,
     reset: false,
     resetAt: null,
+    resetRoomCount: null,
     pendingReset: {
       key,
       openedRoomCount,
@@ -221,8 +344,9 @@ export function evaluateMapTransition(previous = {}, gameMap, calibration, now =
       // The streak start survives key changes so the valve above can measure a
       // continuous pending; a gap (lost reads) starts a fresh streak.
       firstSeenAt: streakAlive && streakStart > 0 ? streakStart : timestamp,
-      reason: baseChanged ? "base-change" : "single-base",
+      firstOpenedRoomCount,
+      reason: candidateReason,
     },
-    reason: baseChanged ? "pending-base-change" : "pending-single-base",
+    reason: `pending-${candidateReason}`,
   };
 }

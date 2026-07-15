@@ -21,6 +21,16 @@ function decodeImageString(encoded, target, targetWidth, offsetX, offsetY, width
   }
 }
 
+function transferRegionInRows(readRegion, target, targetWidth, x, y, width, height, maxTransfer) {
+  const rowsPerTransfer = Math.max(1, Math.floor(maxTransfer / 4 / width));
+  for (let offsetY = 0; offsetY < height; offsetY += rowsPerTransfer) {
+    const stripeHeight = Math.min(rowsPerTransfer, height - offsetY);
+    const encoded = readRegion(x, y + offsetY, width, stripeHeight);
+    if (!encoded) throw new Error("Alt1 could not read the RuneScape image.");
+    decodeImageString(encoded, target, targetWidth, 0, offsetY, width, stripeHeight);
+  }
+}
+
 export function captureRegion(x, y, width, height) {
   if (!hasAlt1()) throw new Error("Alt1 is not available.");
   const api = window.alt1;
@@ -37,13 +47,48 @@ export function captureRegion(x, y, width, height) {
 
   const data = new Uint8ClampedArray(width * height * 4);
   const maxTransfer = Math.max(65536, Math.min(Number(api.maxtransfer) || 4_000_000, 4_000_000));
-  const rowsPerTransfer = Math.max(1, Math.floor(maxTransfer / 4 / width));
-  for (let offsetY = 0; offsetY < height; offsetY += rowsPerTransfer) {
-    const stripeHeight = Math.min(rowsPerTransfer, height - offsetY);
-    const encoded = api.getRegion(x, y + offsetY, width, stripeHeight);
-    if (!encoded) throw new Error("Alt1 could not read the RuneScape image.");
-    decodeImageString(encoded, data, width, 0, offsetY, width, stripeHeight);
+
+  // A large getRegion request has to be transferred in stripes. Bind the whole
+  // source rectangle first so every stripe comes from one held RuneScape frame;
+  // otherwise an animating interface can be stitched together from multiple
+  // moments. Older Alt1 builds without the bind API keep the legacy getRegion
+  // path below so pixel capture continues to work, albeit without that guarantee.
+  if (width * height * 4 > maxTransfer
+    && typeof api.bindRegion === "function"
+    && typeof api.bindGetRegion === "function") {
+    try {
+      const bind = api.bindRegion(x, y, width, height);
+      if (Number(bind) > 0) {
+        transferRegionInRows(
+          (stripeX, stripeY, stripeWidth, stripeHeight) =>
+            api.bindGetRegion(bind, stripeX, stripeY, stripeWidth, stripeHeight),
+          data,
+          width,
+          x,
+          y,
+          width,
+          height,
+          maxTransfer,
+        );
+        return new ImageData(data, width, height);
+      }
+    } catch {
+      // Fall through to the compatible live getRegion path and refill all rows.
+    }
   }
+
+  if (typeof api.getRegion !== "function") throw new Error("Alt1 could not read the RuneScape image.");
+  transferRegionInRows(
+    (stripeX, stripeY, stripeWidth, stripeHeight) =>
+      api.getRegion(stripeX, stripeY, stripeWidth, stripeHeight),
+    data,
+    width,
+    x,
+    y,
+    width,
+    height,
+    maxTransfer,
+  );
   return new ImageData(data, width, height);
 }
 
