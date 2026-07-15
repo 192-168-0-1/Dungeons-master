@@ -341,24 +341,24 @@ if (($rpmState -notmatch 'function evaluateMapTransition') -or
     ($overlay -notmatch 'rpmValue')) {
     throw 'RPM state must be centralized and must gate suspicious floor resets before updating visible stats.'
 }
-if (($app -notmatch 'map-core\.js\?v=20260625-29') -or
-    ($app -notmatch 'alt1-map-locator\.js\?v=20260625-29') -or
-    ($app -notmatch 'rpm-state\.js\?v=20260625-29') -or
-    ($app -notmatch 'team-sync\.js\?v=20260625-29') -or
-    ($app -notmatch 'party-core\.js\?v=20260625-29') -or
-    ($app -notmatch 'results-core\.js\?v=20260625-29') -or
-    ($app -notmatch 'party-menu\.js\?v=20260625-29') -or
-    ($app -notmatch 'team-gates\.js\?v=20260625-29') -or
-    ($app -notmatch 'file-saver\.js\?v=20260625-29') -or
-    ($app -notmatch 'party-anchor\.js\?v=20260625-29') -or
-    ($app -notmatch 'winterface\.js\?v=20260625-29') -or
-    ($overlay -notmatch 'map-core\.js\?v=20260625-29') -or
-    ($overlay -notmatch 'rpm-state\.js\?v=20260625-29') -or
-    ($teamSync -notmatch 'party-core\.js\?v=20260625-29') -or
-    ($teamGates -notmatch 'party-core\.js\?v=20260625-29') -or
-    ($teamGates -notmatch 'alt1-overlay\.js\?v=20260625-29') -or
-    ($partyAnchor -notmatch 'party-interface\.js\?v=20260625-29') -or
-    ($mapLocator -notmatch 'map-core\.js\?v=20260625-29')) {
+if (($app -notmatch 'map-core\.js\?v=20260625-30') -or
+    ($app -notmatch 'alt1-map-locator\.js\?v=20260625-30') -or
+    ($app -notmatch 'rpm-state\.js\?v=20260625-30') -or
+    ($app -notmatch 'team-sync\.js\?v=20260625-30') -or
+    ($app -notmatch 'party-core\.js\?v=20260625-30') -or
+    ($app -notmatch 'results-core\.js\?v=20260625-30') -or
+    ($app -notmatch 'party-menu\.js\?v=20260625-30') -or
+    ($app -notmatch 'team-gates\.js\?v=20260625-30') -or
+    ($app -notmatch 'file-saver\.js\?v=20260625-30') -or
+    ($app -notmatch 'party-anchor\.js\?v=20260625-30') -or
+    ($app -notmatch 'winterface\.js\?v=20260625-30') -or
+    ($overlay -notmatch 'map-core\.js\?v=20260625-30') -or
+    ($overlay -notmatch 'rpm-state\.js\?v=20260625-30') -or
+    ($teamSync -notmatch 'party-core\.js\?v=20260625-30') -or
+    ($teamGates -notmatch 'party-core\.js\?v=20260625-30') -or
+    ($teamGates -notmatch 'alt1-overlay\.js\?v=20260625-30') -or
+    ($partyAnchor -notmatch 'party-interface\.js\?v=20260625-30') -or
+    ($mapLocator -notmatch 'map-core\.js\?v=20260625-30')) {
     throw 'Changed Alt1 runtime modules must be cache-busted for existing Alt1 installations.'
 }
 if (($app -notmatch 'buildVisibleRemoteGatestones') -or
@@ -441,6 +441,11 @@ if (($app -notmatch 'findMapByAlt1Anchor') -or
     ($mapLocator -notmatch 'bindFindSubImg') -or
     ($mapLocator -notmatch 'readableRooms')) {
     throw 'Scale-aware anchor-first Alt1 map location with readable-room validation is missing.'
+}
+if (($mapLocator -notmatch 'allowEmpty') -or
+    ($mapCore -notmatch 'tolerant') -or
+    ($app -notmatch 'rooms unreadable')) {
+    throw 'Scaled-client map locking (allowEmpty), tolerant room classification and the framed-but-unreadable hold are missing.'
 }
 if (($mapLocator -notmatch 'readableRooms === 1 && !gameMap\.base') -or
     ($rpmState -notmatch 'singleBaseAfterProgress') -or

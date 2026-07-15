@@ -249,6 +249,25 @@ test("boss palette evidence finds a skull away from the old fixed probes", () =>
   assert.equal(detectGatestones(target, gameMap)[2], undefined);
 });
 
+test("readGameMap tolerant=false is bit-identical to the default on the canonical fixture", () => {
+  const floor = FLOOR_SIZES.find((candidate) => candidate.name === "Small");
+  const target = image(floor.imageWidth, floor.imageHeight);
+  const signatureForType = (type) => [...SIGNATURES.entries()].find(([, value]) => value === type)[0];
+  const baseOrigin = mapToImage({ x: 0, y: 0 }, floor);
+  paintSignature(target, baseOrigin, signatureForType(RoomType.E));
+  setPixel(target, baseOrigin.x + 19, baseOrigin.y + 18, [150, 145, 105, 255]);
+  paintSignature(target, mapToImage({ x: 1, y: 0 }, floor), signatureForType(RoomType.N));
+  paintSignature(target, mapToImage({ x: 2, y: 0 }, floor), signatureForType(RoomType.E | RoomType.S));
+
+  const defaultRead = readGameMap(target, floor);
+  const flaggedRead = readGameMap(target, floor, { tolerant: false });
+  // Present-but-false flag must not perturb any classification output.
+  assert.deepEqual(flaggedRead.roomTypes, defaultRead.roomTypes);
+  assert.equal(flaggedRead.openedRoomCount, defaultRead.openedRoomCount);
+  assert.equal(flaggedRead.mysteryCount, defaultRead.mysteryCount);
+  assert.deepEqual(flaggedRead.base, defaultRead.base);
+});
+
 test("group-gatestone palette pixels are not detected as personal G1", () => {
   const floor = FLOOR_SIZES.find((candidate) => candidate.name === "Small");
   const target = image(floor.imageWidth, floor.imageHeight);

@@ -8,21 +8,21 @@ import {
   isOpened,
   mapToImage,
   toChess,
-} from "./src/map-core.js?v=20260625-29";
+} from "./src/map-core.js?v=20260625-30";
 import {
   MAP_SCALE_CANDIDATES,
   findMapByAlt1Anchor,
   findMapByScaledCorners,
   readMapAtCalibration,
   scaledFloorDimensions,
-} from "./src/alt1-map-locator.js?v=20260625-29";
+} from "./src/alt1-map-locator.js?v=20260625-30";
 import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js";
 import {
   buildMapOverlayCommands,
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260625-29";
+} from "./src/alt1-overlay.js?v=20260625-30";
 import {
   DEFAULT_FLOOR_TARGET_SECONDS,
   elapsedFloorMinutes,
@@ -33,8 +33,8 @@ import {
   formatElapsedClock,
   parseFloorTargetSeconds,
   rpmValue,
-} from "./src/rpm-state.js?v=20260625-29";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-29";
+} from "./src/rpm-state.js?v=20260625-30";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260625-30";
 import {
   PARTY_COLORS,
   automaticPartyRoomStatus,
@@ -43,9 +43,9 @@ import {
   partyColor,
   reconcileObservedParty,
   roomStatusLine,
-} from "./src/party-core.js?v=20260625-29";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-29";
-import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-29";
+} from "./src/party-core.js?v=20260625-30";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260625-30";
+import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260625-30";
 import {
   RESULT_COLUMNS,
   RESULT_DISPLAY_COLUMNS,
@@ -62,7 +62,7 @@ import {
   normalizeResultBatchTarget,
   safeFilePart,
   safeTimestampForFilename,
-} from "./src/results-core.js?v=20260625-29";
+} from "./src/results-core.js?v=20260625-30";
 import {
   chooseSaveFolder,
   clearStoredSaveFolder,
@@ -71,10 +71,10 @@ import {
   requestSaveFolderPermission,
   supportsFolderSaving,
   writeDataUrlToFolder,
-} from "./src/file-saver.js?v=20260625-29";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-29";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-29";
-import { WinterfaceReader } from "./src/winterface.js?v=20260625-29";
+} from "./src/file-saver.js?v=20260625-30";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260625-30";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260625-30";
+import { WinterfaceReader } from "./src/winterface.js?v=20260625-30";
 
 const SCAN_INTERVAL = 600;
 const AUTO_CALIBRATION_INTERVAL = 2500;
@@ -357,8 +357,15 @@ function sameCalibration(left, right) {
 }
 
 function findMapInRuneScapeClient() {
-  const anchored = findMapByAlt1Anchor(window.alt1, captureRegion);
-  if (anchored) return anchored;
+  // The Alt1 anchor is an exact-pixel 100%-scale template; on a scaled client
+  // (interface scaling != 100%) it can never match, so once a calibration has
+  // established a non-1 scale, go straight to the C#-style corner scan
+  // (RuneScapeMapScaling.FindMap), which is scale-aware by construction.
+  const calibratedScale = Number(state.calibration?.scale) || 1;
+  if (calibratedScale === 1) {
+    const anchored = findMapByAlt1Anchor(window.alt1, captureRegion);
+    if (anchored) return anchored;
+  }
   const fullClient = captureFullRuneScape();
   return findMapByScaledCorners(fullClient, captureRegion, { scales: MAP_SCALE_CANDIDATES });
 }
@@ -439,6 +446,21 @@ async function updateMap() {
       state.invalidCaptures += 1;
       setStatus(`Map image lost (${state.invalidCaptures}/${INVALID_CAPTURES_BEFORE_RECALIBRATION})`, "warn");
       shouldRecalibrate = state.invalidCaptures >= INVALID_CAPTURES_BEFORE_RECALIBRATION;
+      return;
+    }
+
+    // A framed-but-unreadable read (0 rooms) only happens at non-100% interface
+    // scaling, where blended pixels defeat even tolerant classification on this
+    // frame. The map IS still located, so do not escalate toward recalibration
+    // (reset invalidCaptures). We deliberately keep the last good state instead
+    // of feeding a 0-room gameMap into evaluateMapTransition/state: an empty
+    // frame looks like a fresh floor and would corrupt the rpm reset logic. This
+    // trades C#'s show-degraded-data for holding the last good read.
+    const readableRooms = read.gameMap.openedRoomCount + read.gameMap.mysteryCount;
+    if (readableRooms < 1) {
+      state.invalidCaptures = 0;
+      setStatus("Map framed but rooms unreadable (interface scaling?) — keeping the last good read", "warn");
+      updateStats();
       return;
     }
 

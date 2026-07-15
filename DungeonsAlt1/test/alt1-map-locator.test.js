@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   FLOOR_SIZES,
+  ROOM_SIZE,
   RoomType,
   SIGNATURES,
   findMapByCorners,
@@ -70,6 +71,75 @@ function scaleImageNearest(source, scale) {
     }
   }
   return target;
+}
+
+// Center-aligned bilinear 1.5x upscaler. A blended render shifts every sampled
+// channel a few counts, which is exactly what defeats the exact 4-pixel room
+// signature lookup on a non-100% RuneScape interface scale (the C#-proven bug).
+function scaleImageBilinear(source, scale) {
+  const width = Math.round(source.width * scale);
+  const height = Math.round(source.height * scale);
+  const target = image(width, height);
+  for (let y = 0; y < height; y += 1) {
+    const sourceY = Math.min(source.height - 1, Math.max(0, (y + 0.5) / scale - 0.5));
+    const y0 = Math.floor(sourceY);
+    const y1 = Math.min(source.height - 1, y0 + 1);
+    const wy = sourceY - y0;
+    for (let x = 0; x < width; x += 1) {
+      const sourceX = Math.min(source.width - 1, Math.max(0, (x + 0.5) / scale - 0.5));
+      const x0 = Math.floor(sourceX);
+      const x1 = Math.min(source.width - 1, x0 + 1);
+      const wx = sourceX - x0;
+      const to = (y * width + x) * 4;
+      for (let c = 0; c < 4; c += 1) {
+        const p00 = source.data[(y0 * source.width + x0) * 4 + c];
+        const p10 = source.data[(y0 * source.width + x1) * 4 + c];
+        const p01 = source.data[(y1 * source.width + x0) * 4 + c];
+        const p11 = source.data[(y1 * source.width + x1) * 4 + c];
+        const top = p00 + (p10 - p00) * wx;
+        const bottom = p01 + (p11 - p01) * wx;
+        target.data[to + c] = Math.round(top + (bottom - top) * wy);
+      }
+    }
+  }
+  return target;
+}
+
+// A high-frequency room texture: tile the room's 2x2 signature block across the
+// whole 32x32 cell. Nearest-neighbour 1.5x round-trips this byte-exact, while a
+// bilinear 1.5x render blurs it enough to defeat the exact signature lookup.
+function paintTiledRoom(target, floor, point, type) {
+  const [signature] = [...SIGNATURES.entries()].find(([, value]) => value === type);
+  const colors = signature.split(";").map((color) => [...color.split(",").map(Number), 255]);
+  const origin = mapToImage(point, floor);
+  for (let y = 0; y < ROOM_SIZE; y += 1) {
+    for (let x = 0; x < ROOM_SIZE; x += 1) {
+      // Sample order is [(6,7),(7,7),(6,8),(7,8)] -> odd row uses cols 0/1,
+      // even row uses cols 2/3, so the exact sample pixels get their true colors.
+      const index = (y & 1) === 1 ? ((x & 1) === 0 ? 0 : 1) : ((x & 1) === 0 ? 2 : 3);
+      setPixel(target, origin.x + x, origin.y + y, colors[index]);
+    }
+  }
+}
+
+const TILED_FIXTURE_ROOMS = [
+  { point: { x: 0, y: 0 }, type: RoomType.E, base: true },
+  { point: { x: 1, y: 0 }, type: RoomType.N },
+  { point: { x: 2, y: 0 }, type: RoomType.E | RoomType.S },
+  { point: { x: 0, y: 1 }, type: RoomType.N | RoomType.S },
+];
+
+function buildTiledFixture(floor) {
+  const canonical = image(floor.imageWidth, floor.imageHeight);
+  paintValidMapCorners(canonical);
+  for (const room of TILED_FIXTURE_ROOMS) {
+    paintTiledRoom(canonical, floor, room.point, room.type);
+    if (room.base) {
+      const origin = mapToImage(room.point, floor);
+      setPixel(canonical, origin.x + 19, origin.y + 18, [150, 145, 105, 255]);
+    }
+  }
+  return canonical;
 }
 
 test("mapCandidateFromAnchor converts the top-right anchor to client-relative map coordinates", () => {
@@ -400,4 +470,66 @@ test("findMapByAlt1Anchor safely falls back when the Alt1 bind API is missing or
     bindRegion: () => "rs-bind",
     bindFindSubImg: () => "not json",
   }, () => image(1, 1)), null);
+});
+
+test("nearest-neighbour 1.5x tiled fixture reads every room exactly (regression pins the NN path)", () => {
+  const floor = FLOOR_SIZES.find((candidate) => candidate.name === "Small");
+  const canonical = buildTiledFixture(floor);
+  const normalized = normalizeMapCapture(scaleImageNearest(canonical, 1.5), floor, 1.5);
+  // Default options (no allowEmpty/tolerant): the NN round-trip is byte-exact so
+  // the exact signature lookup still reads all four rooms.
+  const scored = scoreMapCandidate(normalized, floor);
+  assert.ok(scored);
+  assert.equal(scored.gameMap.openedRoomCount, 4);
+  assert.deepEqual(scored.gameMap.base, { x: 0, y: 0 });
+  assert.equal(scored.gameMap.typeAt(0, 0), RoomType.E | RoomType.Base);
+  assert.equal(scored.gameMap.typeAt(1, 0), RoomType.N);
+  assert.equal(scored.gameMap.typeAt(2, 0), RoomType.E | RoomType.S);
+  assert.equal(scored.gameMap.typeAt(0, 1), RoomType.N | RoomType.S);
+});
+
+test("bilinear 1.5x tiled fixture defeats the exact signature lookup with default options", () => {
+  const floor = FLOOR_SIZES.find((candidate) => candidate.name === "Small");
+  const canonical = buildTiledFixture(floor);
+  const bilinear = normalizeMapCapture(scaleImageBilinear(canonical, 1.5), floor, 1.5);
+  // Pins the old failure: blended rooms miss the exact 4-pixel lookup, so only a
+  // lone uniform-colour room survives and the default one-room-non-base guard
+  // rejects the whole capture (null) — calibration could never lock.
+  assert.equal(scoreMapCandidate(bilinear, floor), null);
+});
+
+test("bilinear 1.5x tiled fixture is kept locked via allowEmpty with rooms unreadable", () => {
+  const floor = FLOOR_SIZES.find((candidate) => candidate.name === "Small");
+  const canonical = buildTiledFixture(floor);
+  const bilinear = normalizeMapCapture(scaleImageBilinear(canonical, 1.5), floor, 1.5);
+  const scored = scoreMapCandidate(bilinear, floor, { allowEmpty: true });
+  assert.ok(scored);
+  assert.equal(scored.validFrame, true);
+  // Exact reading recovers far fewer than the four true rooms; allowEmpty keeps
+  // the frame-valid scaled map locked anyway (C# MapForm.UpdateMap parity).
+  assert.ok(scored.readableRooms < 4);
+});
+
+test("bilinear 1.5x tiled fixture classifies to true door layouts with allowEmpty + tolerant", () => {
+  const floor = FLOOR_SIZES.find((candidate) => candidate.name === "Small");
+  const canonical = buildTiledFixture(floor);
+  const bilinear = normalizeMapCapture(scaleImageBilinear(canonical, 1.5), floor, 1.5);
+  const scored = scoreMapCandidate(bilinear, floor, { allowEmpty: true, tolerant: true });
+  assert.ok(scored);
+  assert.equal(scored.gameMap.openedRoomCount, 4);
+  assert.deepEqual(scored.gameMap.base, { x: 0, y: 0 });
+  assert.equal(scored.gameMap.typeAt(1, 0), RoomType.N);
+  assert.equal(scored.gameMap.typeAt(2, 0), RoomType.E | RoomType.S);
+  assert.equal(scored.gameMap.typeAt(0, 1), RoomType.N | RoomType.S);
+  // A never-painted background cell must not be hallucinated into a room.
+  assert.equal(scored.gameMap.typeAt(3, 3), RoomType.Gap);
+});
+
+test("scoreMapCandidate at 100% still rejects an unreadable framed capture with default options", () => {
+  const floor = FLOOR_SIZES.find((candidate) => candidate.name === "Small");
+  const target = image(floor.imageWidth, floor.imageHeight);
+  paintValidMapCorners(target); // valid frame + top-right marker, but zero rooms
+  // Bit-identical 100% behavior: allowEmpty defaults off, so an empty frame at
+  // scale 1 is still rejected.
+  assert.equal(scoreMapCandidate(target, floor), null);
 });

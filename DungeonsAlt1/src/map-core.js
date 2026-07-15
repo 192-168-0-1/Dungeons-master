@@ -213,10 +213,66 @@ export function imageToMap(point, floor) {
   return x >= 0 && x < floor.width && y >= 0 && y < floor.height ? { x, y } : null;
 }
 
+const SIGNATURE_SAMPLE_OFFSETS = [[6, 7], [7, 7], [6, 8], [7, 8]];
+
 function signatureAt(image, originX, originY) {
-  return [[6, 7], [7, 7], [6, 8], [7, 8]]
+  return SIGNATURE_SAMPLE_OFFSETS
     .map(([x, y]) => getPixel(image, originX + x, originY + y).slice(0, 3).join(","))
     .join(";");
+}
+
+// Tolerant room classification, only ever consulted on an exact SIGNATURES miss
+// at non-100% interface scaling (see readRoom). A bilinear/blended 1.5x render
+// shifts every sampled channel a few counts, so the exact 4-pixel lookup misses
+// while the true door layout is still the nearest signature. The 34 signature
+// strings are parsed once into numeric arrays (lazy module-level cache).
+const TOLERANT_MAX_CHANNEL_DELTA = 16;
+let tolerantSignatureCache = null;
+
+function tolerantSignatures() {
+  if (!tolerantSignatureCache) {
+    tolerantSignatureCache = SIGNATURE_ROWS.map(([name, signature]) => ({
+      type: typeFromResourceName(name),
+      pixels: signature.split(";").map((color) => color.split(",").map(Number)),
+    }));
+  }
+  return tolerantSignatureCache;
+}
+
+function classifyTolerantRoom(image, originX, originY) {
+  const sampled = SIGNATURE_SAMPLE_OFFSETS.map(([x, y]) => getPixel(image, originX + x, originY + y));
+  let bestType = null;
+  let bestDistance = Infinity;
+  let runnerUpDistance = Infinity;
+  for (const signature of tolerantSignatures()) {
+    let maxChannelDelta = 0;
+    let distance = 0;
+    for (let i = 0; i < 4; i += 1) {
+      for (let c = 0; c < 3; c += 1) {
+        const delta = sampled[i][c] - signature.pixels[i][c];
+        const absDelta = delta < 0 ? -delta : delta;
+        if (absDelta > maxChannelDelta) maxChannelDelta = absDelta;
+        distance += delta * delta;
+      }
+    }
+    // A candidate only qualifies when every sampled channel is within the max
+    // per-channel delta of the signature; among qualifiers keep the smallest
+    // sum-of-squared distance and remember the runner-up.
+    if (maxChannelDelta > TOLERANT_MAX_CHANNEL_DELTA) continue;
+    if (distance < bestDistance) {
+      runnerUpDistance = bestDistance;
+      bestDistance = distance;
+      bestType = signature.type;
+    } else if (distance < runnerUpDistance) {
+      runnerUpDistance = distance;
+    }
+  }
+  if (bestType === null) return RoomType.Gap;
+  // Require the winner to be at least twice as close as any runner-up (a lone
+  // qualifier passes). The runner-up margin prevents a blended pixel from being
+  // misfiled into a neighbouring door layout.
+  if (runnerUpDistance !== Infinity && bestDistance * 2 > runnerUpDistance) return RoomType.Gap;
+  return bestType;
 }
 
 // Shape probes sampled from Common/Resources/BossOverlay.png. The live boss
@@ -282,11 +338,21 @@ function isBossMarkerAt(image, originX, originY) {
   return false;
 }
 
-export function readRoom(image, originX, originY) {
-  let type = SIGNATURES.get(signatureAt(image, originX, originY)) ?? RoomType.Gap;
+export function readRoom(image, originX, originY, { tolerant = false } = {}) {
+  const exact = SIGNATURES.get(signatureAt(image, originX, originY));
+  let type = exact ?? RoomType.Gap;
+  // Only consulted on an exact miss at non-100% interface scaling; the runner-up
+  // margin inside classifyTolerantRoom prevents a blended pixel from being
+  // misfiled into a neighbouring door layout.
+  if (tolerant && exact === undefined) type = classifyTolerantRoom(image, originX, originY);
   const base = getPixel(image, originX + 19, originY + 18);
   const boss = getPixel(image, originX + 8, originY + 11);
-  if (base[0] === 150 && base[1] === 145 && base[2] === 105) type |= RoomType.Base;
+  // The base room's centre pixel is exact at 100%; at scale it blends, so allow
+  // a ±24 per-channel window only in tolerant mode (exact equality otherwise).
+  const baseMatch = tolerant
+    ? Math.abs(base[0] - 150) <= 24 && Math.abs(base[1] - 145) <= 24 && Math.abs(base[2] - 105) <= 24
+    : base[0] === 150 && base[1] === 145 && base[2] === 105;
+  if (baseMatch) type |= RoomType.Base;
   else if ((boss[0] === 63 && boss[1] === 20 && boss[2] === 13)
     || isBossMarkerAt(image, originX, originY)) type |= RoomType.Boss;
   return type;
@@ -311,7 +377,7 @@ const DIRECTIONS = [
   { bit: RoomType.N, dx: 0, dy: 1 },
 ];
 
-export function readGameMap(image, floor) {
+export function readGameMap(image, floor, { tolerant = false } = {}) {
   const roomTypes = new Array(floor.width * floor.height).fill(RoomType.Gap);
   let openedRoomCount = 0;
   let mysteryCount = 0;
@@ -323,7 +389,7 @@ export function readGameMap(image, floor) {
   for (let y = 0; y < floor.height; y += 1) {
     for (let x = 0; x < floor.width; x += 1) {
       const origin = mapToImage({ x, y }, floor);
-      const type = readRoom(image, origin.x, origin.y);
+      const type = readRoom(image, origin.x, origin.y, { tolerant });
       roomTypes[y * floor.width + x] = type;
       if (isOpened(type)) {
         openedRoomCount += 1;

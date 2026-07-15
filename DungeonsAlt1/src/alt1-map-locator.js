@@ -4,7 +4,7 @@ import {
   isValidInGameMapFrame,
   isValidMap,
   readGameMap,
-} from "./map-core.js?v=20260625-29";
+} from "./map-core.js?v=20260625-30";
 
 // Anchor-based map location adapted from Sleepy-meh-alt-1/dg-map with
 // permission relayed by this project's maintainer. The anchor is the fixed
@@ -103,15 +103,21 @@ export function mapCandidateFromScaledAnchor(anchor, floor, scale = 1) {
   };
 }
 
-export function scoreMapCandidate(image, floor) {
+export function scoreMapCandidate(image, floor, { allowEmpty = false, tolerant = false } = {}) {
   if (!image || !floor || image.width !== floor.imageWidth || image.height !== floor.imageHeight) return null;
   const validFrame = isValidInGameMapFrame(image);
   if (!validFrame) return null;
-  const gameMap = readGameMap(image, floor);
+  const gameMap = readGameMap(image, floor, { tolerant: Boolean(tolerant) });
   const readableRooms = gameMap.openedRoomCount + gameMap.mysteryCount;
   const validCorners = isValidMap(image);
-  if (readableRooms < 1) return null;
-  if (readableRooms === 1 && !gameMap.base) return null;
+  // C# parity — MapForm.UpdateMap keeps a frame-valid scaled map locked even
+  // when the room raster is unreadable. allowEmpty skips the two readability
+  // rejections; default false keeps every existing caller/test bit-identical
+  // (the score formula still ranks empty candidates lowest via readableRooms).
+  if (!allowEmpty) {
+    if (readableRooms < 1) return null;
+    if (readableRooms === 1 && !gameMap.base) return null;
+  }
   return {
     gameMap,
     readableRooms,
@@ -143,7 +149,13 @@ export function findMapByScaledCorners(fullClient, captureRegion, {
       continue;
     }
     const normalized = normalizeMapCapture(image, candidate.floor, candidate.scale);
-    const scored = scoreMapCandidate(normalized, candidate.floor);
+    // At a non-100% scale, keep a frame-valid map even when its rooms are
+    // unreadable and let tolerant classification recover the door layouts. The
+    // requireMarker gate below still stops scenery false-locks.
+    const scored = scoreMapCandidate(normalized, candidate.floor, {
+      allowEmpty: candidate.scale !== 1,
+      tolerant: candidate.scale !== 1,
+    });
     if (!scored) continue;
     // Calibration must see the rare top-right map marker, not just three brown
     // corners. This is what stops scenery (banners, flags) from being locked
@@ -190,7 +202,12 @@ export function readMapAtCalibration(captureRegion, calibration, { floors = FLOO
     } catch {
       continue;
     }
-    const scored = scoreMapCandidate(image, floor);
+    // Once calibrated at a non-100% scale, keep the map locked even on a
+    // temporarily unreadable frame and read rooms tolerantly (C# parity).
+    const scored = scoreMapCandidate(image, floor, {
+      allowEmpty: dimensions.scale !== 1,
+      tolerant: dimensions.scale !== 1,
+    });
     if (!scored) continue;
     // A tiny bias toward the floor we are already locked onto keeps a still
     // valid read from flip-flopping to another size on a near tie. It is far
