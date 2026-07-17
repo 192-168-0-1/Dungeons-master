@@ -45,3 +45,16 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## Alt1 folder-write compatibility
+
+Alt1 1.6 uses a Chromium 108/CefSharp host that exposes the directory picker but
+does not provide Chromium's File System Access permission context for external
+writes. The app therefore stores pending PNGs in IndexedDB and offers a single
+ZIP download instead of repeatedly asking for a folder selection that cannot
+succeed in that host.
+
+Implementation references:
+- https://chromium.googlesource.com/chromium/src/+/e673bd0ea624e2a1a2e78517bb616956f2a378c7/content/browser/file_system_access/file_system_access_manager_impl.cc
+- https://cefsharp.github.io/api/110.0.x/html/M_CefSharp_IPermissionHandler_OnShowPermissionPrompt.htm
+- https://www.w3.org/TR/IndexedDB/#value-construct

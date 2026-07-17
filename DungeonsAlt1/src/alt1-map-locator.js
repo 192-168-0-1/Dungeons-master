@@ -6,7 +6,7 @@ import {
   isValidInGameMapFrame,
   isValidMap,
   readGameMap,
-} from "./map-core.js?v=20260717-36";
+} from "./map-core.js?v=20260718-37";
 
 function hasExtendedSideBorders(image, shorterHeight) {
   if (!image || image.height <= shorterHeight) return false;

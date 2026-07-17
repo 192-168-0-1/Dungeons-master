@@ -8,7 +8,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>Dungeons Alt1</title>
-  <link rel="stylesheet" href="./styles.css?v=20260717-36">
+  <link rel="stylesheet" href="./styles.css?v=20260718-37">
 </head>
 <body>
   <header class="titlebar">
@@ -126,6 +126,11 @@
             <button id="reallow-results-save-folder" type="button" hidden>Re-allow folder</button>
             <small id="results-save-folder-status">Choose a results folder before results PNG auto-save</small>
           </div>
+          <div class="save-folder-tools capture-archive-tools">
+            <button id="download-capture-archive" type="button" disabled>Download stored captures (.zip)</button>
+            <button id="clear-capture-archive" type="button" disabled>Clear stored captures</button>
+            <small id="capture-archive-status">Loading the internal capture archive...</small>
+          </div>
         </div>
         <div class="table-scroll">
           <table>
@@ -202,7 +207,7 @@
     (function bootstrapDungeons() {
       "use strict";
 
-      var fallbackVersion = "20260717-36";
+      var fallbackVersion = "20260718-37";
       var appStarted = false;
       var environment = document.getElementById("environment");
       var status = document.getElementById("status");

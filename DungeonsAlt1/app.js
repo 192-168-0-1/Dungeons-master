@@ -8,16 +8,16 @@ import {
   isOpened,
   mapToImage,
   toChess,
-} from "./src/map-core.js?v=20260717-36";
+} from "./src/map-core.js?v=20260718-37";
 import {
   MAP_SCALE_CANDIDATES,
   findMapByAlt1Anchor,
   findMapByScaledCorners,
   readMapAtCalibration,
   scaledFloorDimensions,
-} from "./src/alt1-map-locator.js?v=20260717-36";
-import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js?v=20260717-36";
-import { normalizeCaptureInterval, reserveCaptureSlot } from "./src/capture-scheduler.js?v=20260717-36";
+} from "./src/alt1-map-locator.js?v=20260718-37";
+import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js?v=20260718-37";
+import { normalizeCaptureInterval, reserveCaptureSlot } from "./src/capture-scheduler.js?v=20260718-37";
 import {
   createInterfaceScaleState,
   currentInterfaceScale,
@@ -25,13 +25,13 @@ import {
   isFreshInterfaceScaleObservation,
   parseSavedInterfaceScale,
   observeInterfaceScale,
-} from "./src/interface-scale.js?v=20260717-36";
+} from "./src/interface-scale.js?v=20260718-37";
 import {
   buildMapOverlayCommands,
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260717-36";
+} from "./src/alt1-overlay.js?v=20260718-37";
 import {
   DEFAULT_FLOOR_TARGET_SECONDS,
   elapsedFloorMinutes,
@@ -43,8 +43,8 @@ import {
   parseFloorTargetSeconds,
   rpmValue,
   trackedBaseAfterTransition,
-} from "./src/rpm-state.js?v=20260717-36";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260717-36";
+} from "./src/rpm-state.js?v=20260718-37";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260718-37";
 import {
   PARTY_COLORS,
   automaticPartyRoomStatus,
@@ -53,9 +53,9 @@ import {
   partyColor,
   reconcileObservedParty,
   roomStatusLine,
-} from "./src/party-core.js?v=20260717-36";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260717-36";
-import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260717-36";
+} from "./src/party-core.js?v=20260718-37";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260718-37";
+import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260718-37";
 import {
   RESULT_COLUMNS,
   RESULT_DISPLAY_COLUMNS,
@@ -78,25 +78,35 @@ import {
   normalizeStoredResults,
   safeFilePart,
   safeTimestampForFilename,
-} from "./src/results-core.js?v=20260717-36";
+} from "./src/results-core.js?v=20260718-37";
 import {
   chooseSaveFolder,
   clearStoredSaveFolder,
   isSaveFolderPermissionError,
+  knownAlt1FolderWritesUnsupported,
   loadStoredSaveFolder,
   querySaveFolderPermission,
   requestSaveFolderPermission,
   supportsFolderSaving,
   writeDataUrlToFolder,
-} from "./src/file-saver.js?v=20260717-36";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260717-36";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260717-36";
-import { WinterfaceReader } from "./src/winterface.js?v=20260717-36";
+} from "./src/file-saver.js?v=20260718-37";
+import {
+  MAX_CAPTURE_ARCHIVE_ITEMS,
+  buildCaptureZip,
+  deleteCaptureArchiveRecords,
+  loadCaptureArchive,
+  requestPersistentCaptureStorage,
+  triggerBlobDownload,
+  upsertCaptureArchive,
+} from "./src/capture-archive.js?v=20260718-37";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260718-37";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260718-37";
+import { WinterfaceReader } from "./src/winterface.js?v=20260718-37";
 import {
   RESULTS_SENTINEL_CADENCE_MS,
   createResultsSentinelPlan,
   resultsSentinelsMatch,
-} from "./src/results-sentinel.js?v=20260717-36";
+} from "./src/results-sentinel.js?v=20260718-37";
 
 const SCAN_INTERVAL = 600;
 const AUTO_CALIBRATION_INTERVAL = 2500;
@@ -117,7 +127,6 @@ const RESULTS_SETTLE_INTERVAL = 300;
 const RESULTS_MANUAL_MAX_SCANS = 30;
 const RESULTS_SCALE_FALLBACK_ACTIVE_INTERVAL = 3000;
 const RESULTS_SCALE_FALLBACK_IDLE_INTERVAL = 30000;
-const MAX_PENDING_RESULTS_PNGS = 20;
 const MAX_PERSISTED_RESULTS = 500;
 const RECENT_RESULT_SCREEN_MAX_AGE = 10 * 60 * 1000;
 
@@ -167,6 +176,9 @@ const elements = {
   clearResultsSaveFolder: document.querySelector("#clear-results-save-folder"),
   reallowResultsSaveFolder: document.querySelector("#reallow-results-save-folder"),
   resultsSaveFolderStatus: document.querySelector("#results-save-folder-status"),
+  downloadCaptureArchive: document.querySelector("#download-capture-archive"),
+  clearCaptureArchive: document.querySelector("#clear-capture-archive"),
+  captureArchiveStatus: document.querySelector("#capture-archive-status"),
   selection: document.querySelector("#selection"),
   annotation: document.querySelector("#annotation"),
   applyAnnotation: document.querySelector("#apply-annotation"),
@@ -249,6 +261,8 @@ const state = {
   lastResultsScaleFallback: 0,
   pendingResultsPngs: [],
   pendingMapPngs: [],
+  inFlightResultsPngs: [],
+  inFlightMapPngs: [],
   droppedResultsPngs: 0,
   droppedMapPngs: 0,
   retryingResultsPngs: false,
@@ -257,20 +271,41 @@ const state = {
   retryMapPngsNotify: false,
   retryResultsPngsRequested: false,
   retryResultsPngsNotify: false,
+  captureArchive: {
+    loaded: false,
+    readSucceeded: false,
+    supported: Boolean(window.indexedDB),
+    persistent: null,
+    exportBusy: false,
+    clearBusy: false,
+    lastExportCount: 0,
+    lastExportKeys: new Set(),
+    lastExportHadErrors: false,
+    persistChain: Promise.resolve(),
+    restorePromise: Promise.resolve(),
+  },
   pendingFloorReset: null,
   saveFolders: {
     supported: false,
+    hostWriteUnsupported: false,
+    lastHostFailure: null,
     map: {
       handle: null,
       name: "",
       permission: "unknown",
       loading: true,
+      source: "none",
+      writeVerified: false,
+      lastFailure: null,
     },
     results: {
       handle: null,
       name: "",
       permission: "unknown",
       loading: true,
+      source: "none",
+      writeVerified: false,
+      lastFailure: null,
     },
   },
   observedParty: [],
@@ -1335,6 +1370,370 @@ function canvasPoint(event) {
   };
 }
 
+function captureArchiveKind(record) {
+  if (record?.kind === "map" || record?.kind === "results") return record.kind;
+  return String(record?.filename || "").startsWith("dungeon-map-") ? "map" : "results";
+}
+
+let captureArchiveSequence = 0;
+
+function createCaptureArchiveId(kind) {
+  captureArchiveSequence = (captureArchiveSequence + 1) % Number.MAX_SAFE_INTEGER;
+  const random = typeof window.crypto?.randomUUID === "function"
+    ? window.crypto.randomUUID()
+    : `${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+  return `${kind}-${Date.now().toString(36)}-${captureArchiveSequence.toString(36)}-${random}`;
+}
+
+function captureArchiveRecordKey(record) {
+  if (record?.id) return String(record.id);
+  return `${captureArchiveKind(record)}\n${String(record?.filename || "")}\n${Math.max(0, Number(record?.createdAt) || 0)}`;
+}
+
+function pendingCaptureArchiveRecords() {
+  const records = new Map();
+  for (const [kind, pending, inFlight] of [
+    ["map", state.pendingMapPngs, state.inFlightMapPngs],
+    ["results", state.pendingResultsPngs, state.inFlightResultsPngs],
+  ]) {
+    for (const item of [...inFlight, ...pending]) {
+      if (!item?.filename || !item?.dataUrl) continue;
+      records.set(item.id || `${kind}\n${item.filename}`, {
+        id: item.id,
+        kind,
+        filename: item.filename,
+        dataUrl: item.dataUrl,
+        createdAt: Math.max(0, Number(item.createdAt) || Date.now()),
+        persisted: item.persisted === true,
+      });
+    }
+  }
+  return [...records.values()].sort((left, right) => left.createdAt - right.createdAt
+    || left.filename.localeCompare(right.filename));
+}
+
+function ensureCaptureArchiveControls() {
+  if (elements.downloadCaptureArchive && elements.clearCaptureArchive && elements.captureArchiveStatus) return;
+  const resultsTools = elements.resultsSaveFolderStatus?.parentElement;
+  const container = resultsTools?.parentElement;
+  if (!container) return;
+  let tools = container.querySelector?.(".capture-archive-tools");
+  if (!tools) {
+    tools = document.createElement("div");
+    tools.className = "save-folder-tools capture-archive-tools";
+    const next = resultsTools.nextSibling;
+    if (next) container.insertBefore(tools, next);
+    else container.appendChild(tools);
+  }
+  const ensureButton = (id, label) => {
+    let button = tools.querySelector?.(`#${id}`);
+    if (button) return button;
+    button = document.createElement("button");
+    button.id = id;
+    button.type = "button";
+    button.disabled = true;
+    button.textContent = label;
+    tools.appendChild(button);
+    return button;
+  };
+  elements.downloadCaptureArchive = ensureButton("download-capture-archive", "Download stored captures (.zip)");
+  elements.clearCaptureArchive = ensureButton("clear-capture-archive", "Clear stored captures");
+  if (!elements.captureArchiveStatus) {
+    const status = document.createElement("small");
+    status.id = "capture-archive-status";
+    status.textContent = "Loading the internal capture archive...";
+    tools.appendChild(status);
+    elements.captureArchiveStatus = status;
+  }
+}
+
+function updateCaptureArchiveStatus() {
+  if (!elements.captureArchiveStatus) return;
+  const records = pendingCaptureArchiveRecords();
+  const mapCount = records.filter((record) => record.kind === "map").length;
+  const resultsCount = records.length - mapCount;
+  const total = mapCount + resultsCount;
+  const busy = state.captureArchive.exportBusy || state.captureArchive.clearBusy;
+  if (elements.downloadCaptureArchive) elements.downloadCaptureArchive.disabled = busy || total === 0;
+  if (elements.clearCaptureArchive) {
+    elements.clearCaptureArchive.disabled = busy || state.retryingMapPngs || state.retryingResultsPngs || total === 0;
+  }
+  if (state.captureArchive.exportBusy) {
+    elements.captureArchiveStatus.textContent = `Building ZIP for ${total} stored capture${total === 1 ? "" : "s"}...`;
+    return;
+  }
+  if (state.captureArchive.clearBusy) {
+    elements.captureArchiveStatus.textContent = "Updating the stored capture archive...";
+    return;
+  }
+  if (!total) {
+    elements.captureArchiveStatus.textContent = state.captureArchive.loaded
+      ? "No captures stored in the app"
+      : "Loading the internal capture archive...";
+    return;
+  }
+  const parts = [];
+  if (mapCount) parts.push(`${mapCount} map PNG${mapCount === 1 ? "" : "s"}`);
+  if (resultsCount) parts.push(`${resultsCount} results PNG${resultsCount === 1 ? "" : "s"}`);
+  const durability = state.captureArchive.supported
+    ? (state.captureArchive.persistent === true ? "stored persistently in Alt1" : "stored in Alt1 app data")
+    : "kept for this Alt1 session";
+  const exported = state.captureArchive.lastExportCount
+    ? ` · last ZIP contained ${state.captureArchive.lastExportCount}`
+    : "";
+  elements.captureArchiveStatus.textContent = `${parts.join(" + ")} ${durability}${exported}`;
+}
+
+function persistPendingCaptureArchive() {
+  // Startup restoration owns the first database read. Do not let a capture that
+  // arrives during that read replace the old archive with only the new item;
+  // restorePendingCaptureArchive merges both sides and persists that snapshot.
+  if (!state.captureArchive.loaded || !state.captureArchive.readSucceeded
+    || state.captureArchive.clearBusy) {
+    updateCaptureArchiveStatus();
+    return state.captureArchive.persistChain;
+  }
+  const snapshot = pendingCaptureArchiveRecords().filter((record) => record.id && !record.persisted);
+  if (!snapshot.length) return state.captureArchive.persistChain;
+  const snapshotIds = new Set(snapshot.map((record) => record.id));
+  state.captureArchive.persistChain = state.captureArchive.persistChain
+    .catch(() => false)
+    .then(async () => {
+      const stored = await upsertCaptureArchive(snapshot, window);
+      state.captureArchive.supported = stored !== false;
+      if (stored) {
+        for (const records of [
+          state.pendingMapPngs,
+          state.pendingResultsPngs,
+          state.inFlightMapPngs,
+          state.inFlightResultsPngs,
+        ]) {
+          for (const record of records) {
+            if (snapshotIds.has(record.id)) record.persisted = true;
+          }
+        }
+      }
+      return stored;
+    })
+    .catch(() => {
+      state.captureArchive.supported = false;
+      return false;
+    })
+    .finally(updateCaptureArchiveStatus);
+  return state.captureArchive.persistChain;
+}
+
+function deletePersistedCaptureRecords(records) {
+  const ids = [...new Set((Array.isArray(records) ? records : [])
+    .map((record) => record?.id)
+    .filter(Boolean))];
+  if (!ids.length || !state.captureArchive.readSucceeded) return Promise.resolve(true);
+  state.captureArchive.persistChain = state.captureArchive.persistChain
+    .catch(() => false)
+    .then(async () => {
+      const deleted = await deleteCaptureArchiveRecords(ids, window);
+      state.captureArchive.supported = deleted !== false;
+      return deleted;
+    })
+    .catch(() => {
+      state.captureArchive.supported = false;
+      return false;
+    })
+    .finally(updateCaptureArchiveStatus);
+  return state.captureArchive.persistChain;
+}
+
+function mergeRestoredCaptureRecords(current, restored, kind) {
+  const merged = new Map();
+  const add = (item, persisted) => {
+    if (!item?.filename || !item?.dataUrl || captureArchiveKind(item) !== kind) return;
+    const id = item.id || createCaptureArchiveId(kind);
+    const previous = merged.get(id);
+    merged.set(id, {
+      id,
+      kind,
+      filename: item.filename,
+      dataUrl: item.dataUrl,
+      createdAt: Math.max(0, Number(item.createdAt) || Number(previous?.createdAt) || Date.now()),
+      persisted,
+    });
+  };
+  for (const item of restored) add(item, true);
+  for (const item of current) add(item, item.persisted === true);
+  return [...merged.values()].sort((left, right) => left.createdAt - right.createdAt);
+}
+
+function enforceCaptureArchiveItemLimit() {
+  const combined = [
+    ...state.pendingMapPngs.map((record) => ({ kind: "map", record })),
+    ...state.pendingResultsPngs.map((record) => ({ kind: "results", record })),
+  ].sort((left, right) => left.record.createdAt - right.record.createdAt
+    || String(left.record.id).localeCompare(String(right.record.id)));
+  const overflow = Math.max(0, combined.length - MAX_CAPTURE_ARCHIVE_ITEMS);
+  if (!overflow) return Promise.resolve(true);
+  const dropped = combined.slice(0, overflow);
+  const droppedIds = new Set(dropped.map(({ record }) => record.id));
+  state.pendingMapPngs = state.pendingMapPngs.filter((record) => !droppedIds.has(record.id));
+  state.pendingResultsPngs = state.pendingResultsPngs.filter((record) => !droppedIds.has(record.id));
+  state.droppedMapPngs += dropped.filter(({ kind }) => kind === "map").length;
+  state.droppedResultsPngs += dropped.filter(({ kind }) => kind === "results").length;
+  return deletePersistedCaptureRecords(dropped.map(({ record }) => record));
+}
+
+async function restorePendingCaptureArchive() {
+  state.captureArchive.readSucceeded = false;
+  try {
+    const [records, persistent] = await Promise.all([
+      loadCaptureArchive(window),
+      requestPersistentCaptureStorage(window),
+    ]);
+    if (!Array.isArray(records)) throw new Error("Capture archive could not be read safely");
+    state.captureArchive.readSucceeded = true;
+    state.captureArchive.supported = Boolean(window.indexedDB)
+      && typeof window.indexedDB.open === "function";
+    state.captureArchive.persistent = persistent;
+    state.pendingMapPngs = mergeRestoredCaptureRecords(state.pendingMapPngs, records, "map");
+    state.pendingResultsPngs = mergeRestoredCaptureRecords(state.pendingResultsPngs, records, "results");
+    await enforceCaptureArchiveItemLimit();
+  } catch {
+    state.captureArchive.supported = false;
+  } finally {
+    state.captureArchive.loaded = true;
+    updateAllSaveFolderStatuses();
+    updateCaptureArchiveStatus();
+  }
+  if (state.captureArchive.readSucceeded) await persistPendingCaptureArchive();
+  if (!state.saveFolders.hostWriteUnsupported) {
+    if (state.pendingMapPngs.length && ["granted", "unknown"].includes(saveFolderState("map").permission)) {
+      await retryPendingMapPngs({ quiet: true });
+    }
+    if (state.pendingResultsPngs.length && ["granted", "unknown"].includes(saveFolderState("results").permission)) {
+      await retryPendingResultsPngs({ quiet: true });
+    }
+  }
+}
+
+async function downloadPendingCaptureArchive() {
+  const records = pendingCaptureArchiveRecords();
+  if (!records.length || state.captureArchive.exportBusy) return;
+  state.captureArchive.exportBusy = true;
+  updateCaptureArchiveStatus();
+  try {
+    const zip = await buildCaptureZip(records);
+    const filename = `dungeons-captures-${safeTimestampForFilename(new Date())}.zip`;
+    if (!triggerBlobDownload(zip, filename, window)) {
+      throw new Error("Alt1 could not open the ZIP Save As dialog");
+    }
+    const exportedCount = Math.max(0, Number(zip.captureCount) || 0);
+    const skippedCount = Math.max(0, Number(zip.skippedCaptureCount) || 0);
+    state.captureArchive.lastExportCount = exportedCount;
+    state.captureArchive.lastExportHadErrors = skippedCount > 0 || exportedCount !== records.length;
+    state.captureArchive.lastExportKeys = state.captureArchive.lastExportHadErrors
+      ? new Set()
+      : new Set(records.map(captureArchiveRecordKey));
+    setStatus(state.captureArchive.lastExportHadErrors
+      ? `ZIP contains ${exportedCount} valid capture${exportedCount === 1 ? "" : "s"}; ${skippedCount} damaged capture${skippedCount === 1 ? " was" : "s were"} kept in the app`
+      : `ZIP download opened for ${exportedCount} stored capture${exportedCount === 1 ? "" : "s"}; clear them only after verifying the ZIP`,
+    state.captureArchive.lastExportHadErrors ? "warn" : "ok");
+  } catch (error) {
+    setStatus(`Could not build capture ZIP: ${error.message || error}`, "error");
+  } finally {
+    state.captureArchive.exportBusy = false;
+    updateCaptureArchiveStatus();
+  }
+}
+
+async function clearPendingCaptureArchive() {
+  if (state.captureArchive.exportBusy || state.captureArchive.clearBusy
+    || state.retryingMapPngs || state.retryingResultsPngs) return;
+  const records = pendingCaptureArchiveRecords();
+  const total = records.length;
+  if (!total) return;
+  const exportedKeys = state.captureArchive.lastExportKeys;
+  const hasCompleteExport = exportedKeys.size > 0 && !state.captureArchive.lastExportHadErrors;
+  const clearCount = hasCompleteExport
+    ? records.filter((record) => exportedKeys.has(captureArchiveRecordKey(record))).length
+    : total;
+  const retainedCount = total - clearCount;
+  if (!clearCount) {
+    setStatus("Nothing from the last ZIP remains to clear; newer captures were kept", "warn");
+    return;
+  }
+  const question = hasCompleteExport
+    ? `Clear ${clearCount} capture${clearCount === 1 ? "" : "s"} included in the last ZIP?${retainedCount ? ` ${retainedCount} newer capture${retainedCount === 1 ? " will" : "s will"} be kept.` : ""}`
+    : `Clear ${clearCount} stored capture${clearCount === 1 ? "" : "s"}? There is no complete ZIP snapshot to verify.`;
+  if (!window.confirm(question)) return;
+
+  const previousMap = state.pendingMapPngs;
+  const previousResults = state.pendingResultsPngs;
+  const shouldKeep = (item) => hasCompleteExport && !exportedKeys.has(captureArchiveRecordKey(item));
+  state.pendingMapPngs = previousMap.filter(shouldKeep);
+  state.pendingResultsPngs = previousResults.filter(shouldKeep);
+  const retainedIds = new Set([...state.pendingMapPngs, ...state.pendingResultsPngs].map((item) => item.id));
+  const clearedRecords = [...previousMap, ...previousResults].filter((item) => !retainedIds.has(item.id));
+  state.captureArchive.clearBusy = true;
+  updateAllSaveFolderStatuses();
+  updateCaptureArchiveStatus();
+  const deleted = await deletePersistedCaptureRecords(clearedRecords);
+  if (!deleted) {
+    const uncertainMap = clearedRecords
+      .filter((record) => captureArchiveKind(record) === "map")
+      .map((record) => ({ ...record, persisted: false }));
+    const uncertainResults = clearedRecords
+      .filter((record) => captureArchiveKind(record) === "results")
+      .map((record) => ({ ...record, persisted: false }));
+    state.pendingMapPngs = mergeRestoredCaptureRecords(
+      [...state.pendingMapPngs, ...uncertainMap], [], "map",
+    );
+    state.pendingResultsPngs = mergeRestoredCaptureRecords(
+      [...state.pendingResultsPngs, ...uncertainResults], [], "results",
+    );
+  } else {
+    if (!state.pendingMapPngs.length) state.droppedMapPngs = 0;
+    if (!state.pendingResultsPngs.length) state.droppedResultsPngs = 0;
+    state.captureArchive.lastExportCount = 0;
+    state.captureArchive.lastExportKeys = new Set();
+    state.captureArchive.lastExportHadErrors = false;
+  }
+  state.captureArchive.clearBusy = false;
+  await persistPendingCaptureArchive();
+  updateAllSaveFolderStatuses();
+  updateCaptureArchiveStatus();
+  setStatus(deleted
+    ? `Cleared ${clearCount} stored capture${clearCount === 1 ? "" : "s"}${retainedCount ? `; kept ${retainedCount} newer` : ""}`
+    : "Could not clear the durable capture archive; all captures were restored in the app", deleted ? "warn" : "error");
+}
+
+function markFolderWritesHostUnsupported(error, operation = "write", kind = "map") {
+  if (!hasAlt1()) return false;
+  if (!knownAlt1FolderWritesUnsupported(window)) return false;
+  const firstFailure = !state.saveFolders.hostWriteUnsupported;
+  state.saveFolders.hostWriteUnsupported = true;
+  state.saveFolders.lastHostFailure = {
+    kind,
+    operation,
+    name: String(error?.name || "NotAllowedError").slice(0, 80),
+    message: String(error?.message || "Alt1 denied external folder writing").slice(0, 240),
+  };
+  for (const kind of ["map", "results"]) {
+    const folder = saveFolderState(kind);
+    folder.handle = null;
+    folder.permission = "unsupported";
+    folder.loading = false;
+    folder.writeVerified = false;
+    folder.lastFailure = state.saveFolders.lastHostFailure;
+  }
+  if (firstFailure) {
+    Promise.allSettled([
+      clearStoredSaveFolder(window, saveFolderTarget("map").key),
+      clearStoredSaveFolder(window, saveFolderTarget("results").key),
+    ]).catch(() => {});
+  }
+  updateAllSaveFolderStatuses();
+  updateCaptureArchiveStatus();
+  return true;
+}
+
 const SAVE_FOLDER_TARGETS = Object.freeze({
   map: Object.freeze({
     key: "map-folder",
@@ -1374,30 +1773,41 @@ function updateSaveFolderStatus(kind) {
   const folder = saveFolderState(kind);
   const pendingCount = kind === "results" ? state.pendingResultsPngs.length : state.pendingMapPngs.length;
   const pendingText = pendingCount
-    ? ` · ${pendingCount} ${target.label} PNG${pendingCount === 1 ? "" : "s"} waiting to retry`
+    ? state.saveFolders.hostWriteUnsupported
+      ? ` · ${pendingCount} ${target.label} PNG${pendingCount === 1 ? "" : "s"} stored in the capture archive`
+      : ` · ${pendingCount} ${target.label} PNG${pendingCount === 1 ? "" : "s"} waiting to retry`
     : "";
   const dropped = kind === "results" ? state.droppedResultsPngs : state.droppedMapPngs;
   const droppedText = dropped
     ? ` · ${dropped} older PNG${dropped === 1 ? "" : "s"} could not be retained`
     : "";
-  elements[target.choose].disabled = folder.loading || !state.saveFolders.supported;
+  elements[target.choose].disabled = folder.loading || !state.saveFolders.supported
+    || state.saveFolders.hostWriteUnsupported;
   elements[target.clear].disabled = folder.loading || !folder.handle;
   // Offer the one-click re-grant only when the embedded browser exposes that
   // operation. Some Alt1 builds can write a picker handle but cannot inspect or
   // separately request its permission state.
-  elements[target.reallow].hidden = !(!folder.loading && state.saveFolders.supported
+  elements[target.reallow].hidden = state.saveFolders.hostWriteUnsupported
+    || !(!folder.loading && state.saveFolders.supported
     && folder.handle && folder.permission !== "granted"
     && canRequestSaveFolderPermission(folder));
   if (folder.loading) {
     elements[target.status].textContent = `Checking ${target.label} save folder...${pendingText}${droppedText}`;
     return;
   }
+  if (state.saveFolders.hostWriteUnsupported) {
+    const version = String(window.alt1?.version || "1.6");
+    elements[target.status].textContent = `Alt1 ${version} cannot write external folders; ${target.label} PNGs are kept in the app — use Download stored captures (.zip)${pendingText}${droppedText}`;
+    return;
+  }
   if (!state.saveFolders.supported) {
-    elements[target.status].textContent = `Folder saving is not supported in this Alt1 browser${pendingText}${droppedText}`;
+    elements[target.status].textContent = `External folder saving is not supported here; ${target.label} PNGs are stored in the capture archive${pendingText}${droppedText}`;
     return;
   }
   if (folder.handle && folder.permission === "granted") {
-    elements[target.status].textContent = `Saving ${target.label} PNGs to: ${folder.name || "selected folder"}${pendingText}${droppedText}`;
+    elements[target.status].textContent = folder.writeVerified
+      ? `Saving ${target.label} PNGs to: ${folder.name || "selected folder"}${pendingText}${droppedText}`
+      : `${target.label} folder selected: ${folder.name || "selected folder"} · the next PNG will verify write access${pendingText}${droppedText}`;
     return;
   }
   if (folder.handle && folder.permission === "unknown") {
@@ -1425,6 +1835,17 @@ async function refreshStoredSaveFolder(kind) {
   folder.loading = true;
   state.saveFolders.supported = supportsFolderSaving(window);
   updateSaveFolderStatus(kind);
+  if (state.saveFolders.hostWriteUnsupported) {
+    folder.handle = null;
+    folder.name = "";
+    folder.permission = "unsupported";
+    folder.source = "none";
+    folder.writeVerified = false;
+    folder.loading = false;
+    clearStoredSaveFolder(window, target.key).catch(() => false);
+    updateSaveFolderStatus(kind);
+    return;
+  }
   if (!state.saveFolders.supported) {
     folder.loading = false;
     updateSaveFolderStatus(kind);
@@ -1435,10 +1856,15 @@ async function refreshStoredSaveFolder(kind) {
     folder.handle = handle;
     folder.name = handle?.name || "";
     folder.permission = handle ? await querySaveFolderPermission(handle) : "unknown";
+    folder.source = handle ? "restored" : "none";
+    folder.writeVerified = false;
+    folder.lastFailure = null;
   } catch {
     folder.handle = null;
     folder.name = "";
     folder.permission = "unknown";
+    folder.source = "none";
+    folder.writeVerified = false;
   } finally {
     folder.loading = false;
     updateSaveFolderStatus(kind);
@@ -1451,6 +1877,7 @@ async function refreshStoredSaveFolder(kind) {
 
 function refreshStoredSaveFolders() {
   state.saveFolders.supported = supportsFolderSaving(window);
+  state.saveFolders.hostWriteUnsupported ||= knownAlt1FolderWritesUnsupported(window);
   refreshStoredSaveFolder("map");
   refreshStoredSaveFolder("results");
 }
@@ -1459,11 +1886,17 @@ async function selectSaveFolder(kind) {
   const target = saveFolderTarget(kind);
   const folder = saveFolderState(kind);
   if (folder.loading) return;
-  if (!state.saveFolders.supported) {
-    setStatus("Folder saving is not supported in this Alt1 browser", "error");
+  if (state.saveFolders.hostWriteUnsupported) {
+    setStatus("This Alt1 version cannot write external folders; use Download stored captures (.zip)", "warn");
     updateSaveFolderStatus(kind);
     return;
   }
+  if (!state.saveFolders.supported) {
+    setStatus("External folder saving is unavailable; captures remain in the internal archive", "warn");
+    updateSaveFolderStatus(kind);
+    return;
+  }
+  let selected = false;
   folder.loading = true;
   updateSaveFolderStatus(kind);
   try {
@@ -1473,7 +1906,10 @@ async function selectSaveFolder(kind) {
     // showDirectoryPicker({mode:"readwrite"}) only resolves after the fresh
     // grant succeeds. Trust that grant even if Alt1 lacks queryPermission.
     folder.permission = "granted";
-    setStatus(`${target.label} save folder selected: ${folder.name || "selected folder"}`, "ok");
+    folder.source = "picker";
+    folder.writeVerified = false;
+    folder.lastFailure = null;
+    selected = true;
   } catch (error) {
     const cancelled = error?.name === "AbortError";
     setStatus(cancelled ? `${target.label} save folder unchanged` : `Could not choose ${target.label} folder: ${error.message || error}`, cancelled ? "warn" : "error");
@@ -1481,9 +1917,17 @@ async function selectSaveFolder(kind) {
     folder.loading = false;
     updateSaveFolderStatus(kind);
   }
-  if (folder.permission === "granted") {
+  if (selected && folder.permission === "granted") {
     if (kind === "results") await retryPendingResultsPngs();
     else await retryPendingMapPngs();
+    if (state.saveFolders.hostWriteUnsupported) {
+      setStatus("Alt1 blocked the real folder write; the PNG is in the internal archive — use Download stored captures (.zip)", "warn");
+    } else if (folder.writeVerified) {
+      setStatus(`${target.label} save folder verified: ${folder.name || "selected folder"}`, "ok");
+    } else {
+      setStatus(`${target.label} save folder selected; the first PNG will verify write access`, "ok");
+    }
+    updateSaveFolderStatus(kind);
   }
 }
 
@@ -1500,6 +1944,9 @@ async function clearSelectedSaveFolder(kind) {
     folder.handle = null;
     folder.name = "";
     folder.permission = "unknown";
+    folder.source = "none";
+    folder.writeVerified = false;
+    folder.lastFailure = null;
     setStatus(`${target.label} save folder cleared`, "warn");
   } finally {
     folder.loading = false;
@@ -1511,6 +1958,11 @@ async function reallowSaveFolder(kind) {
   const target = saveFolderTarget(kind);
   const folder = saveFolderState(kind);
   if (folder.loading || !folder.handle) return;
+  if (state.saveFolders.hostWriteUnsupported) {
+    setStatus("This Alt1 version cannot request external folder writes; use Download stored captures (.zip)", "warn");
+    updateSaveFolderStatus(kind);
+    return;
+  }
   if (!canRequestSaveFolderPermission(folder)) {
     setStatus(`Choose the ${target.label} folder again to restore Alt1 write access`, "warn");
     updateSaveFolderStatus(kind);
@@ -1528,6 +1980,7 @@ async function reallowSaveFolder(kind) {
     return;
   }
   folder.permission = permission;
+  if (permission === "granted") folder.writeVerified = false;
   folder.loading = false;
   updateSaveFolderStatus(kind);
   const label = target.label.charAt(0).toUpperCase() + target.label.slice(1);
@@ -1546,8 +1999,13 @@ async function writePngToSaveFolder(kind, filename, dataUrl, label, options = {}
   const target = saveFolderTarget(kind);
   const folder = saveFolderState(kind);
   const quiet = Boolean(options?.quiet);
+  if (state.saveFolders.hostWriteUnsupported) {
+    if (!quiet) setStatus(`${label} stored in the app — use Download stored captures (.zip)`, "warn");
+    updateSaveFolderStatus(kind);
+    return { saved: false, reason: "host-unsupported" };
+  }
   if (!state.saveFolders.supported) {
-    if (!quiet) setStatus("Folder saving is not supported in this Alt1 browser", "error");
+    if (!quiet) setStatus(`${label} stored in the app because external folder saving is unavailable`, "warn");
     return { saved: false, reason: "unsupported" };
   }
   const handle = folder.handle;
@@ -1582,6 +2040,8 @@ async function writePngToSaveFolder(kind, filename, dataUrl, label, options = {}
     await writeDataUrlToFolder(handle, filename, dataUrl);
     if (folder.handle === handle) {
       folder.permission = "granted";
+      folder.writeVerified = true;
+      folder.lastFailure = null;
       updateSaveFolderStatus(kind);
     }
     if (!quiet) setStatus(`${label} saved to ${folder.name || "selected folder"}`, "ok");
@@ -1589,6 +2049,20 @@ async function writePngToSaveFolder(kind, filename, dataUrl, label, options = {}
   } catch (error) {
     const permissionError = isSaveFolderPermissionError(error);
     if (folder.handle === handle && permissionError) {
+      folder.lastFailure = {
+        operation: "write",
+        name: String(error?.name || "Error").slice(0, 80),
+        message: String(error?.message || error).slice(0, 240),
+      };
+      if (markFolderWritesHostUnsupported(error, "write", kind)) {
+        if (!quiet) setStatus(`${label} stored in the app because Alt1 blocked external folder writing — use Download stored captures (.zip)`, "warn");
+        return {
+          saved: false,
+          reason: "host-unsupported",
+          errorName: folder.lastFailure.name,
+        };
+      }
+      folder.writeVerified = false;
       folder.permission = "prompt";
       updateSaveFolderStatus(kind);
     }
@@ -1597,13 +2071,22 @@ async function writePngToSaveFolder(kind, filename, dataUrl, label, options = {}
         ? `${target.label} folder write permission is unavailable in Alt1 — choose the folder again; this PNG is kept for retry`
         : `Could not save ${label}: ${error.message || error}`, permissionError ? "warn" : "error");
     }
-    return { saved: false, reason: permissionError ? "permission" : "error" };
+    return {
+      saved: false,
+      reason: permissionError ? "permission" : "error",
+      errorName: String(error?.name || "Error"),
+    };
   }
+}
+
+function capturePngTimestamp(date = new Date()) {
+  const value = date instanceof Date ? date : new Date(date);
+  return `${safeTimestampForFilename(value)}-${String(value.getMilliseconds()).padStart(3, "0")}`;
 }
 
 function mapPngFilename(date = new Date(), floorName = state.gameMap?.floor?.name) {
   const floor = safeFilePart(floorName, "unknown");
-  return `dungeon-map-${floor}-${safeTimestampForFilename(date)}.png`;
+  return `dungeon-map-${floor}-${capturePngTimestamp(date)}.png`;
 }
 
 async function saveMap(options = {}) {
@@ -1619,6 +2102,8 @@ async function saveMap(options = {}) {
     filename: mapPngFilename(date, options?.floorName),
     dataUrl: frozenDataUrl || elements.canvas.toDataURL("image/png"),
   };
+  await state.captureArchive.restorePromise;
+  await queuePendingMapPng({ saved: false, reason: "error", prepared }, { retry: false });
   const saved = await writePngToSaveFolder(
     "map",
     prepared.filename,
@@ -1626,12 +2111,13 @@ async function saveMap(options = {}) {
     "Map PNG",
     options,
   );
+  if (saved.saved) await removePendingCapturePng("map", prepared);
   return { ...saved, prepared };
 }
 
 function resultsPngFilename(result, date = new Date()) {
   const floor = safeFilePart(result?.Floor || result?.FloorSize, "unknown");
-  return `dungeon-results-${floor}-${safeTimestampForFilename(date)}.png`;
+  return `dungeon-results-${floor}-${capturePngTimestamp(date)}.png`;
 }
 
 function cropImageData(image, x, y, width, height) {
@@ -1670,6 +2156,8 @@ function prepareResultsInterfacePng(capture, date = new Date()) {
 async function saveResultsInterfacePng(capture, date = new Date(), options = {}) {
   const prepared = options?.prepared || prepareResultsInterfacePng(capture, date);
   if (!prepared) return { saved: false, reason: "no-results-crop", prepared: null };
+  await state.captureArchive.restorePromise;
+  await queuePendingResultsPng({ saved: false, reason: "error", prepared }, { retry: false });
   const saved = await writePngToSaveFolder(
     "results",
     prepared.filename,
@@ -1677,29 +2165,42 @@ async function saveResultsInterfacePng(capture, date = new Date(), options = {})
     "Results interface PNG",
     options,
   );
+  if (saved.saved) await removePendingCapturePng("results", prepared);
   return { ...saved, prepared };
 }
 
-function queuePendingMapPng(artifact) {
+function queuePendingMapPng(artifact, { retry = true } = {}) {
   const prepared = artifact?.prepared;
-  const retryable = ["no-folder", "permission", "error", "handle-changed"].includes(artifact?.reason);
+  const retryable = ["no-folder", "permission", "error", "handle-changed", "unsupported", "host-unsupported"].includes(artifact?.reason);
   if (artifact?.saved || !retryable || !prepared?.filename || !prepared?.dataUrl) return;
-  const existing = state.pendingMapPngs.findIndex((item) => item.filename === prepared.filename);
-  if (existing >= 0) state.pendingMapPngs[existing] = prepared;
+  prepared.id ||= createCaptureArchiveId("map");
+  const existing = state.pendingMapPngs.findIndex((item) => item.id === prepared.id);
+  const previous = state.pendingMapPngs[existing];
+  const archived = {
+    ...prepared,
+    kind: "map",
+    createdAt: Number(previous?.createdAt) || Date.now(),
+    persisted: previous?.persisted === true,
+  };
+  if (existing >= 0) state.pendingMapPngs[existing] = archived;
   else {
-    if (state.pendingMapPngs.length >= MAX_PENDING_RESULTS_PNGS) {
-      state.pendingMapPngs.shift();
-      state.droppedMapPngs += 1;
-    }
-    state.pendingMapPngs.push(prepared);
+    state.pendingMapPngs.push(archived);
   }
+  enforceCaptureArchiveItemLimit();
+  const persistence = persistPendingCaptureArchive();
   updateSaveFolderStatus("map");
-  if (["granted", "unknown"].includes(saveFolderState("map").permission)) {
+  updateCaptureArchiveStatus();
+  if (retry && !state.saveFolders.hostWriteUnsupported
+    && ["granted", "unknown"].includes(saveFolderState("map").permission)) {
     setTimeout(() => { retryPendingMapPngs({ quiet: true }); }, 0);
   }
+  return persistence;
 }
 
 async function retryPendingMapPngs({ quiet = false } = {}) {
+  if (state.saveFolders.hostWriteUnsupported) {
+    return { saved: 0, remaining: state.pendingMapPngs.length };
+  }
   if (state.retryingMapPngs) {
     state.retryMapPngsRequested = true;
     if (!quiet) state.retryMapPngsNotify = true;
@@ -1715,17 +2216,22 @@ async function retryPendingMapPngs({ quiet = false } = {}) {
   }
   state.retryingMapPngs = true;
   let saved = 0;
+  const savedRecords = [];
   try {
     do {
       state.retryMapPngsRequested = false;
       const pending = state.pendingMapPngs.splice(0);
+      state.inFlightMapPngs = pending;
       const remaining = [];
       for (let index = 0; index < pending.length; index += 1) {
         const prepared = pending[index];
         const result = await writePngToSaveFolder(
           "map", prepared.filename, prepared.dataUrl, "Map PNG", { quiet: true },
         );
-        if (result.saved) saved += 1;
+        if (result.saved) {
+          saved += 1;
+          savedRecords.push(prepared);
+        }
         else {
           remaining.push(prepared, ...pending.slice(index + 1));
           break;
@@ -1733,16 +2239,36 @@ async function retryPendingMapPngs({ quiet = false } = {}) {
       }
       const merged = new Map();
       for (const prepared of [...remaining, ...state.pendingMapPngs]) {
-        if (prepared?.filename && prepared?.dataUrl) merged.set(prepared.filename, prepared);
+        if (prepared?.filename && prepared?.dataUrl) merged.set(prepared.id || prepared.filename, prepared);
       }
-      const items = [...merged.values()];
-      const overflow = Math.max(0, items.length - MAX_PENDING_RESULTS_PNGS);
-      if (overflow) state.droppedMapPngs += overflow;
-      state.pendingMapPngs = overflow ? items.slice(overflow) : items;
+      state.pendingMapPngs = [...merged.values()];
+      enforceCaptureArchiveItemLimit();
+      state.inFlightMapPngs = [];
     } while (state.retryMapPngsRequested && state.pendingMapPngs.length);
   } finally {
+    if (state.inFlightMapPngs.length) {
+      const merged = new Map();
+      for (const prepared of [...state.inFlightMapPngs, ...state.pendingMapPngs]) {
+        if (prepared?.filename && prepared?.dataUrl) merged.set(prepared.id || prepared.filename, prepared);
+      }
+      state.pendingMapPngs = [...merged.values()];
+      state.inFlightMapPngs = [];
+      enforceCaptureArchiveItemLimit();
+    }
     state.retryingMapPngs = false;
+    persistPendingCaptureArchive();
     updateSaveFolderStatus("map");
+    updateCaptureArchiveStatus();
+  }
+  if (savedRecords.length && !(await deletePersistedCaptureRecords(savedRecords))) {
+    state.pendingMapPngs = mergeRestoredCaptureRecords([
+      ...state.pendingMapPngs,
+      ...savedRecords.map((record) => ({ ...record, persisted: false })),
+    ], [], "map");
+    await enforceCaptureArchiveItemLimit();
+    await persistPendingCaptureArchive();
+    updateSaveFolderStatus("map");
+    updateCaptureArchiveStatus();
   }
   const notifyRetry = !quiet || state.retryMapPngsNotify;
   state.retryMapPngsNotify = false;
@@ -1752,28 +2278,40 @@ async function retryPendingMapPngs({ quiet = false } = {}) {
   return { saved, remaining: state.pendingMapPngs.length };
 }
 
-function queuePendingResultsPng(artifact) {
+function queuePendingResultsPng(artifact, { retry = true } = {}) {
   const prepared = artifact?.prepared;
-  const retryable = ["no-folder", "permission", "error", "handle-changed"].includes(artifact?.reason);
+  const retryable = ["no-folder", "permission", "error", "handle-changed", "unsupported", "host-unsupported"].includes(artifact?.reason);
   if (artifact?.saved || !retryable || !prepared?.filename || !prepared?.dataUrl) return;
-  const existing = state.pendingResultsPngs.findIndex((item) => item.filename === prepared.filename);
-  if (existing >= 0) state.pendingResultsPngs[existing] = prepared;
+  prepared.id ||= createCaptureArchiveId("results");
+  const existing = state.pendingResultsPngs.findIndex((item) => item.id === prepared.id);
+  const previous = state.pendingResultsPngs[existing];
+  const archived = {
+    ...prepared,
+    kind: "results",
+    createdAt: Number(previous?.createdAt) || Date.now(),
+    persisted: previous?.persisted === true,
+  };
+  if (existing >= 0) state.pendingResultsPngs[existing] = archived;
   else {
-    if (state.pendingResultsPngs.length >= MAX_PENDING_RESULTS_PNGS) {
-      state.pendingResultsPngs.shift();
-      state.droppedResultsPngs += 1;
-    }
-    state.pendingResultsPngs.push(prepared);
+    state.pendingResultsPngs.push(archived);
   }
+  enforceCaptureArchiveItemLimit();
+  const persistence = persistPendingCaptureArchive();
   updateSaveFolderStatus("results");
-  if (["granted", "unknown"].includes(saveFolderState("results").permission)) {
+  updateCaptureArchiveStatus();
+  if (retry && !state.saveFolders.hostWriteUnsupported
+    && ["granted", "unknown"].includes(saveFolderState("results").permission)) {
     // One asynchronous retry covers transient write errors. A repeated failure
     // remains visible in the queue until the user chooses/re-allows the folder.
     setTimeout(() => { retryPendingResultsPngs({ quiet: true }); }, 0);
   }
+  return persistence;
 }
 
 async function retryPendingResultsPngs({ quiet = false } = {}) {
+  if (state.saveFolders.hostWriteUnsupported) {
+    return { saved: 0, remaining: state.pendingResultsPngs.length };
+  }
   if (state.retryingResultsPngs) {
     state.retryResultsPngsRequested = true;
     if (!quiet) state.retryResultsPngsNotify = true;
@@ -1789,10 +2327,12 @@ async function retryPendingResultsPngs({ quiet = false } = {}) {
   }
   state.retryingResultsPngs = true;
   let saved = 0;
+  const savedRecords = [];
   try {
     do {
       state.retryResultsPngsRequested = false;
       const pending = state.pendingResultsPngs.splice(0);
+      state.inFlightResultsPngs = pending;
       const remaining = [];
       for (let index = 0; index < pending.length; index += 1) {
         const prepared = pending[index];
@@ -1803,10 +2343,13 @@ async function retryPendingResultsPngs({ quiet = false } = {}) {
           "Results interface PNG",
           { quiet: true },
         );
-        if (result.saved) saved += 1;
+        if (result.saved) {
+          saved += 1;
+          savedRecords.push(prepared);
+        }
         else {
           remaining.push(prepared);
-          if (["no-folder", "permission", "handle-changed", "unsupported"].includes(result.reason)) {
+          if (["no-folder", "permission", "handle-changed", "unsupported", "host-unsupported"].includes(result.reason)) {
             remaining.push(...pending.slice(index + 1));
             break;
           }
@@ -1816,16 +2359,36 @@ async function retryPendingResultsPngs({ quiet = false } = {}) {
       // duplicate writes queued for the same already-frozen PNG bytes.
       const merged = new Map();
       for (const prepared of [...remaining, ...state.pendingResultsPngs]) {
-        if (prepared?.filename && prepared?.dataUrl) merged.set(prepared.filename, prepared);
+        if (prepared?.filename && prepared?.dataUrl) merged.set(prepared.id || prepared.filename, prepared);
       }
-      const mergedItems = [...merged.values()];
-      const overflow = Math.max(0, mergedItems.length - MAX_PENDING_RESULTS_PNGS);
-      if (overflow) state.droppedResultsPngs += overflow;
-      state.pendingResultsPngs = overflow ? mergedItems.slice(overflow) : mergedItems;
+      state.pendingResultsPngs = [...merged.values()];
+      enforceCaptureArchiveItemLimit();
+      state.inFlightResultsPngs = [];
     } while (state.retryResultsPngsRequested && state.pendingResultsPngs.length);
   } finally {
+    if (state.inFlightResultsPngs.length) {
+      const merged = new Map();
+      for (const prepared of [...state.inFlightResultsPngs, ...state.pendingResultsPngs]) {
+        if (prepared?.filename && prepared?.dataUrl) merged.set(prepared.id || prepared.filename, prepared);
+      }
+      state.pendingResultsPngs = [...merged.values()];
+      state.inFlightResultsPngs = [];
+      enforceCaptureArchiveItemLimit();
+    }
     state.retryingResultsPngs = false;
+    persistPendingCaptureArchive();
     updateSaveFolderStatus("results");
+    updateCaptureArchiveStatus();
+  }
+  if (savedRecords.length && !(await deletePersistedCaptureRecords(savedRecords))) {
+    state.pendingResultsPngs = mergeRestoredCaptureRecords([
+      ...state.pendingResultsPngs,
+      ...savedRecords.map((record) => ({ ...record, persisted: false })),
+    ], [], "results");
+    await enforceCaptureArchiveItemLimit();
+    await persistPendingCaptureArchive();
+    updateSaveFolderStatus("results");
+    updateCaptureArchiveStatus();
   }
   const notifyRetry = !quiet || state.retryResultsPngsNotify;
   state.retryResultsPngsNotify = false;
@@ -2018,6 +2581,27 @@ async function waitForPixelCaptureSlot() {
     const delay = Math.max(1, state.nextPixelCaptureAt - Date.now());
     await new Promise((resolve) => setTimeout(resolve, delay));
   }
+}
+
+async function removePendingCapturePng(kind, prepared) {
+  const key = kind === "results" ? "pendingResultsPngs" : "pendingMapPngs";
+  const removed = state[key].filter((item) => prepared?.id
+    ? item.id === prepared.id
+    : item.filename === prepared?.filename && item.dataUrl === prepared?.dataUrl);
+  if (!removed.length) return false;
+  const removedIds = new Set(removed.map((item) => item.id));
+  state[key] = state[key].filter((item) => !removedIds.has(item.id));
+  if (!(await deletePersistedCaptureRecords(removed))) {
+    state[key] = mergeRestoredCaptureRecords([
+      ...state[key],
+      ...removed.map((record) => ({ ...record, persisted: false })),
+    ], [], kind);
+    await enforceCaptureArchiveItemLimit();
+    await persistPendingCaptureArchive();
+  }
+  updateSaveFolderStatus(kind);
+  updateCaptureArchiveStatus();
+  return !state[key].some((item) => removedIds.has(item.id));
 }
 
 function waitForNextResultScan() {
@@ -2230,17 +2814,21 @@ function resultArtifactSuffix(results) {
   if (saved === results.length) return `; saved ${saved} PNG${saved === 1 ? "" : "s"}`;
   const firstFailure = results.find((result) => !result.saved);
   const reason = {
-    unsupported: "folder saving unsupported",
-    "no-folder": "choose a save folder",
-    permission: "folder permission needed",
+    "host-unsupported": "stored in the capture archive (Alt1 folder writes unavailable)",
+    unsupported: "stored in the capture archive (external folder saving unavailable)",
+    "no-folder": "stored in the capture archive; choose a save folder for direct writes",
+    permission: "stored in the capture archive; folder permission needed for direct writes",
     "handle-changed": "save folder changed; retry queued",
-    error: "save failed",
+    error: "stored in the capture archive after the folder write failed",
     "no-map": "no map image",
     "map-floor-mismatch": "map size did not match results",
     "map-snapshot-not-new": "no newly accepted map snapshot",
     "no-results-crop": "results crop failed",
   }[firstFailure?.reason] || "save skipped";
   if (saved > 0) return `; saved ${saved}/${results.length} PNGs, ${reason}`;
+  if (["host-unsupported", "unsupported", "no-folder", "permission", "handle-changed", "error"].includes(firstFailure?.reason)) {
+    return `; PNG ${reason}`;
+  }
   return `; PNG save skipped: ${reason}`;
 }
 
@@ -2942,6 +3530,8 @@ function bindEvents() {
   elements.chooseResultsSaveFolder.addEventListener("click", () => selectSaveFolder("results"));
   elements.clearResultsSaveFolder.addEventListener("click", () => clearSelectedSaveFolder("results"));
   elements.reallowResultsSaveFolder.addEventListener("click", () => reallowSaveFolder("results"));
+  elements.downloadCaptureArchive?.addEventListener("click", downloadPendingCaptureArchive);
+  elements.clearCaptureArchive?.addEventListener("click", clearPendingCaptureArchive);
   elements.resetResultBatch.addEventListener("click", () => resetResultBatch(true));
   for (const control of [elements.resultBatchSize, elements.resultFloorFilter, elements.resultBatchMode]) {
     control.addEventListener("change", () => {
@@ -3372,10 +3962,13 @@ function restoreResultSettings() {
 }
 
 function initialize() {
+  state.saveFolders.hostWriteUnsupported = knownAlt1FolderWritesUnsupported(window);
+  ensureCaptureArchiveControls();
   bindEvents();
   restoreResultSettings();
   updateAllSaveFolderStatuses();
   refreshStoredSaveFolders();
+  state.captureArchive.restorePromise = restorePendingCaptureArchive();
   renderResults();
   renderParty();
   drawEmptyState();

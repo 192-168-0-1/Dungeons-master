@@ -7,6 +7,18 @@ const PERMISSION_REQUEST_TIMEOUT_MS = 10000;
 const FOLDER_WRITE_TIMEOUT_MS = 15000;
 const HANDLE_DATABASE_TIMEOUT_MS = 1500;
 
+export function knownAlt1FolderWritesUnsupported(root = globalThis) {
+  const api = root?.alt1;
+  if (!api) return false;
+  const versionInt = Number(api.versionint);
+  if (Number.isFinite(versionInt) && versionInt > 0) return versionInt < 1_007_000;
+  const match = String(api.version || "").match(/^(\d+)\.(\d+)(?:\.(\d+))?/);
+  if (!match) return false;
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  return major < 1 || (major === 1 && minor <= 6);
+}
+
 export function supportsFolderSaving(root = globalThis) {
   // IndexedDB is only needed to remember a handle across app restarts. A
   // browser with a working directory picker can still save during this session

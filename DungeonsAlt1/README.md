@@ -19,6 +19,20 @@ This is the Alt1 version of the `Dungeons` project. It does not use or modify `A
 - PNG export of the visible map.
 - Dungeoneering results-screen OCR for time, floor, modifiers, bonus and XP at 100–200% interface scale. Result PNGs wait for final stable values and preserve the full physical interface crop.
 
+## Saving map and results PNGs
+
+Alt1 1.6 can open Chromium's folder picker, but its embedded browser cannot grant
+the write permission needed by the File System Access API. Choosing the folder
+again therefore cannot repair a failed write.
+
+On Alt1 1.6, every enabled map/results PNG export is automatically kept in the
+app's internal IndexedDB capture archive. Use **Download stored captures (.zip)**
+to open one Save As dialog containing the original separate PNG files. The app
+does not clear those files after starting a download; verify the ZIP first, then
+use **Clear stored captures**. In a normal browser, and in a future Alt1 host
+whose real folder write succeeds, the existing automatic map/results folder
+saving remains available.
+
 ## Run locally
 
 Alt1 apps are web apps and must be served over HTTP. From the repository root, run:

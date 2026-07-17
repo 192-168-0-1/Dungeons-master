@@ -122,6 +122,7 @@ $teamGates = Get-Content (Join-Path $appRoot 'src\team-gates.js') -Raw
 $partyMenu = Get-Content (Join-Path $appRoot 'src\party-menu.js') -Raw
 $resultsCore = Get-Content (Join-Path $appRoot 'src\results-core.js') -Raw
 $fileSaver = Get-Content (Join-Path $appRoot 'src\file-saver.js') -Raw
+$captureArchive = Get-Content (Join-Path $appRoot 'src\capture-archive.js') -Raw
 $winterface = Get-Content (Join-Path $appRoot 'src\winterface.js') -Raw
 $mapLocator = Get-Content (Join-Path $appRoot 'src\alt1-map-locator.js') -Raw
 $rpmState = Get-Content (Join-Path $appRoot 'src\rpm-state.js') -Raw
@@ -129,7 +130,7 @@ $partyAnchor = Get-Content (Join-Path $appRoot 'src\party-anchor.js') -Raw
 $interfaceScale = Get-Content (Join-Path $appRoot 'src\interface-scale.js') -Raw
 $resultsSentinel = Get-Content (Join-Path $appRoot 'src\results-sentinel.js') -Raw
 $nativeOverlaySource = $app + "`n" + $overlay
-$runtimeSource = $app + "`n" + $capture + "`n" + $overlay + "`n" + $partyCore + "`n" + $partyInterface + "`n" + $teamSync + "`n" + $teamGates + "`n" + $partyMenu + "`n" + $resultsCore + "`n" + $fileSaver + "`n" + $winterface + "`n" + $mapLocator + "`n" + $rpmState + "`n" + $partyAnchor + "`n" + $interfaceScale + "`n" + $resultsSentinel
+$runtimeSource = $app + "`n" + $capture + "`n" + $overlay + "`n" + $partyCore + "`n" + $partyInterface + "`n" + $teamSync + "`n" + $teamGates + "`n" + $partyMenu + "`n" + $resultsCore + "`n" + $fileSaver + "`n" + $captureArchive + "`n" + $winterface + "`n" + $mapLocator + "`n" + $rpmState + "`n" + $partyAnchor + "`n" + $interfaceScale + "`n" + $resultsSentinel
 $domIds = @([regex]::Matches($app, 'querySelector\("#(?<id>[a-z0-9-]+)"\)') | ForEach-Object { $_.Groups['id'].Value })
 $missingDomIds = @($domIds | Where-Object { $html -notmatch ('id="' + [regex]::Escape($_) + '"') })
 if ($missingDomIds.Count -ne 0) {
@@ -262,6 +263,9 @@ if (($html -notmatch 'id="auto-track-results" type="checkbox"') -or
     ($html -notmatch 'id="choose-results-save-folder"') -or
     ($html -notmatch 'id="clear-results-save-folder"') -or
     ($html -notmatch 'id="results-save-folder-status"') -or
+    ($html -notmatch 'id="download-capture-archive"') -or
+    ($html -notmatch 'id="clear-capture-archive"') -or
+    ($html -notmatch 'id="capture-archive-status"') -or
     ($html -match 'id="auto-track-results"[^>]*checked') -or
     ($html -match 'id="auto-save-map-png"[^>]*checked') -or
     ($html -match 'id="auto-save-results-png"[^>]*checked') -or
@@ -292,6 +296,13 @@ if (($app -notmatch 'autoCaptureDungeonResults') -or
     ($fileSaver -notmatch 'return "unknown"') -or
     ($fileSaver -notmatch 'TimeoutError') -or
     ($fileSaver -notmatch 'isSaveFolderPermissionError') -or
+    ($fileSaver -notmatch 'knownAlt1FolderWritesUnsupported') -or
+    ($captureArchive -notmatch 'indexedDB') -or
+    ($captureArchive -notmatch 'buildCaptureZip') -or
+    ($captureArchive -notmatch 'triggerBlobDownload') -or
+    ($captureArchive -notmatch 'upsertCaptureArchive') -or
+    ($captureArchive -notmatch 'deleteCaptureArchiveRecords') -or
+    ($captureArchive -notmatch 'MAX_CAPTURE_ARCHIVE_ITEMS') -or
     ($app -notmatch 'folder\.permission = "granted"') -or
     ($app -match 'save folder permission was not granted') -or
     ($app -notmatch 'function canRequestSaveFolderPermission') -or
@@ -324,7 +335,7 @@ if (($app -notmatch 'autoCaptureDungeonResults') -or
     ($app -notmatch 'resultLooksComplete') -or
     ($app -notmatch 'readSettledDungeonResultsCapture') -or
     ($app -notmatch 'pendingResultsPngs') -or
-    ($app -notmatch 'MAX_PENDING_RESULTS_PNGS = 20') -or
+    ($app -notmatch 'enforceCaptureArchiveItemLimit') -or
     ($app -notmatch 'retryPendingResultsPngs') -or
     ($app -notmatch 'pendingMapPngs') -or
     ($app -notmatch 'retryPendingMapPngs') -or
@@ -412,31 +423,32 @@ if (($rpmState -notmatch 'function evaluateMapTransition') -or
     ($overlay -notmatch 'rpmValue')) {
     throw 'RPM state must be centralized and must gate suspicious floor resets before updating visible stats.'
 }
-if (($app -notmatch 'map-core\.js\?v=20260717-36') -or
-    ($app -notmatch 'alt1-map-locator\.js\?v=20260717-36') -or
-    ($app -notmatch 'alt1-capture\.js\?v=20260717-36') -or
-    ($app -notmatch 'capture-scheduler\.js\?v=20260717-36') -or
-    ($app -notmatch 'interface-scale\.js\?v=20260717-36') -or
-    ($app -notmatch 'alt1-overlay\.js\?v=20260717-36') -or
-    ($app -notmatch 'rpm-state\.js\?v=20260717-36') -or
-    ($app -notmatch 'team-sync\.js\?v=20260717-36') -or
-    ($app -notmatch 'party-core\.js\?v=20260717-36') -or
-    ($app -notmatch 'party-interface\.js\?v=20260717-36') -or
-    ($app -notmatch 'results-core\.js\?v=20260717-36') -or
-    ($app -notmatch 'party-menu\.js\?v=20260717-36') -or
-    ($app -notmatch 'team-gates\.js\?v=20260717-36') -or
-    ($app -notmatch 'file-saver\.js\?v=20260717-36') -or
-    ($app -notmatch 'party-anchor\.js\?v=20260717-36') -or
-    ($app -notmatch 'winterface\.js\?v=20260717-36') -or
-    ($app -notmatch 'results-sentinel\.js\?v=20260717-36') -or
-    ($overlay -notmatch 'map-core\.js\?v=20260717-36') -or
-    ($overlay -notmatch 'rpm-state\.js\?v=20260717-36') -or
-    ($teamSync -notmatch 'party-core\.js\?v=20260717-36') -or
-    ($teamGates -notmatch 'party-core\.js\?v=20260717-36') -or
-    ($teamGates -notmatch 'alt1-overlay\.js\?v=20260717-36') -or
-    ($partyAnchor -notmatch 'party-interface\.js\?v=20260717-36') -or
-    ($partyAnchor -notmatch 'chatbox-font-data\.js\?v=20260717-36') -or
-    ($mapLocator -notmatch 'map-core\.js\?v=20260717-36')) {
+if (($app -notmatch 'map-core\.js\?v=20260718-37') -or
+    ($app -notmatch 'alt1-map-locator\.js\?v=20260718-37') -or
+    ($app -notmatch 'alt1-capture\.js\?v=20260718-37') -or
+    ($app -notmatch 'capture-scheduler\.js\?v=20260718-37') -or
+    ($app -notmatch 'interface-scale\.js\?v=20260718-37') -or
+    ($app -notmatch 'alt1-overlay\.js\?v=20260718-37') -or
+    ($app -notmatch 'rpm-state\.js\?v=20260718-37') -or
+    ($app -notmatch 'team-sync\.js\?v=20260718-37') -or
+    ($app -notmatch 'party-core\.js\?v=20260718-37') -or
+    ($app -notmatch 'party-interface\.js\?v=20260718-37') -or
+    ($app -notmatch 'results-core\.js\?v=20260718-37') -or
+    ($app -notmatch 'party-menu\.js\?v=20260718-37') -or
+    ($app -notmatch 'team-gates\.js\?v=20260718-37') -or
+    ($app -notmatch 'file-saver\.js\?v=20260718-37') -or
+    ($app -notmatch 'capture-archive\.js\?v=20260718-37') -or
+    ($app -notmatch 'party-anchor\.js\?v=20260718-37') -or
+    ($app -notmatch 'winterface\.js\?v=20260718-37') -or
+    ($app -notmatch 'results-sentinel\.js\?v=20260718-37') -or
+    ($overlay -notmatch 'map-core\.js\?v=20260718-37') -or
+    ($overlay -notmatch 'rpm-state\.js\?v=20260718-37') -or
+    ($teamSync -notmatch 'party-core\.js\?v=20260718-37') -or
+    ($teamGates -notmatch 'party-core\.js\?v=20260718-37') -or
+    ($teamGates -notmatch 'alt1-overlay\.js\?v=20260718-37') -or
+    ($partyAnchor -notmatch 'party-interface\.js\?v=20260718-37') -or
+    ($partyAnchor -notmatch 'chatbox-font-data\.js\?v=20260718-37') -or
+    ($mapLocator -notmatch 'map-core\.js\?v=20260718-37')) {
     throw 'Changed Alt1 runtime modules must be cache-busted for existing Alt1 installations.'
 }
 if (($app -notmatch 'buildVisibleRemoteGatestones') -or
