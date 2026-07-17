@@ -7,6 +7,7 @@ import {
   WINTERFACE_WIDTH,
   WinterfaceReader,
   deriveFloorSize,
+  deriveOcrFloorSize,
 } from "../src/winterface.js";
 
 function image(width, height, color = [0, 0, 0, 255]) {
@@ -246,6 +247,16 @@ test("floor size falls back to the modifier text when no map was tracked", () =>
   assert.equal(deriveFloorSize({ sizeMod: "+0" }), "Small");
 });
 
+test("independent OCR floor evidence rejects partial or unknown size modifiers", () => {
+  assert.equal(deriveOcrFloorSize("+350"), "Medium");
+  assert.equal(deriveOcrFloorSize("+500"), "Large");
+  assert.equal(deriveOcrFloorSize("+850"), "Large");
+  assert.equal(deriveOcrFloorSize("+0"), "Small");
+  for (const value of ["", "+35", "+50", "+999", "noise"]) {
+    assert.equal(deriveOcrFloorSize(value), null);
+  }
+});
+
 test("floor size ignores blank or unrecognised detection and arguments", () => {
   assert.equal(deriveFloorSize({ detected: "", sizeMod: "+500" }), "Large");
   assert.equal(deriveFloorSize({ detected: "Huge", sizeMod: "+350" }), "Medium");
@@ -295,6 +306,30 @@ test("bilinear 150 percent fallback finds the real marker, reads glyphs tolerant
   assertSourceRect(capture, offset, 1.5);
   assert.equal(capture.width, 768);
   assert.equal(capture.height, 501);
+});
+
+test("cheap lifecycle presence locator finds exact, scaled and cached result markers", () => {
+  const fixture = winterfaceFixture();
+  const reader = new WinterfaceReader(fixture.marker, fixture.fonts);
+
+  const exactOffset = { x: 43, y: 29 };
+  const exactClient = placeOnClient(fixture.canonical, exactOffset);
+  const exact = reader.locateMarker(exactClient, { interfaceScale: 1 });
+  assert.ok(exact);
+  assert.equal(exact.x, exactOffset.x);
+  assert.equal(exact.y, exactOffset.y);
+  const cached = reader.locateMarker(exactClient, { interfaceScale: 1, previousSource: exact });
+  assert.deepEqual({ x: cached.x, y: cached.y }, exactOffset);
+
+  const scaledOffset = { x: 57, y: 41 };
+  const scaledClient = placeOnClient(scaleImageBilinear(fixture.canonical, 1.5), scaledOffset);
+  const scaled = reader.locateMarker(scaledClient, { interfaceScale: 1.5 });
+  assert.ok(scaled);
+  assert.equal(scaled.scale, 1.5);
+  assert.deepEqual({ x: scaled.x, y: scaled.y }, scaledOffset);
+
+  assert.equal(reader.locateMarker(scaledClient, { interfaceScale: 1 }), null);
+  assert.equal(reader.locateMarker(image(1600, 900, [37, 31, 25, 255]), { interfaceScale: 1.5 }), null);
 });
 
 test("a stale scale hint falls back to the actual interface scale", () => {

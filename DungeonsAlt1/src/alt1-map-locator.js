@@ -1,10 +1,23 @@
 import {
   FLOOR_SIZES,
   findMapCandidatesByCorners,
+  getPixel,
+  isMapCornerColor,
   isValidInGameMapFrame,
   isValidMap,
   readGameMap,
-} from "./map-core.js?v=20260715-31";
+} from "./map-core.js?v=20260717-36";
+
+function hasExtendedSideBorders(image, shorterHeight) {
+  if (!image || image.height <= shorterHeight) return false;
+  const span = image.height - shorterHeight;
+  const probes = [0.25, 0.5, 0.75].map((ratio) => Math.min(
+    image.height - 2,
+    shorterHeight + Math.floor(span * ratio),
+  ));
+  return probes.filter((y) => isMapCornerColor(getPixel(image, 0, y))
+    && isMapCornerColor(getPixel(image, image.width - 1, y))).length >= 2;
+}
 
 // Anchor-based map location adapted from Sleepy-meh-alt-1/dg-map with
 // permission relayed by this project's maintainer. The anchor is the fixed
@@ -193,14 +206,14 @@ export function readMapAtCalibration(captureRegion, calibration, { floors = FLOO
   const y = Math.round(Number(calibration.y) || 0);
   const currentName = calibration.floor?.name;
   let best = null;
-  for (const floor of floors) {
+  const scoreFloor = (floor) => {
     const dimensions = scaledFloorDimensions(floor, scale);
     let image;
     try {
       const raw = captureRegion(x, y, dimensions.width, dimensions.height);
       image = normalizeMapCapture(raw, floor, dimensions.scale);
     } catch {
-      continue;
+      return null;
     }
     // Once calibrated at a non-100% scale, keep the map locked even on a
     // temporarily unreadable frame and read rooms tolerantly (C# parity).
@@ -208,14 +221,13 @@ export function readMapAtCalibration(captureRegion, calibration, { floors = FLOO
       allowEmpty: dimensions.scale !== 1,
       tolerant: dimensions.scale !== 1,
     });
-    if (!scored) continue;
+    if (!scored) return null;
     // A tiny bias toward the floor we are already locked onto keeps a still
     // valid read from flip-flopping to another size on a near tie. It is far
     // too small to override a genuinely better read of a new floor size.
     const stabilityBonus = currentName && floor.name === currentName ? 1 : 0;
     const total = scored.score + stabilityBonus;
-    if (!best || total > best.total) {
-      best = {
+    const candidate = {
         total,
         x,
         y,
@@ -227,7 +239,47 @@ export function readMapAtCalibration(captureRegion, calibration, { floors = FLOO
         scoredMap: scored,
         gameMap: scored.gameMap,
       };
+    if (!best || total > best.total) best = candidate;
+    return candidate;
+  };
+
+  for (const floor of floors) scoreFloor(floor);
+
+  // Small and Medium share the same 152px width and top-right marker. The top
+  // 152px of a genuine Medium can therefore be a marker-valid Small frame when
+  // an internal horizontal border happens to supply Small's bottom corners.
+  // Probe the taller same-width geometry even when the Small marker is valid;
+  // a complete marker-valid Medium frame is stronger geometry than that crop.
+  if (floors.length === 1 && best?.floor?.name === "Small") {
+    const lockedSmall = best;
+    const medium = FLOOR_SIZES.find((floor) => floor.name === "Medium");
+    const mediumCandidate = medium ? scoreFloor(medium) : null;
+    const hasMediumGeometry = mediumCandidate?.scoredMap?.validCorners
+      && mediumCandidate.scoredMap.readableRooms >= lockedSmall.scoredMap.readableRooms
+      && hasExtendedSideBorders(mediumCandidate.image, lockedSmall.floor.imageHeight);
+    best = hasMediumGeometry ? mediumCandidate : lockedSmall;
+  }
+
+  // Medium and Large have the same physical height. A real Large map with a
+  // continuous brown bottom border can therefore produce a frame-valid 152px
+  // left crop that looks exactly like Medium, except that its true top-right
+  // marker is still 128px farther right. The high-frequency locked-floor fast
+  // path used to accept that crop and never run the all-size comparison. Only
+  // when the single locked candidate lacks its marker, compare the remaining
+  // floor sizes at the same x/y/scale. This also protects Small against a rare
+  // internal-border crop of Medium/Large; a healthy marker lock still costs one
+  // capture and the genuine full-frame marker wins by the normal score.
+  if (floors.length === 1 && best && !best.scoredMap.validCorners) {
+    const lockedBest = best;
+    const requestedNames = new Set(floors.map((floor) => floor.name));
+    for (const floor of FLOOR_SIZES) {
+      if (!requestedNames.has(floor.name)) scoreFloor(floor);
     }
+    // The ambiguity probe exists to find the missing TRUE top-right marker. If
+    // every interpretation is marker-less, retain the locked semantic size;
+    // otherwise tolerant noise in a wider crop could manufacture more rooms
+    // and flip floors without any geometry proof.
+    if (!best.scoredMap.validCorners) best = lockedBest;
   }
   return best;
 }

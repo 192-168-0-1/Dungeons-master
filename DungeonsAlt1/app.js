@@ -8,21 +8,30 @@ import {
   isOpened,
   mapToImage,
   toChess,
-} from "./src/map-core.js?v=20260715-31";
+} from "./src/map-core.js?v=20260717-36";
 import {
   MAP_SCALE_CANDIDATES,
   findMapByAlt1Anchor,
   findMapByScaledCorners,
   readMapAtCalibration,
   scaledFloorDimensions,
-} from "./src/alt1-map-locator.js?v=20260715-31";
-import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js?v=20260715-31";
+} from "./src/alt1-map-locator.js?v=20260717-36";
+import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js?v=20260717-36";
+import { normalizeCaptureInterval, reserveCaptureSlot } from "./src/capture-scheduler.js?v=20260717-36";
+import {
+  createInterfaceScaleState,
+  currentInterfaceScale,
+  interfaceScaleLabel,
+  isFreshInterfaceScaleObservation,
+  parseSavedInterfaceScale,
+  observeInterfaceScale,
+} from "./src/interface-scale.js?v=20260717-36";
 import {
   buildMapOverlayCommands,
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260715-31";
+} from "./src/alt1-overlay.js?v=20260717-36";
 import {
   DEFAULT_FLOOR_TARGET_SECONDS,
   elapsedFloorMinutes,
@@ -34,8 +43,8 @@ import {
   parseFloorTargetSeconds,
   rpmValue,
   trackedBaseAfterTransition,
-} from "./src/rpm-state.js?v=20260715-31";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260715-31";
+} from "./src/rpm-state.js?v=20260717-36";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260717-36";
 import {
   PARTY_COLORS,
   automaticPartyRoomStatus,
@@ -44,57 +53,73 @@ import {
   partyColor,
   reconcileObservedParty,
   roomStatusLine,
-} from "./src/party-core.js?v=20260715-31";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260715-31";
-import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260715-31";
+} from "./src/party-core.js?v=20260717-36";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260717-36";
+import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260717-36";
 import {
   RESULT_COLUMNS,
   RESULT_DISPLAY_COLUMNS,
   RESULT_BATCH_MODES,
+  enforceResultStableDuration,
   nextAutoResultState,
   orderedResultsForDisplay,
   resultDisplayValue,
   plannedResultExports,
   resultCaptureRect,
-  resultMapSnapshotIsFresh,
+  resultMapSnapshotMatchesGeneration,
   resultAlreadyRecorded,
   resultLooksComplete,
+  resultStabilityKey,
+  mapSnapshotFingerprint,
   resultBatchIsComplete,
   resultBatchStatus,
   resultMatchesFloorFilter,
   normalizeResultBatchTarget,
+  normalizeStoredResults,
   safeFilePart,
   safeTimestampForFilename,
-} from "./src/results-core.js?v=20260715-31";
+} from "./src/results-core.js?v=20260717-36";
 import {
   chooseSaveFolder,
   clearStoredSaveFolder,
+  isSaveFolderPermissionError,
   loadStoredSaveFolder,
   querySaveFolderPermission,
   requestSaveFolderPermission,
   supportsFolderSaving,
   writeDataUrlToFolder,
-} from "./src/file-saver.js?v=20260715-31";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260715-31";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260715-31";
-import { WinterfaceReader } from "./src/winterface.js?v=20260715-31";
+} from "./src/file-saver.js?v=20260717-36";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260717-36";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260717-36";
+import { WinterfaceReader } from "./src/winterface.js?v=20260717-36";
+import {
+  RESULTS_SENTINEL_CADENCE_MS,
+  createResultsSentinelPlan,
+  resultsSentinelsMatch,
+} from "./src/results-sentinel.js?v=20260717-36";
 
 const SCAN_INTERVAL = 600;
 const AUTO_CALIBRATION_INTERVAL = 2500;
 const STORAGE_PREFIX = "dungeons-alt1";
 const INVALID_CAPTURES_BEFORE_RECALIBRATION = 3;
+const UNREADABLE_CAPTURES_BEFORE_RECALIBRATION = 3;
 const OVERLAY_DURATION = 30000;
 // Native overlays live for OVERLAY_DURATION, so re-issuing them every 600ms
 // frame is wasted native-call churn on the game screen. Only redraw when the
 // overlay content changes, or this often to refresh before it expires.
 const OVERLAY_REFRESH_INTERVAL = 20000;
 const PARTY_SCAN_INTERVAL = 5000;
-const RESULTS_AUTO_INTERVAL = 1500;
-const RESULTS_MANUAL_MAX_SCANS = 20;
+// Discover a newly opened final-results screen promptly, while the independent
+// three-read + 1.2s wall-clock gate below still prevents empty/animating values
+// from reaching the floor tracker. Alt1's larger captureInterval always wins.
+const RESULTS_AUTO_INTERVAL = 900;
+const RESULTS_SETTLE_INTERVAL = 300;
+const RESULTS_MANUAL_MAX_SCANS = 30;
 const RESULTS_SCALE_FALLBACK_ACTIVE_INTERVAL = 3000;
 const RESULTS_SCALE_FALLBACK_IDLE_INTERVAL = 30000;
-const RESULT_MAP_MAX_AGE_MS = 15000;
 const MAX_PENDING_RESULTS_PNGS = 20;
+const MAX_PERSISTED_RESULTS = 500;
+const RECENT_RESULT_SCREEN_MAX_AGE = 10 * 60 * 1000;
 
 // High-resolution timer for the optional in-app performance readout (debug mode).
 const perfNow = (typeof performance !== "undefined" && typeof performance.now === "function")
@@ -116,7 +141,7 @@ const elements = {
   rpmOnly: document.querySelector("#rpm-only"),
   gameOverlay: document.querySelector("#game-overlay"),
   statsPosition: document.querySelector("#stats-position"),
-  statsScale: document.querySelector("#stats-scale"),
+  interfaceScaleStatus: document.querySelector("#interface-scale-status"),
   statsFreeControls: document.querySelector("#stats-free-controls"),
   statsFreeX: document.querySelector("#stats-free-x"),
   statsFreeY: document.querySelector("#stats-free-y"),
@@ -171,9 +196,11 @@ const elements = {
 const context = elements.canvas.getContext("2d", { alpha: true });
 const teamSync = new TeamSync();
 const winterfaceReader = WinterfaceReader.load();
+const initialCalibration = loadCalibration();
 
 const state = {
-  calibration: loadCalibration(),
+  calibration: initialCalibration,
+  interfaceScale: createInterfaceScaleState(initialCalibration?.scale),
   image: null,
   gameMap: null,
   selected: null,
@@ -185,11 +212,20 @@ const state = {
   lastBase: null,
   lastRoomCount: 0,
   lastFloorName: null,
+  lastAcceptedMapScale: null,
   lastMapReadAt: 0,
-  lastResultMapConsumedAt: 0,
+  mapGeneration: 0,
+  lastResultMapGenerationConsumed: 0,
+  mapSnapshotFingerprint: "",
+  mapSnapshotRevision: 0,
+  lastResultMapSnapshotRevisionConsumed: 0,
+  activeResultContext: null,
   mapLostAt: null,
   awaitingNewFloor: false,
   invalidCaptures: 0,
+  unreadableCaptures: 0,
+  weakFrameCaptures: 0,
+  unusableCaptures: 0,
   autoScan: true,
   busy: false,
   lastCalibrationAttempt: 0,
@@ -200,16 +236,25 @@ const state = {
   // Free (movable) RPM/stats overlay position; restored from storage on init.
   statsFree: { x: 8, y: 8 },
   placingStats: false,
-  results: [],
+  results: loadStoredResults(),
+  recentResultScreen: loadRecentResultScreen(),
   resultsBusy: false,
   autoResultState: { visible: false, key: "", handled: false, missing: 0, stable: 0 },
-  autoResultKeys: new Set(),
+  resultStableTiming: { key: "", since: 0 },
   lastAutoResultScan: 0,
-  resultsInterfaceScale: null,
+  lastResultSentinelProbe: 0,
+  resultSentinelOpen: false,
+  lastResultMarkerSource: null,
+  nextPixelCaptureAt: 0,
   lastResultsScaleFallback: 0,
   pendingResultsPngs: [],
+  pendingMapPngs: [],
   droppedResultsPngs: 0,
+  droppedMapPngs: 0,
   retryingResultsPngs: false,
+  retryingMapPngs: false,
+  retryMapPngsRequested: false,
+  retryMapPngsNotify: false,
   retryResultsPngsRequested: false,
   retryResultsPngsNotify: false,
   pendingFloorReset: null,
@@ -249,9 +294,18 @@ function loadCalibration() {
   try {
     const saved = JSON.parse(storageGet(`${STORAGE_PREFIX}:calibration`));
     const floor = FLOOR_SIZES.find((candidate) => candidate.name === saved?.floor);
-    const scale = Number(saved?.scale) > 0 ? Number(saved.scale) : 1;
-    if (floor && Number.isInteger(saved.x) && Number.isInteger(saved.y)) {
+    const scale = parseSavedInterfaceScale(saved?.scale);
+    if (floor && scale !== null
+      && Number.isInteger(saved.x) && saved.x >= 0
+      && Number.isInteger(saved.y) && saved.y >= 0) {
       const dimensions = scaledFloorDimensions(floor, scale);
+      const linkedClient = currentClientDimensions();
+      const storedWidth = Number(saved.rsWidth) > 0 ? Math.round(Number(saved.rsWidth)) : 0;
+      const storedHeight = Number(saved.rsHeight) > 0 ? Math.round(Number(saved.rsHeight)) : 0;
+      const clientWidth = linkedClient.width || storedWidth;
+      const clientHeight = linkedClient.height || storedHeight;
+      if ((clientWidth && saved.x + dimensions.width > clientWidth)
+        || (clientHeight && saved.y + dimensions.height > clientHeight)) return null;
       return {
         x: saved.x,
         y: saved.y,
@@ -259,6 +313,9 @@ function loadCalibration() {
         scale: dimensions.scale,
         captureWidth: dimensions.width,
         captureHeight: dimensions.height,
+        rsWidth: storedWidth || null,
+        rsHeight: storedHeight || null,
+        verified: false,
       };
     }
   } catch {
@@ -274,7 +331,36 @@ function saveCalibration() {
     y: state.calibration.y,
     floor: state.calibration.floor.name,
     scale: state.calibration.scale || 1,
+    rsWidth: state.calibration.rsWidth || currentClientDimensions().width || null,
+    rsHeight: state.calibration.rsHeight || currentClientDimensions().height || null,
   }));
+}
+
+function loadStoredResults() {
+  try {
+    return normalizeStoredResults(
+      JSON.parse(storageGet(`${STORAGE_PREFIX}:results`) || "[]"),
+      MAX_PERSISTED_RESULTS,
+    );
+  } catch {
+    return [];
+  }
+}
+
+function persistResults() {
+  state.results = normalizeStoredResults(state.results, MAX_PERSISTED_RESULTS);
+  return storageSet(`${STORAGE_PREFIX}:results`, JSON.stringify(state.results));
+}
+
+function loadRecentResultScreen() {
+  try {
+    const value = JSON.parse(storageGet(`${STORAGE_PREFIX}:last-result-screen`) || "null");
+    const committedAt = Number(value?.committedAt);
+    const key = String(value?.key || "").slice(0, 4096);
+    return key && Number.isFinite(committedAt) && committedAt > 0 ? { key, committedAt } : null;
+  } catch {
+    return null;
+  }
 }
 
 function storageGet(key) {
@@ -301,6 +387,54 @@ function storageRemove(key) {
   } catch {
     return false;
   }
+}
+
+function currentClientDimensions() {
+  const width = Math.round(Number(window.alt1?.rsWidth));
+  const height = Math.round(Number(window.alt1?.rsHeight));
+  return {
+    width: Number.isFinite(width) && width > 0 ? width : 0,
+    height: Number.isFinite(height) && height > 0 ? height : 0,
+  };
+}
+
+function calibrationWithClientDimensions(calibration) {
+  if (!calibration) return null;
+  const client = currentClientDimensions();
+  return {
+    ...calibration,
+    rsWidth: client.width || calibration.rsWidth || null,
+    rsHeight: client.height || calibration.rsHeight || null,
+    verified: true,
+  };
+}
+
+function calibrationMatchesLinkedClient(calibration) {
+  if (!calibration) return false;
+  const client = currentClientDimensions();
+  if (!client.width || !client.height || !calibration.rsWidth || !calibration.rsHeight) return true;
+  return client.width === calibration.rsWidth && client.height === calibration.rsHeight;
+}
+
+function updateInterfaceScaleStatus() {
+  if (!elements.interfaceScaleStatus) return;
+  let label = interfaceScaleLabel(
+    state.interfaceScale,
+    state.calibration?.verified ? state.calibration : null,
+  );
+  const desktopCapture = Boolean(window.alt1?.compatEnabled);
+  if (desktopCapture) label += " — Desktop capture includes overlays; native in-game overlay disabled (use DirectX/OpenGL)";
+  elements.interfaceScaleStatus.textContent = label;
+  elements.interfaceScaleStatus.dataset.tone = desktopCapture ? "warn" : "ok";
+}
+
+function recordInterfaceScale(value, source) {
+  state.interfaceScale = observeInterfaceScale(state.interfaceScale, value, source, Date.now());
+  updateInterfaceScaleStatus();
+}
+
+function detectedInterfaceScale() {
+  return currentInterfaceScale({ calibration: state.calibration, scaleState: state.interfaceScale });
 }
 
 function setStatus(text, tone = "neutral") {
@@ -354,6 +488,7 @@ function pointInFloor(point, floor = state.gameMap?.floor) {
 
 function resetFloor(now = Date.now(), openedRooms = 1) {
   state.floorStart = floorStartForDetectedMap(now, openedRooms);
+  state.mapGeneration += 1;
   state.pendingFloorReset = null;
   state.annotations.clear();
   state.manualCritical.clear();
@@ -364,8 +499,18 @@ function resetFloor(now = Date.now(), openedRooms = 1) {
 }
 
 function clearCalibration() {
+  if (state.calibration?.scale) {
+    state.interfaceScale = {
+      ...state.interfaceScale,
+      value: state.calibration.scale,
+      source: "saved-hint",
+      confirmed: false,
+    };
+  }
   state.calibration = null;
   storageRemove(`${STORAGE_PREFIX}:calibration`);
+  clearGameOverlay();
+  updateInterfaceScaleStatus();
 }
 
 function sameCalibration(left, right) {
@@ -400,13 +545,18 @@ async function calibrate({ silent = false } = {}) {
     assertAlt1Ready();
     if (!silent) setStatus("Searching for the Dungeoneering map…");
     await nextPaint();
+    await waitForPixelCaptureSlot();
     const match = findMapInRuneScapeClient();
     if (!match) {
       clearCalibration();
       setStatus("Waiting for a Dungeoneering map to appear…", "warn");
     } else {
-      state.calibration = match;
+      state.calibration = calibrationWithClientDimensions(match);
       state.invalidCaptures = 0;
+      state.unreadableCaptures = 0;
+      state.weakFrameCaptures = 0;
+      state.unusableCaptures = 0;
+      recordInterfaceScale(match.scale || 1, "map");
       saveCalibration();
       found = true;
       const scaleText = match.scale && match.scale !== 1 ? ` @${Math.round(match.scale * 100)}%` : "";
@@ -433,11 +583,17 @@ function nextPaint() {
 }
 
 async function updateMap() {
-  if (state.busy || !state.calibration || !state.autoScan) return;
+  if (state.busy || state.resultsBusy || !state.calibration || !state.autoScan) return;
+  if (!tryReservePixelCaptureSlot()) return;
   state.busy = true;
   let shouldRecalibrate = false;
   try {
     assertAlt1Ready();
+    if (!calibrationMatchesLinkedClient(state.calibration)) {
+      shouldRecalibrate = true;
+      setStatus("RuneScape client size changed — detecting the map and interface scale again", "warn");
+      return;
+    }
     // Re-read at the locked location, re-detecting the floor size in place the
     // way the desktop EXE does (MapForm.UpdateMap). Only fall back to a full
     // client search when the map can no longer be framed at its calibrated
@@ -463,11 +619,16 @@ async function updateMap() {
       if (relocated) read = readMapAtCalibration(captureRegion, relocated, { floors: [relocated.floor] });
     }
     if (!read) {
-      if (!state.mapLostAt) state.mapLostAt = Date.now();
-      state.pendingFloorReset = null;
+      if (!state.mapLostAt) {
+        state.mapLostAt = Date.now();
+        // Never leave a 30-second native overlay floating at stale coordinates
+        // while the map/results/loading screen is no longer readable.
+        clearGameOverlay();
+      }
       state.invalidCaptures += 1;
-      setStatus(`Map image lost (${state.invalidCaptures}/${INVALID_CAPTURES_BEFORE_RECALIBRATION})`, "warn");
-      shouldRecalibrate = state.invalidCaptures >= INVALID_CAPTURES_BEFORE_RECALIBRATION;
+      state.unusableCaptures += 1;
+      setStatus(`Map image lost (${state.unusableCaptures}/${INVALID_CAPTURES_BEFORE_RECALIBRATION})`, "warn");
+      shouldRecalibrate = state.unusableCaptures >= INVALID_CAPTURES_BEFORE_RECALIBRATION;
       return;
     }
 
@@ -481,26 +642,58 @@ async function updateMap() {
     const readableRooms = read.gameMap.openedRoomCount + read.gameMap.mysteryCount;
     if (readableRooms < 1) {
       if (!state.mapLostAt) state.mapLostAt = Date.now();
-      state.pendingFloorReset = null;
-      state.invalidCaptures = 0;
-      setStatus("Map framed but rooms unreadable (interface scaling?) — keeping the last good read", "warn");
+      state.unreadableCaptures += 1;
+      state.unusableCaptures += 1;
+      clearGameOverlay();
+      shouldRecalibrate = state.unusableCaptures >= UNREADABLE_CAPTURES_BEFORE_RECALIBRATION;
+      setStatus(shouldRecalibrate
+        ? "Map frame stayed unreadable — detecting interface scale again"
+        : `Map framed but rooms unreadable (${state.unusableCaptures}/${UNREADABLE_CAPTURES_BEFORE_RECALIBRATION}) — keeping the last good RPM`, "warn");
       updateStats();
       return;
     }
 
-    const nextCalibration = {
+    // A stale saved scale can occasionally hallucinate one readable room. Ask
+    // an unverified localStorage hint for the strong top-right marker before it
+    // may alter state. Once a lock has been proven live, retain the desktop
+    // EXE's three-corner contract: that marker can legitimately disappear due
+    // to scaled rasterisation or Desktop/overlay occlusion.
+    if (!state.calibration.verified && !read.scoredMap.validCorners) {
+      if (!state.mapLostAt) state.mapLostAt = Date.now();
+      state.weakFrameCaptures += 1;
+      state.unusableCaptures += 1;
+      shouldRecalibrate = state.unusableCaptures >= UNREADABLE_CAPTURES_BEFORE_RECALIBRATION;
+      setStatus(shouldRecalibrate
+        ? "Map marker stayed invalid — detecting map size and interface scale again"
+        : `Saved map lock is not verified (${state.unusableCaptures}/${UNREADABLE_CAPTURES_BEFORE_RECALIBRATION}) — holding the last good RPM`, "warn");
+      updateStats();
+      return;
+    }
+
+    const nextCalibration = calibrationWithClientDimensions({
       x: read.x,
       y: read.y,
       floor: read.floor,
       scale: read.scale,
       captureWidth: read.captureWidth,
       captureHeight: read.captureHeight,
-    };
+    });
     const image = read.image;
     const scoredMap = read.scoredMap;
     const floor = read.floor;
 
     state.invalidCaptures = 0;
+    state.unreadableCaptures = 0;
+    state.weakFrameCaptures = 0;
+    state.unusableCaptures = 0;
+    const calibrationChanged = !sameCalibration(nextCalibration, state.calibration);
+    const priorAcceptedScale = Number(state.lastAcceptedMapScale);
+    const calibrationScaleChanged = Number.isFinite(priorAcceptedScale) && priorAcceptedScale > 0
+      && Math.abs(Number(nextCalibration.scale || 1) - priorAcceptedScale) >= 0.025;
+    const calibrationNeedsClientMetadata = !state.calibration?.rsWidth || !state.calibration?.rsHeight;
+    state.calibration = nextCalibration;
+    if (calibrationChanged || calibrationNeedsClientMetadata) saveCalibration();
+    recordInterfaceScale(nextCalibration.scale || 1, "map");
     const gameMap = scoredMap.gameMap;
     const now = Date.now();
     const mapGapMs = state.mapLostAt ? Math.max(0, now - state.mapLostAt) : 0;
@@ -509,10 +702,13 @@ async function updateMap() {
       lastBase: state.lastBase,
       lastRoomCount: state.lastRoomCount,
       lastFloorName: state.lastFloorName,
+      lastGameMap: state.gameMap,
+      scaleChanged: calibrationScaleChanged,
       mapGapMs,
       // The pure transition gate combines this results-screen lifecycle latch
       // with mapGapMs and never trusts a single returning map frame.
       awaitingNewFloor: state.awaitingNewFloor,
+      resultsScreenVisible: Boolean(state.autoResultState?.visible),
       pendingReset: state.pendingFloorReset,
     }, gameMap, nextCalibration, now);
     // Gap evidence belongs to this first readable frame. A genuine gap-based
@@ -525,6 +721,8 @@ async function updateMap() {
         "pending-base-change": "base moved",
         "pending-floor-change": "floor size changed",
         "pending-map-gap-regression": "room count dropped after map loss",
+        "pending-room-regression": "lower room count stayed visible",
+        "pending-results-lifecycle": "results screen completed",
         "pending-single-base": "single base room",
       }[transition.reason] || transition.reason;
       setStatus(`Possible new floor detected (${pendingReason}); waiting for confirmation`, "warn");
@@ -532,11 +730,11 @@ async function updateMap() {
       // new read awaits confirmation, matching the C# reference which refreshes
       // its data label every frame (the JS gate must not freeze the readout).
       updateStats();
+      // Geometry is independent from accepted room progress. Re-anchor the
+      // strip immediately when the map moved/rescaled, while annotations are
+      // suppressed by renderGameOverlay if the semantic floor is still old.
+      renderGameOverlay();
       return;
-    }
-    if (!sameCalibration(nextCalibration, state.calibration)) {
-      state.calibration = nextCalibration;
-      saveCalibration();
     }
     if (transition.reset) {
       resetFloor(transition.resetAt ?? now, transition.resetRoomCount ?? gameMap.openedRoomCount);
@@ -548,15 +746,22 @@ async function updateMap() {
       state.lastTransition = "same-floor-room-regression-held";
       setStatus(`Room read dipped ${state.lastRoomCount}→${gameMap.openedRoomCount}; keeping the last good RPM`, "warn");
       updateStats();
+      renderGameOverlay();
       return;
     }
 
     const tReadMs = perfNow() - tRead0;
+    const snapshotFingerprint = mapSnapshotFingerprint(gameMap);
+    if (snapshotFingerprint && snapshotFingerprint !== state.mapSnapshotFingerprint) {
+      state.mapSnapshotFingerprint = snapshotFingerprint;
+      state.mapSnapshotRevision += 1;
+    }
     state.image = image;
     state.gameMap = gameMap;
     state.lastBase = trackedBaseAfterTransition(state.lastBase, gameMap.base, transition.reset);
     state.lastRoomCount = gameMap.openedRoomCount;
     state.lastFloorName = floor.name;
+    state.lastAcceptedMapScale = nextCalibration.scale || 1;
     state.lastMapReadAt = now;
     const tDetect0 = perfNow();
     updateLocalGatestones(detectGatestones(image, gameMap));
@@ -612,14 +817,6 @@ const PACE_OVERLAY_COLORS = {
 
 function floorPaceTargetSeconds() {
   return parseFloorTargetSeconds(elements.paceTarget?.value, DEFAULT_FLOOR_TARGET_SECONDS);
-}
-
-// User size for the in-game RPM/stats strip, as a fraction (100% -> 1). Clamped
-// so it stays legible and cannot be shrunk away or blown up off-screen.
-function statsScaleValue() {
-  const percent = Number(elements.statsScale?.value);
-  const fraction = Number.isFinite(percent) && percent > 0 ? percent / 100 : 1;
-  return Math.min(3, Math.max(0.5, fraction));
 }
 
 // The free-position X/Y controls only apply to the "Free / movable" mode.
@@ -1020,6 +1217,11 @@ function renderGameOverlay() {
     return;
   }
   const group = "dungeons-alt1";
+  if (api.compatEnabled) {
+    drawGameOverlayGated(api, group, []);
+    updateOverlayStatus("Desktop capture active — native game overlay disabled to keep map/results pixels clean");
+    return;
+  }
   if (!elements.gameOverlay.checked || !state.calibration || !state.gameMap || api.permissionOverlay === false) {
     drawGameOverlayGated(api, group, []);
     updateOverlayStatus();
@@ -1028,23 +1230,33 @@ function renderGameOverlay() {
 
   // Pixel capture and native overlays both use RuneScape-client coordinates.
   // Screen coordinates such as alt1.rsX/rsY must never be added here.
+  const overlayFloor = state.calibration.floor;
+  const mapContentMatchesGeometry = state.gameMap.floor?.name === overlayFloor?.name;
+  const hideMapDetails = elements.rpmOnly.checked
+    || !mapContentMatchesGeometry
+    || Boolean(state.pendingFloorReset)
+    || state.awaitingNewFloor
+    || Boolean(state.autoResultState?.visible);
   const commands = buildMapOverlayCommands({
     mapX: state.calibration.x,
     mapY: state.calibration.y,
-    floor: state.gameMap.floor,
+    floor: overlayFloor,
     overlayScale: state.calibration.scale || 1,
-    annotations: elements.rpmOnly.checked ? [] : [...state.annotations].map(([pointKey, annotation]) => ({
+    annotations: hideMapDetails ? [] : [...state.annotations].map(([pointKey, annotation]) => ({
       point: pointFromKey(pointKey),
       text: annotation.text,
       color: ownerColor(annotation.ownerId, annotation.slot, null),
     })),
-    manualCritical: elements.rpmOnly.checked ? [] : [...state.manualCritical].map(pointFromKey),
-    gatestones: elements.rpmOnly.checked ? [] : collectGatestoneMarkers(state.gameMap.floor),
+    manualCritical: hideMapDetails ? [] : [...state.manualCritical].map(pointFromKey),
+    gatestones: hideMapDetails ? [] : collectGatestoneMarkers(overlayFloor),
     stats: currentOverlayStats(),
     statsPosition: elements.statsPosition?.value || "bottom",
     statsColor: PACE_OVERLAY_COLORS[currentFloorPace().status] || undefined,
-    statsScale: statsScaleValue(),
+    // The overlay module derives every physical size from the detected map
+    // scale. There is no second manual UI-scale knob to drift out of sync.
+    statsScale: 1,
     statsScreen: { width: api.rsWidth, height: api.rsHeight },
+    statsAvoidMapOverlap: false,
     statsFree: state.statsFree,
     duration: OVERLAY_DURATION,
   });
@@ -1056,6 +1268,10 @@ function testGameOverlay() {
   updateOverlayStatus();
   if (!hasAlt1()) return;
   const api = window.alt1;
+  if (api.compatEnabled) {
+    updateOverlayStatus("Test disabled in Desktop capture — switch Alt1 to DirectX/OpenGL first");
+    return;
+  }
   if (!api.rsLinked) {
     updateOverlayStatus("Test failed: Alt1 is not linked to RuneScape");
     return;
@@ -1146,22 +1362,32 @@ function saveFolderState(kind) {
   return state.saveFolders[kind] || state.saveFolders.map;
 }
 
+function canRequestSaveFolderPermission(folder) {
+  // Alt1 1.6 uses CefSharp's Alloy browser without a host PermissionHandler.
+  // Its requestPermission promise can therefore remain unresolved forever.
+  // Re-picking the directory is both supported and already requests readwrite.
+  return !hasAlt1() && typeof folder?.handle?.requestPermission === "function";
+}
+
 function updateSaveFolderStatus(kind) {
   const target = saveFolderTarget(kind);
   const folder = saveFolderState(kind);
-  const pendingCount = kind === "results" ? state.pendingResultsPngs.length : 0;
+  const pendingCount = kind === "results" ? state.pendingResultsPngs.length : state.pendingMapPngs.length;
   const pendingText = pendingCount
-    ? ` · ${pendingCount} result PNG${pendingCount === 1 ? "" : "s"} waiting to retry`
+    ? ` · ${pendingCount} ${target.label} PNG${pendingCount === 1 ? "" : "s"} waiting to retry`
     : "";
-  const droppedText = kind === "results" && state.droppedResultsPngs
-    ? ` · ${state.droppedResultsPngs} older PNG${state.droppedResultsPngs === 1 ? "" : "s"} could not be retained`
+  const dropped = kind === "results" ? state.droppedResultsPngs : state.droppedMapPngs;
+  const droppedText = dropped
+    ? ` · ${dropped} older PNG${dropped === 1 ? "" : "s"} could not be retained`
     : "";
   elements[target.choose].disabled = folder.loading || !state.saveFolders.supported;
   elements[target.clear].disabled = folder.loading || !folder.handle;
-  // Offer the one-click re-grant only when a folder is remembered but its grant
-  // lapsed (restored handles read back as "prompt" after an Alt1 restart).
+  // Offer the one-click re-grant only when the embedded browser exposes that
+  // operation. Some Alt1 builds can write a picker handle but cannot inspect or
+  // separately request its permission state.
   elements[target.reallow].hidden = !(!folder.loading && state.saveFolders.supported
-    && folder.handle && folder.permission !== "granted");
+    && folder.handle && folder.permission !== "granted"
+    && canRequestSaveFolderPermission(folder));
   if (folder.loading) {
     elements[target.status].textContent = `Checking ${target.label} save folder...${pendingText}${droppedText}`;
     return;
@@ -1174,8 +1400,15 @@ function updateSaveFolderStatus(kind) {
     elements[target.status].textContent = `Saving ${target.label} PNGs to: ${folder.name || "selected folder"}${pendingText}${droppedText}`;
     return;
   }
+  if (folder.handle && folder.permission === "unknown") {
+    elements[target.status].textContent = `${target.label} folder selected: ${folder.name || "selected folder"} · write access will be verified on the next PNG${pendingText}${droppedText}`;
+    return;
+  }
   if (folder.handle) {
-    elements[target.status].textContent = `${target.label} folder access expired — click Re-allow folder${pendingText}${droppedText}`;
+    const action = canRequestSaveFolderPermission(folder)
+      ? "click Re-allow folder"
+      : "choose the folder again";
+    elements[target.status].textContent = `${target.label} folder access ${folder.permission === "denied" ? "blocked" : "needs confirmation"} — ${action}${pendingText}${droppedText}`;
     return;
   }
   elements[target.status].textContent = `Choose a ${target.label} folder before ${target.label} PNG auto-save${pendingText}${droppedText}`;
@@ -1210,8 +1443,9 @@ async function refreshStoredSaveFolder(kind) {
     folder.loading = false;
     updateSaveFolderStatus(kind);
   }
-  if (kind === "results" && folder.permission === "granted") {
-    await retryPendingResultsPngs();
+  if (folder.permission === "granted" || folder.permission === "unknown") {
+    if (kind === "results") await retryPendingResultsPngs();
+    else await retryPendingMapPngs();
   }
 }
 
@@ -1235,10 +1469,11 @@ async function selectSaveFolder(kind) {
   try {
     const handle = await chooseSaveFolder(window, target.key);
     folder.handle = handle;
-    folder.name = handle?.name || "";
-    folder.permission = handle ? await querySaveFolderPermission(handle) : "unknown";
-    if (handle) setStatus(`${target.label} save folder selected: ${folder.name || "selected folder"}`, "ok");
-    else setStatus(`${target.label} save folder permission was not granted`, "error");
+    folder.name = handle.name || "";
+    // showDirectoryPicker({mode:"readwrite"}) only resolves after the fresh
+    // grant succeeds. Trust that grant even if Alt1 lacks queryPermission.
+    folder.permission = "granted";
+    setStatus(`${target.label} save folder selected: ${folder.name || "selected folder"}`, "ok");
   } catch (error) {
     const cancelled = error?.name === "AbortError";
     setStatus(cancelled ? `${target.label} save folder unchanged` : `Could not choose ${target.label} folder: ${error.message || error}`, cancelled ? "warn" : "error");
@@ -1246,8 +1481,9 @@ async function selectSaveFolder(kind) {
     folder.loading = false;
     updateSaveFolderStatus(kind);
   }
-  if (kind === "results" && folder.permission === "granted") {
-    await retryPendingResultsPngs();
+  if (folder.permission === "granted") {
+    if (kind === "results") await retryPendingResultsPngs();
+    else await retryPendingMapPngs();
   }
 }
 
@@ -1275,6 +1511,11 @@ async function reallowSaveFolder(kind) {
   const target = saveFolderTarget(kind);
   const folder = saveFolderState(kind);
   if (folder.loading || !folder.handle) return;
+  if (!canRequestSaveFolderPermission(folder)) {
+    setStatus(`Choose the ${target.label} folder again to restore Alt1 write access`, "warn");
+    updateSaveFolderStatus(kind);
+    return;
+  }
   const handle = folder.handle;
   folder.loading = true;
   updateSaveFolderStatus(kind);
@@ -1293,8 +1534,11 @@ async function reallowSaveFolder(kind) {
   if (folder.permission === "granted") {
     setStatus(`${label} folder re-allowed — PNG auto-save active`, "ok");
     if (kind === "results") await retryPendingResultsPngs();
+    else await retryPendingMapPngs();
   } else {
-    setStatus(`${label} folder access still blocked — pick the folder again`, "warn");
+    setStatus(folder.permission === "unknown"
+      ? `${label} folder permission cannot be inspected in this Alt1 version; the next PNG write will verify it`
+      : `${label} folder access still blocked — pick the folder again`, "warn");
   }
 }
 
@@ -1312,23 +1556,23 @@ async function writePngToSaveFolder(kind, filename, dataUrl, label, options = {}
     updateSaveFolderStatus(kind);
     return { saved: false, reason: "no-folder" };
   }
-  let permission = await querySaveFolderPermission(handle);
-  // A Re-allow click may have completed while the background query was in
-  // flight. Do not let that older "prompt" result overwrite a fresh grant.
-  if (folder.handle === handle && folder.permission === "granted" && permission !== "granted") {
-    permission = await querySaveFolderPermission(handle);
-  }
+  // A freshly picked handle is already granted by showDirectoryPicker. Do not
+  // downgrade it through an unsupported/broken queryPermission implementation;
+  // a failed real write below will revoke this optimistic state safely.
+  let permission = folder.permission === "granted"
+    ? "granted"
+    : await querySaveFolderPermission(handle);
   // The File System Access grant does not survive a reload, so a restored handle
   // reads back as "prompt". A manual save is a user gesture, so we can re-request
   // the grant in place instead of forcing the user to pick the folder again.
   // (The quiet auto-save path cannot prompt — it runs outside a user gesture.)
-  if (permission === "prompt" && !quiet) {
+  if (permission === "prompt" && !quiet && canRequestSaveFolderPermission(folder)) {
     permission = await requestSaveFolderPermission(handle);
   }
   if (folder.handle !== handle) return { saved: false, reason: "handle-changed" };
   folder.permission = permission;
   updateSaveFolderStatus(kind);
-  if (permission !== "granted") {
+  if (permission === "prompt" || permission === "denied") {
     if (!quiet) setStatus(`${target.label} folder permission needed; choose the folder again`, "warn");
     return { saved: false, reason: "permission" };
   }
@@ -1336,34 +1580,53 @@ async function writePngToSaveFolder(kind, filename, dataUrl, label, options = {}
     // Keep using the permission-checked handle even if another UI event changes
     // the selected folder while this asynchronous write is in progress.
     await writeDataUrlToFolder(handle, filename, dataUrl);
+    if (folder.handle === handle) {
+      folder.permission = "granted";
+      updateSaveFolderStatus(kind);
+    }
     if (!quiet) setStatus(`${label} saved to ${folder.name || "selected folder"}`, "ok");
     return { saved: true, filename };
   } catch (error) {
-    if (!quiet) setStatus(`Could not save ${label}: ${error.message || error}`, "error");
-    return { saved: false, reason: "error" };
+    const permissionError = isSaveFolderPermissionError(error);
+    if (folder.handle === handle && permissionError) {
+      folder.permission = "prompt";
+      updateSaveFolderStatus(kind);
+    }
+    if (!quiet) {
+      setStatus(permissionError
+        ? `${target.label} folder write permission is unavailable in Alt1 — choose the folder again; this PNG is kept for retry`
+        : `Could not save ${label}: ${error.message || error}`, permissionError ? "warn" : "error");
+    }
+    return { saved: false, reason: permissionError ? "permission" : "error" };
   }
 }
 
-function mapPngFilename(date = new Date()) {
-  const floor = safeFilePart(state.gameMap?.floor?.name, "unknown");
+function mapPngFilename(date = new Date(), floorName = state.gameMap?.floor?.name) {
+  const floor = safeFilePart(floorName, "unknown");
   return `dungeon-map-${floor}-${safeTimestampForFilename(date)}.png`;
 }
 
 async function saveMap(options = {}) {
-  if (!state.image) {
+  const frozenDataUrl = typeof options?.dataUrl === "string" ? options.dataUrl : null;
+  if (!frozenDataUrl && !state.image) {
     // Every other save path reports a reason; the manual button must not no-op
     // silently. Stay quiet on the auto-save path (it aggregates its own status).
     if (!options?.quiet) setStatus("No map to save yet — wait for a Dungeoneering map to appear", "warn");
     return { saved: false, reason: "no-map" };
   }
   const date = options?.date instanceof Date ? options.date : new Date();
-  return writePngToSaveFolder(
+  const prepared = {
+    filename: mapPngFilename(date, options?.floorName),
+    dataUrl: frozenDataUrl || elements.canvas.toDataURL("image/png"),
+  };
+  const saved = await writePngToSaveFolder(
     "map",
-    mapPngFilename(date),
-    elements.canvas.toDataURL("image/png"),
+    prepared.filename,
+    prepared.dataUrl,
     "Map PNG",
     options,
   );
+  return { ...saved, prepared };
 }
 
 function resultsPngFilename(result, date = new Date()) {
@@ -1417,6 +1680,78 @@ async function saveResultsInterfacePng(capture, date = new Date(), options = {})
   return { ...saved, prepared };
 }
 
+function queuePendingMapPng(artifact) {
+  const prepared = artifact?.prepared;
+  const retryable = ["no-folder", "permission", "error", "handle-changed"].includes(artifact?.reason);
+  if (artifact?.saved || !retryable || !prepared?.filename || !prepared?.dataUrl) return;
+  const existing = state.pendingMapPngs.findIndex((item) => item.filename === prepared.filename);
+  if (existing >= 0) state.pendingMapPngs[existing] = prepared;
+  else {
+    if (state.pendingMapPngs.length >= MAX_PENDING_RESULTS_PNGS) {
+      state.pendingMapPngs.shift();
+      state.droppedMapPngs += 1;
+    }
+    state.pendingMapPngs.push(prepared);
+  }
+  updateSaveFolderStatus("map");
+  if (["granted", "unknown"].includes(saveFolderState("map").permission)) {
+    setTimeout(() => { retryPendingMapPngs({ quiet: true }); }, 0);
+  }
+}
+
+async function retryPendingMapPngs({ quiet = false } = {}) {
+  if (state.retryingMapPngs) {
+    state.retryMapPngsRequested = true;
+    if (!quiet) state.retryMapPngsNotify = true;
+    return { saved: 0, remaining: state.pendingMapPngs.length };
+  }
+  if (!state.pendingMapPngs.length) {
+    return { saved: 0, remaining: state.pendingMapPngs.length };
+  }
+  const folder = saveFolderState("map");
+  if (!state.saveFolders.supported || !folder.handle
+    || folder.permission === "prompt" || folder.permission === "denied") {
+    return { saved: 0, remaining: state.pendingMapPngs.length };
+  }
+  state.retryingMapPngs = true;
+  let saved = 0;
+  try {
+    do {
+      state.retryMapPngsRequested = false;
+      const pending = state.pendingMapPngs.splice(0);
+      const remaining = [];
+      for (let index = 0; index < pending.length; index += 1) {
+        const prepared = pending[index];
+        const result = await writePngToSaveFolder(
+          "map", prepared.filename, prepared.dataUrl, "Map PNG", { quiet: true },
+        );
+        if (result.saved) saved += 1;
+        else {
+          remaining.push(prepared, ...pending.slice(index + 1));
+          break;
+        }
+      }
+      const merged = new Map();
+      for (const prepared of [...remaining, ...state.pendingMapPngs]) {
+        if (prepared?.filename && prepared?.dataUrl) merged.set(prepared.filename, prepared);
+      }
+      const items = [...merged.values()];
+      const overflow = Math.max(0, items.length - MAX_PENDING_RESULTS_PNGS);
+      if (overflow) state.droppedMapPngs += overflow;
+      state.pendingMapPngs = overflow ? items.slice(overflow) : items;
+    } while (state.retryMapPngsRequested && state.pendingMapPngs.length);
+  } finally {
+    state.retryingMapPngs = false;
+    updateSaveFolderStatus("map");
+  }
+  const notifyRetry = !quiet || state.retryMapPngsNotify;
+  state.retryMapPngsNotify = false;
+  if (notifyRetry && saved) {
+    setStatus(`Retried and saved ${saved} map PNG${saved === 1 ? "" : "s"}`, state.pendingMapPngs.length ? "warn" : "ok");
+  }
+  return { saved, remaining: state.pendingMapPngs.length };
+}
+
 function queuePendingResultsPng(artifact) {
   const prepared = artifact?.prepared;
   const retryable = ["no-folder", "permission", "error", "handle-changed"].includes(artifact?.reason);
@@ -1431,7 +1766,7 @@ function queuePendingResultsPng(artifact) {
     state.pendingResultsPngs.push(prepared);
   }
   updateSaveFolderStatus("results");
-  if (saveFolderState("results").permission === "granted") {
+  if (["granted", "unknown"].includes(saveFolderState("results").permission)) {
     // One asynchronous retry covers transient write errors. A repeated failure
     // remains visible in the queue until the user chooses/re-allows the folder.
     setTimeout(() => { retryPendingResultsPngs({ quiet: true }); }, 0);
@@ -1448,7 +1783,8 @@ async function retryPendingResultsPngs({ quiet = false } = {}) {
   const folder = saveFolderState("results");
   // Avoid querying/walking the complete queue before every new floor when the
   // same missing or expired folder makes every write predictably impossible.
-  if (!state.saveFolders.supported || !folder.handle || folder.permission !== "granted") {
+  if (!state.saveFolders.supported || !folder.handle
+    || folder.permission === "prompt" || folder.permission === "denied") {
     return { saved: 0, remaining: state.pendingResultsPngs.length };
   }
   state.retryingResultsPngs = true;
@@ -1502,7 +1838,7 @@ async function retryPendingResultsPngs({ quiet = false } = {}) {
   return { saved, remaining: state.pendingResultsPngs.length };
 }
 
-function resultExtraFields() {
+function liveResultExtraFields() {
   return {
     roomcount: state.gameMap?.openedRoomCount,
     deadEnds: state.gameMap?.deadEndCount,
@@ -1512,37 +1848,90 @@ function resultExtraFields() {
   };
 }
 
+function resultExtraFields() {
+  return state.activeResultContext?.extraFields || liveResultExtraFields();
+}
+
+function freezeCurrentResultContext(date = new Date()) {
+  const extraFields = liveResultExtraFields();
+  let mapDataUrl = null;
+  if (state.image) {
+    try {
+      // Freeze the exact rendered end-of-floor map now. The independent map and
+      // results scan loops may advance state while OCR settles for 1.2s.
+      mapDataUrl = elements.canvas.toDataURL("image/png");
+    } catch {
+      mapDataUrl = null;
+    }
+  }
+  return {
+    extraFields,
+    mapGeneration: state.mapGeneration,
+    mapSnapshotRevision: state.mapSnapshotRevision,
+    mapFloorName: state.gameMap?.floor?.name ?? null,
+    mapDataUrl,
+    capturedAt: date instanceof Date ? date : new Date(),
+  };
+}
+
 async function readDungeonResultsCapture(date = new Date(), {
   allowScaleFallback = true,
   interfaceScale = null,
+  trustScaleHint = false,
 } = {}) {
   const reader = await winterfaceReader;
   // Do not capture until the lazily-loaded OCR assets are ready. On a cold
   // start, capturing first could leave us parsing an interface frame that was
   // already animating or closed by the time the reader finished loading.
+  await prepareDesktopFullCapture();
+  await waitForPixelCaptureSlot();
   const image = captureFullRuneScape();
   const calibratedScale = Number(state.calibration?.scale) || null;
-  if (state.resultsInterfaceScale && calibratedScale
-    && Math.abs(state.resultsInterfaceScale - calibratedScale) >= 0.025) {
-    // Map calibration is a fresher measurement of RuneScape's global UI scale
-    // than a results screen cached from an earlier floor/session.
-    state.resultsInterfaceScale = null;
-  }
+  const scaleHint = interfaceScale ?? detectedInterfaceScale();
   const capture = reader.readWithOffset(image, {
     ...resultExtraFields(),
     timestamp: date,
     // The map locator already knows RuneScape's interface scale. The results
     // reader uses it first, then falls back across supported scales when no map
     // has been calibrated yet.
-    interfaceScale: interfaceScale ?? state.resultsInterfaceScale ?? calibratedScale,
+    interfaceScale: scaleHint,
     allowScaleFallback,
-    trustScaleHint: Boolean(state.resultsInterfaceScale),
+    // A stored/previous observation is only a fast probe. The matcher must
+    // remain allowed to prove that RuneScape's interface scale changed.
+    trustScaleHint,
   });
   if (!capture) return null;
-  state.resultsInterfaceScale = capture.scale || state.resultsInterfaceScale;
+  const markerRect = resultCaptureRect(capture);
+  if (markerRect) {
+    state.lastResultMarkerSource = {
+      x: markerRect.offset.x,
+      y: markerRect.offset.y,
+      width: markerRect.width,
+      height: markerRect.height,
+      scale: Number(capture.rawScale ?? capture.sourceScale ?? capture.scale) || detectedInterfaceScale(),
+      clientWidth: Number(window.alt1?.rsWidth) || 0,
+      clientHeight: Number(window.alt1?.rsHeight) || 0,
+    };
+  }
+  if (!state.activeResultContext) state.activeResultContext = freezeCurrentResultContext(date);
+  const completionContext = state.activeResultContext;
+  // Keep every follow-up OCR read paired with the map/stats from the first
+  // marker sighting, even if a new map frame arrives while values settle.
+  capture.result.Roomcount = String(completionContext.extraFields.roomcount ?? "");
+  capture.result.DeadEnds = String(completionContext.extraFields.deadEnds ?? "");
+  capture.result.FloorSize = completionContext.extraFields.floorSize || capture.result.FloorSize;
+  if (capture.scale) {
+    if (calibratedScale && Math.abs(capture.scale - calibratedScale) >= 0.025) {
+      // The strong Winterface marker proves the global UI scale changed while
+      // the old map lock was hidden by results. Drop stale geometry now rather
+      // than waiting for three unreadable next-floor frames.
+      clearCalibration();
+    }
+    recordInterfaceScale(capture.scale, "results");
+  }
   // Seeing the winterface marker is an authoritative end-of-floor signal. The
-  // RPM transition consumes it only after the map has also disappeared once,
-  // preventing the old map behind this screen from resetting early.
+  // RPM transition may hold the old map behind it, then rebases only after the
+  // results screen disappears and new-floor room progress is confirmed.
   if (!state.awaitingNewFloor) state.pendingFloorReset = null;
   state.awaitingNewFloor = true;
   return {
@@ -1550,16 +1939,94 @@ async function readDungeonResultsCapture(date = new Date(), {
     image,
     date,
     mapReadAt: state.lastMapReadAt,
-    mapFloorName: state.gameMap?.floor?.name ?? null,
+    mapGeneration: completionContext.mapGeneration,
+    mapSnapshotRevision: completionContext.mapSnapshotRevision,
+    mapFloorName: completionContext.mapFloorName,
+    mapDataUrl: completionContext.mapDataUrl,
+    mapCapturedAt: completionContext.capturedAt,
   };
 }
 
+async function probeDungeonResultsSentinel() {
+  const skipped = {
+    probed: false,
+    present: Boolean(state.resultSentinelOpen),
+    rising: false,
+  };
+  if (state.resultsBusy || !hasAlt1() || !window.alt1.rsLinked) return skipped;
+  const now = Date.now();
+  if (now - state.lastResultSentinelProbe < captureCadence(RESULTS_SENTINEL_CADENCE_MS)) return skipped;
+  if (!tryReservePixelCaptureSlot()) return skipped;
+  const plan = createResultsSentinelPlan({
+    clientWidth: window.alt1.rsWidth,
+    clientHeight: window.alt1.rsHeight,
+    interfaceScale: detectedInterfaceScale(),
+    previousSource: state.lastResultMarkerSource,
+  });
+  state.lastResultSentinelProbe = now;
+  if (!plan) return { probed: true, present: false, rising: false };
+
+  const image = captureRegion(plan.x, plan.y, plan.width, plan.height);
+  const present = resultsSentinelsMatch(image, plan);
+  const rising = present && !state.resultSentinelOpen;
+  state.resultSentinelOpen = present;
+  if (rising && (!state.autoResultState?.visible || !state.autoResultState?.handled)) {
+    // Match dghelper's rising-edge behaviour: wake the results reader on the
+    // very first positive 250 ms sentinel frame. This deliberately does not set
+    // awaitingNewFloor; only the full marker/OCR reader below is authoritative.
+    state.autoResultState = { visible: true, key: "", handled: false, missing: 0, stable: 0 };
+    state.resultStableTiming = { key: "", since: 0 };
+    state.lastAutoResultScan = 0;
+    renderGameOverlay();
+  }
+  return { probed: true, present, rising };
+}
+
+function captureCadence(minimum = RESULTS_SETTLE_INTERVAL) {
+  const recommended = Number(window.alt1?.captureInterval);
+  return Number.isFinite(recommended) && recommended > 0
+    ? Math.max(minimum, recommended)
+    : minimum;
+}
+
+function backendCaptureInterval() {
+  return normalizeCaptureInterval(window.alt1?.captureInterval);
+}
+
+async function prepareDesktopFullCapture() {
+  if (!window.alt1?.compatEnabled) return;
+  clearGameOverlay();
+  // Desktop capture includes overlay pixels. Give Alt1 one backend frame after
+  // clearing so neither OCR nor the saved final-interface crop contains our
+  // own RPM/test/debug overlay.
+  await new Promise((resolve) => setTimeout(resolve, backendCaptureInterval()));
+}
+
+function tryReservePixelCaptureSlot() {
+  const reservation = reserveCaptureSlot(
+    state.nextPixelCaptureAt,
+    Date.now(),
+    backendCaptureInterval(),
+  );
+  state.nextPixelCaptureAt = reservation.nextCaptureAt;
+  return reservation.reserved;
+}
+
+async function waitForPixelCaptureSlot() {
+  for (;;) {
+    if (tryReservePixelCaptureSlot()) return;
+    const delay = Math.max(1, state.nextPixelCaptureAt - Date.now());
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  }
+}
+
 function waitForNextResultScan() {
-  return new Promise((resolve) => setTimeout(resolve, SCAN_INTERVAL));
+  return new Promise((resolve) => setTimeout(resolve, captureCadence(RESULTS_SETTLE_INTERVAL)));
 }
 
 async function readSettledDungeonResultsCapture() {
   let gate = { visible: false, key: "", handled: false, missing: 0, stable: 0 };
+  let timing = { key: "", since: 0 };
   let latest = null;
   let found = false;
   for (let scan = 0; scan < RESULTS_MANUAL_MAX_SCANS; scan += 1) {
@@ -1569,12 +2036,13 @@ async function readSettledDungeonResultsCapture() {
       latest = capture;
     }
     gate = nextAutoResultState(gate, capture?.result ?? null);
-    if (capture && gate.shouldAdd) return { capture, found: true, settled: true, lost: false, gate };
-    if (!found && scan >= 2) return { capture: null, found: false, settled: false, lost: false, gate };
-    if (found && !capture && !gate.visible) return { capture: latest, found: true, settled: false, lost: true, gate };
+    ({ gate, timing } = enforceResultStableDuration(timing, gate, Date.now()));
+    if (capture && gate.shouldAdd) return { capture, found: true, settled: true, lost: false, gate, timing };
+    if (!found && scan >= 2) return { capture: null, found: false, settled: false, lost: false, gate, timing };
+    if (found && !capture && !gate.visible) return { capture: latest, found: true, settled: false, lost: true, gate, timing };
     if (scan + 1 < RESULTS_MANUAL_MAX_SCANS) await waitForNextResultScan();
   }
-  return { capture: latest, found, settled: false, lost: false, gate };
+  return { capture: latest, found, settled: false, lost: false, gate, timing };
 }
 
 async function requestManualArtifactPermissions() {
@@ -1583,7 +2051,10 @@ async function requestManualArtifactPermissions() {
   if (elements.autoSaveMapPng.checked) requestedKinds.push("map");
   const attempts = requestedKinds.map((kind) => {
     const folder = saveFolderState(kind);
-    if (!folder.handle) return null;
+    // Only a known prompt benefits from a proactive request. "unknown" is a
+    // normal Alt1 compatibility state and must flow to the bounded real write;
+    // "denied" requires selecting the folder again.
+    if (!folder.handle || folder.permission !== "prompt" || !canRequestSaveFolderPermission(folder)) return null;
     // Run this before the settling delay while the Read-results click still
     // carries user activation; start every request before the first await. A
     // background/auto scan is not allowed to prompt.
@@ -1601,7 +2072,9 @@ async function requestManualArtifactPermissions() {
 
 function appendResult(result) {
   state.results.unshift(result);
+  const persisted = persistResults();
   renderResults();
+  return persisted;
 }
 
 function resultBatchTarget() {
@@ -1629,7 +2102,7 @@ function renderResultBatchSummary() {
 
 function resetResultBatch(notify = true) {
   state.results = [];
-  state.autoResultKeys.clear();
+  persistResults();
   state.autoResultState = nextAutoResultState(state.autoResultState, null, { missesBeforeHidden: 0 });
   renderResults();
   if (notify) setStatus("Dungeon results batch reset", "warn");
@@ -1653,6 +2126,17 @@ function prepareResultBatch(result) {
       tone: "warn",
     };
   }
+  const recentKey = resultStabilityKey(result);
+  const recentAge = Date.now() - Number(state.recentResultScreen?.committedAt);
+  if (recentKey && state.recentResultScreen?.key === recentKey
+    && Number.isFinite(recentAge) && recentAge >= 0 && recentAge <= RECENT_RESULT_SCREEN_MAX_AGE) {
+    return {
+      accepted: false,
+      duplicate: true,
+      status: `Results skipped: this still-visible floor ${result?.Floor || "?"} screen was already recorded`,
+      tone: "warn",
+    };
+  }
   const target = resultBatchTarget();
   if (resultBatchIsComplete(state.results, target)) {
     if (resultBatchMode() === RESULT_BATCH_MODES.Reset) {
@@ -1669,15 +2153,9 @@ function prepareResultBatch(result) {
 }
 
 async function saveResultArtifacts(capture, { quiet = true } = {}) {
-  const capturedAt = capture?.date instanceof Date ? capture.date.getTime() : Date.now();
-  const mapAgeMs = capturedAt - Number(capture?.mapReadAt || 0);
-  const hasFreshMatchingMap = Boolean(capture?.mapSnapshotClaimed)
-    && Boolean(state.image)
-    && capture?.mapReadAt === state.lastMapReadAt
-    && capture?.mapFloorName === state.gameMap?.floor?.name
-    && capture?.mapFloorName === capture?.result?.FloorSize
-    && mapAgeMs >= 0
-    && mapAgeMs <= RESULT_MAP_MAX_AGE_MS;
+  const hasMapData = Boolean(capture?.mapDataUrl);
+  const mapSizeMatches = !capture?.ocrFloorSize || capture?.mapFloorName === capture.ocrFloorSize;
+  const hasFreshMatchingMap = Boolean(capture?.mapSnapshotClaimed) && hasMapData && mapSizeMatches;
   const exports = plannedResultExports({
     autoSaveMap: elements.autoSaveMapPng.checked,
     autoSaveResults: elements.autoSaveResultsPng.checked,
@@ -1689,8 +2167,24 @@ async function saveResultArtifacts(capture, { quiet = true } = {}) {
     hasResultsOffset: Boolean(resultCaptureRect(capture)),
   });
   const results = [];
+  if (elements.autoSaveMapPng.checked && !hasMapData) {
+    results.push({ kind: "map", saved: false, reason: "no-map" });
+  } else if (elements.autoSaveMapPng.checked && !mapSizeMatches) {
+    results.push({ kind: "map", saved: false, reason: "map-floor-mismatch" });
+  } else if (elements.autoSaveMapPng.checked && !capture?.mapSnapshotClaimed) {
+    results.push({ kind: "map", saved: false, reason: "map-snapshot-not-new" });
+  }
   if (exports.includes("map")) {
-    results.push({ kind: "map", ...await saveMap({ date: capture.date, quiet }) });
+    await retryPendingMapPngs({ quiet: true });
+    const artifact = { kind: "map", ...await saveMap({
+      date: capture.mapCapturedAt || capture.date,
+      quiet,
+      dataUrl: capture.mapDataUrl,
+      floorName: capture.mapFloorName,
+    }) };
+    results.push(artifact);
+    queuePendingMapPng(artifact);
+    if (artifact.saved && state.pendingMapPngs.length) await retryPendingMapPngs({ quiet: true });
   }
   if (exports.includes("results")) {
     // A prior permission/no-folder failure keeps its already-captured PNG bytes.
@@ -1710,18 +2204,22 @@ async function saveResultArtifacts(capture, { quiet = true } = {}) {
 }
 
 function claimResultMapSnapshot(capture) {
-  const mapReadAt = Number(capture?.mapReadAt || 0);
-  const claimed = resultMapSnapshotIsFresh(capture, {
-    currentMapReadAt: state.lastMapReadAt,
-    currentFloorName: state.gameMap?.floor?.name,
-    lastConsumedAt: state.lastResultMapConsumedAt,
-    hasMap: Boolean(state.image),
-    maxAgeMs: RESULT_MAP_MAX_AGE_MS,
+  const generation = Math.max(0, Number(capture?.mapGeneration) || 0);
+  const claimed = resultMapSnapshotMatchesGeneration(capture, {
+    lastConsumedGeneration: state.lastResultMapGenerationConsumed,
+    lastConsumedSnapshotRevision: state.lastResultMapSnapshotRevisionConsumed,
+    hasMap: Boolean(capture?.mapDataUrl),
   });
-  // A stable results screen consumes this exact map generation even when the
-  // row is filtered/duplicate or map export is disabled; it can never be paired
-  // with a later same-size floor.
-  if (mapReadAt > 0) state.lastResultMapConsumedAt = Math.max(state.lastResultMapConsumedAt, mapReadAt);
+  // Only a successfully matched snapshot consumes its floor generation, and
+  // the caller invokes this after filter/dedupe/batch acceptance. A corrected
+  // filter can therefore retry the same still-visible result safely.
+  if (claimed && generation > 0) {
+    state.lastResultMapGenerationConsumed = Math.max(state.lastResultMapGenerationConsumed, generation);
+    state.lastResultMapSnapshotRevisionConsumed = Math.max(
+      state.lastResultMapSnapshotRevisionConsumed,
+      Math.max(0, Number(capture?.mapSnapshotRevision) || 0),
+    );
+  }
   capture.mapSnapshotClaimed = claimed;
   return claimed;
 }
@@ -1738,6 +2236,8 @@ function resultArtifactSuffix(results) {
     "handle-changed": "save folder changed; retry queued",
     error: "save failed",
     "no-map": "no map image",
+    "map-floor-mismatch": "map size did not match results",
+    "map-snapshot-not-new": "no newly accepted map snapshot",
     "no-results-crop": "results crop failed",
   }[firstFailure?.reason] || "save skipped";
   if (saved > 0) return `; saved ${saved}/${results.length} PNGs, ${reason}`;
@@ -1750,12 +2250,14 @@ function resultArtifactTone(results) {
 
 async function commitDungeonResultsCapture(capture, source = "manual") {
   const { result } = capture;
-  claimResultMapSnapshot(capture);
   const batch = prepareResultBatch(result);
   if (!batch.accepted) {
     return batch;
   }
-  appendResult(result);
+  claimResultMapSnapshot(capture);
+  const persisted = appendResult(result);
+  state.recentResultScreen = { key: resultStabilityKey(result), committedAt: Date.now() };
+  storageSet(`${STORAGE_PREFIX}:last-result-screen`, JSON.stringify(state.recentResultScreen));
   const artifacts = await saveResultArtifacts(capture, { quiet: source === "auto" });
   const status = resultBatchStatus(state.results, {
     target: resultBatchTarget(),
@@ -1769,8 +2271,8 @@ async function commitDungeonResultsCapture(capture, source = "manual") {
   const label = source === "auto" ? "Results auto-tracked" : "Results read";
   return {
     accepted: true,
-    status: `${label}: floor ${result.Floor || "?"}, ${result.FinalXP || "?"} XP | avg ${status.averageText}${complete}${resultArtifactSuffix(artifacts)}`,
-    tone: resultArtifactTone(artifacts),
+    status: `${label}: floor ${result.Floor || "?"}, ${result.FinalXP || "?"} XP | avg ${status.averageText}${complete}${resultArtifactSuffix(artifacts)}${persisted ? "" : "; browser storage failed — row may be lost after restart"}`,
+    tone: persisted ? resultArtifactTone(artifacts) : "warn",
   };
 }
 
@@ -1797,7 +2299,7 @@ async function captureDungeonResults() {
     if (!settled.settled) {
       setStatus(settled.lost
         ? "Results screen closed before final values stabilized — keep it open and read again"
-        : "Results were still changing after 12 seconds — press Skip in game or wait for final values, then read again", "warn");
+        : "Results were still changing after 9 seconds — press Skip in game or wait for final values, then read again", "warn");
       return;
     }
     const committed = await commitDungeonResultsCapture(capture, "manual");
@@ -1811,7 +2313,7 @@ async function captureDungeonResults() {
       missing: 0,
       stable: settled.gate?.stable || 3,
     };
-    if (committed.accepted && settled.gate?.key) state.autoResultKeys.add(settled.gate.key);
+    state.resultStableTiming = settled.timing || { key: settled.gate?.key || "", since: Date.now() };
     setStatus(committed.status, committed.tone);
   } catch (error) {
     setStatus(`Could not read the results screen: ${error.message || error}`, "error");
@@ -1821,40 +2323,91 @@ async function captureDungeonResults() {
   }
 }
 
-async function autoCaptureDungeonResults() {
-  if (!elements.autoTrackResults.checked) {
-    state.autoResultState = nextAutoResultState(state.autoResultState, null, { missesBeforeHidden: 0 });
-    return;
-  }
+async function autoCaptureDungeonResults({ forceScan = false } = {}) {
   if (state.resultsBusy || !hasAlt1() || !window.alt1.rsLinked) return;
+  const trackingEnabled = Boolean(elements.autoTrackResults.checked);
   const now = Date.now();
-  // While a results screen is up but not yet committed, scan at the loop's full
-  // 600ms cadence so three stable reads span ~1.2s after the values appear
-  // instead of ~3s. The 1500ms gate stays for the idle case (no screen visible),
-  // which is the expensive full-screen search.
-  const awaitingResults = Boolean(state.autoResultState?.visible) && !state.autoResultState?.handled;
-  if (!awaitingResults && now - state.lastAutoResultScan < RESULTS_AUTO_INTERVAL) return;
+  // Results recognition is also the authoritative end-of-floor lifecycle
+  // signal for RPM. The cheap sentinel is the fast path; this 900 ms full-reader
+  // fallback deliberately remains active so custom colours, shifted dialogs or
+  // a stale scale hint cannot make the checkbox control timer correctness.
+  const lifecycleProbeNeeded = forceScan
+    || trackingEnabled
+    || Boolean(state.mapLostAt)
+    || state.awaitingNewFloor
+    || Boolean(state.autoResultState?.visible)
+    || !state.resultSentinelOpen;
+  if (!lifecycleProbeNeeded) return;
+  // Once this physical results screen has been committed, dghelper keeps only
+  // its cheap sentinel active until the panel closes. Avoid re-running a full
+  // client OCR sweep every 250 ms while that same handled screen remains open.
+  if (!forceScan && state.resultSentinelOpen
+    && state.autoResultState?.visible && state.autoResultState?.handled) return;
+  const awaitingStableResults = trackingEnabled
+    && Boolean(state.autoResultState?.visible)
+    && !state.autoResultState?.handled
+    && Boolean(state.autoResultState?.key);
+  const urgentPresenceCheck = forceScan || Boolean(state.mapLostAt);
+  if (!urgentPresenceCheck && !awaitingStableResults
+    && now - state.lastAutoResultScan < RESULTS_AUTO_INTERVAL) return;
   state.lastAutoResultScan = now;
 
   state.resultsBusy = true;
   try {
-    const calibratedScale = Number(state.calibration?.scale) || null;
-    if (state.resultsInterfaceScale && calibratedScale
-      && Math.abs(state.resultsInterfaceScale - calibratedScale) >= 0.025) {
-      state.resultsInterfaceScale = null;
-    }
-    const measuredScale = state.resultsInterfaceScale ?? state.calibration?.scale;
-    const scaleHint = measuredScale || 1;
+    const hasMeasuredScale = Boolean(state.calibration?.verified
+      || isFreshInterfaceScaleObservation(state.interfaceScale, now));
+    const scaleHint = detectedInterfaceScale();
     // Full 100..200% fallback is intentionally expensive. Run it promptly only
     // while a results/loading phase is plausible (or no scale was measured),
     // and very rarely while the live map proves the normal game UI is active.
-    const fallbackInterval = (!measuredScale || state.mapLostAt || state.awaitingNewFloor)
+    const fallbackInterval = (!hasMeasuredScale || state.mapLostAt || state.awaitingNewFloor)
       ? RESULTS_SCALE_FALLBACK_ACTIVE_INTERVAL
       : RESULTS_SCALE_FALLBACK_IDLE_INTERVAL;
     const allowScaleFallback = now - state.lastResultsScaleFallback >= fallbackInterval;
     if (allowScaleFallback) state.lastResultsScaleFallback = now;
-    const capture = await readDungeonResultsCapture(new Date(), { allowScaleFallback, interfaceScale: scaleHint });
-    const next = nextAutoResultState(state.autoResultState, capture?.result ?? null);
+    const trustResultsScale = state.interfaceScale?.source === "results"
+      && isFreshInterfaceScaleObservation(state.interfaceScale, now);
+    let capture = await readDungeonResultsCapture(new Date(), {
+      allowScaleFallback,
+      interfaceScale: scaleHint,
+      trustScaleHint: trustResultsScale,
+    });
+    // A positive three-zone sentinel proves that the panel is still being
+    // rendered even when the heavier marker/OCR pass misses this frame. Feed an
+    // incomplete-but-visible observation so that one staged frame cannot tear
+    // down the lifecycle state before the next 250 ms retry.
+    const observedResult = capture?.result ?? (state.resultSentinelOpen ? {} : null);
+    let next = nextAutoResultState(state.autoResultState, observedResult);
+    let timed = enforceResultStableDuration(state.resultStableTiming, next, Date.now());
+    next = timed.gate;
+
+    // Once complete values appear, take two short follow-up reads in this same
+    // results phase. The pure count gate is additionally held for at least 1.2
+    // real seconds, so repeated backend frames cannot save an animated panel.
+    if (trackingEnabled && capture && resultLooksComplete(capture.result)
+      && !next.shouldAdd && !next.handled) {
+      for (let burst = 0; burst < 2 && !next.shouldAdd; burst += 1) {
+        await waitForNextResultScan();
+        const followUp = await readDungeonResultsCapture(new Date(), {
+          allowScaleFallback: false,
+          interfaceScale: detectedInterfaceScale(),
+          // The first pixel fallback just confirmed this scale. Tolerant noisy
+          // markers need the trusted hinted path on the short follow-ups.
+          trustScaleHint: state.interfaceScale?.source === "results"
+            && isFreshInterfaceScaleObservation(state.interfaceScale, Date.now()),
+        });
+        next = nextAutoResultState(next, followUp?.result ?? null);
+        timed = enforceResultStableDuration(timed.timing, next, Date.now());
+        next = timed.gate;
+        if (followUp) capture = followUp;
+        if (!next.visible) break;
+      }
+    }
+
+    if (!trackingEnabled && next.shouldAdd) {
+      next = { ...next, handled: false, shouldAdd: false };
+    }
+
     state.autoResultState = {
       visible: next.visible,
       key: next.key,
@@ -1862,13 +2415,21 @@ async function autoCaptureDungeonResults() {
       missing: next.missing,
       stable: next.stable,
     };
-    if (!capture || !next.shouldAdd || state.autoResultKeys.has(next.key)) return;
+    state.resultStableTiming = timed.timing;
+    if (!next.visible) state.activeResultContext = null;
+    if (!trackingEnabled || !capture || !next.shouldAdd) return;
     const committed = await commitDungeonResultsCapture(capture, "auto");
-    const complete = committed.status.includes("complete");
-    if (committed.accepted || complete) state.autoResultKeys.add(next.key);
-    if (committed.accepted || complete) setStatus(committed.status, committed.tone);
-  } catch {
-    state.autoResultState = nextAutoResultState(state.autoResultState, null);
+    setStatus(committed.status, committed.tone);
+  } catch (error) {
+    const observedResult = state.resultSentinelOpen ? {} : null;
+    const missed = nextAutoResultState(state.autoResultState, observedResult);
+    const timed = enforceResultStableDuration(state.resultStableTiming, missed, Date.now());
+    state.autoResultState = timed.gate;
+    state.resultStableTiming = timed.timing;
+    if (!timed.gate.visible) state.activeResultContext = null;
+    if (elements.debugMode?.checked) {
+      setStatus(`Results lifecycle scan failed: ${error.message || error}`, "warn");
+    }
   } finally {
     state.resultsBusy = false;
   }
@@ -2255,7 +2816,8 @@ function maybeAutoJoinFromParty() {
 }
 
 async function scanPartyInterface({ manual = false, forceFull = false } = {}) {
-  if (state.partyScanBusy || !state.experimentalEnabled || !elements.partyInterface.checked) return false;
+  if (state.partyScanBusy || state.resultsBusy || state.autoResultState.visible
+    || !state.experimentalEnabled || !elements.partyInterface.checked) return false;
   state.lastPartyScan = Date.now();
   if (manual) state.partyAutoScan = true;
   if (!hasAlt1() || !window.alt1.rsLinked) {
@@ -2282,6 +2844,8 @@ async function scanPartyInterface({ manual = false, forceFull = false } = {}) {
   state.partyScanBusy = true;
   elements.partyScan.disabled = true;
   try {
+    if (manual) await waitForPixelCaptureSlot();
+    else if (!tryReservePixelCaptureSlot()) return false;
     // Fast path: locate the panel from the DG skill icon via Alt1's native
     // sub-image search, then read each row. Cheap enough to run on every scan
     // (including the 5s auto loop) and works even when the chatbox font failed
@@ -2307,9 +2871,8 @@ async function scanPartyInterface({ manual = false, forceFull = false } = {}) {
     }
 
     // The DG icon was not found (non-100% UI scale or a themed interface). The
-    // divider detector captures and scans the WHOLE screen and is far heavier,
-    // so it only runs on an explicit manual scan — never on the 5s auto loop,
-    // which is what used to make the app hang.
+    // divider detector captures and scans the whole screen and is far heavier,
+    // so it only runs on an explicit manual scan.
     if (forceFull) {
       const area = { x: 0, y: 0, width: window.alt1.rsWidth, height: window.alt1.rsHeight };
       const image = runtime.capture(area.x, area.y, area.width, area.height);
@@ -2366,7 +2929,10 @@ function bindEvents() {
     setStatus(state.autoScan ? "Automatic scanning resumed" : "Automatic scanning paused", "warn");
     if (state.autoScan) scanOnce();
   });
-  elements.save.addEventListener("click", () => { saveMap(); });
+  elements.save.addEventListener("click", async () => {
+    const artifact = await saveMap();
+    queuePendingMapPng(artifact);
+  });
   elements.clear.addEventListener("click", () => clearAnnotations(true));
   elements.captureResults.addEventListener("click", captureDungeonResults);
   elements.copyResults.addEventListener("click", copyResults);
@@ -2379,15 +2945,43 @@ function bindEvents() {
   elements.resetResultBatch.addEventListener("click", () => resetResultBatch(true));
   for (const control of [elements.resultBatchSize, elements.resultFloorFilter, elements.resultBatchMode]) {
     control.addEventListener("change", () => {
+      const key = control === elements.resultBatchSize
+        ? "result-batch-size"
+        : control === elements.resultFloorFilter
+          ? "result-floor-filter"
+          : "result-batch-mode";
+      storageSet(`${STORAGE_PREFIX}:${key}`, control.value);
       state.autoResultState = nextAutoResultState(state.autoResultState, null, { missesBeforeHidden: 0 });
       renderResultBatchSummary();
     });
-    control.addEventListener("input", renderResultBatchSummary);
+    control.addEventListener("input", () => {
+      if (control === elements.resultFloorFilter) {
+        storageSet(`${STORAGE_PREFIX}:result-floor-filter`, control.value);
+      }
+      renderResultBatchSummary();
+    });
   }
   elements.autoTrackResults.addEventListener("change", () => {
-    if (!elements.autoTrackResults.checked) {
-      state.autoResultState = nextAutoResultState(state.autoResultState, null, { missesBeforeHidden: 0 });
+    storageSet(`${STORAGE_PREFIX}:auto-track-results`, elements.autoTrackResults.checked ? "1" : "0");
+    if (elements.autoTrackResults.checked && state.autoResultState.visible) {
+      // Lifecycle-only scans may already have observed this screen while table
+      // tracking was off. Re-arm it so enabling the toggle can still commit the
+      // currently visible, stable final interface.
+      state.autoResultState.handled = false;
+      state.autoResultState.stable = 0;
+      state.resultStableTiming = { key: "", since: 0 };
+      state.lastAutoResultScan = 0;
+    } else if (!elements.autoTrackResults.checked) {
+      // Do not disarm the results lifecycle: it keeps RPM/floor transitions
+      // correct even when the user does not want rows added automatically.
+      state.autoResultState.handled = false;
     }
+  });
+  elements.autoSaveMapPng.addEventListener("change", () => {
+    storageSet(`${STORAGE_PREFIX}:auto-save-map-png`, elements.autoSaveMapPng.checked ? "1" : "0");
+  });
+  elements.autoSaveResultsPng.addEventListener("change", () => {
+    storageSet(`${STORAGE_PREFIX}:auto-save-results-png`, elements.autoSaveResultsPng.checked ? "1" : "0");
   });
   elements.showCapture.addEventListener("change", render);
   elements.showGrid.addEventListener("change", render);
@@ -2397,13 +2991,6 @@ function bindEvents() {
     elements.statsPosition.addEventListener("change", () => {
       storageSet(`${STORAGE_PREFIX}:stats-position`, elements.statsPosition.value);
       applyStatsFreeVisibility();
-      clearGameOverlay();
-      renderGameOverlay();
-    });
-  }
-  if (elements.statsScale) {
-    elements.statsScale.addEventListener("change", () => {
-      storageSet(`${STORAGE_PREFIX}:stats-scale`, elements.statsScale.value);
       clearGameOverlay();
       renderGameOverlay();
     });
@@ -2683,8 +3270,24 @@ function bindEvents() {
 
 async function scanLoop() {
   await scanOnce();
-  await autoCaptureDungeonResults();
-  setTimeout(scanLoop, SCAN_INTERVAL);
+  setTimeout(scanLoop, captureCadence(SCAN_INTERVAL));
+}
+
+async function resultsScanLoop() {
+  try {
+    const sentinel = await probeDungeonResultsSentinel();
+    const shouldForceRead = Boolean(sentinel.rising)
+      || (Boolean(sentinel.present)
+        && Boolean(elements.autoTrackResults.checked)
+        && !state.autoResultState?.handled);
+    await autoCaptureDungeonResults({ forceScan: shouldForceRead });
+  } catch (error) {
+    if (elements.debugMode?.checked) {
+      setStatus(`Results scan loop recovered from: ${error.message || error}`, "warn");
+    }
+  } finally {
+    setTimeout(resultsScanLoop, captureCadence(RESULTS_SENTINEL_CADENCE_MS));
+  }
 }
 
 async function partyScanLoop() {
@@ -2736,32 +3339,55 @@ async function initPartyOcrFont() {
 async function scanOnce() {
   if (!state.autoScan || state.busy) return;
   if (state.calibration) {
-    await updateMap();
-    return;
+    if (!calibrationMatchesLinkedClient(state.calibration)) {
+      clearCalibration();
+      setStatus("RuneScape client size changed — detecting map position and scale again", "warn");
+    } else {
+      await updateMap();
+      return;
+    }
   }
   if (Date.now() - state.lastCalibrationAttempt >= AUTO_CALIBRATION_INTERVAL) {
     await calibrate({ silent: true });
   }
 }
 
+function restoreResultSettings() {
+  for (const [element, key] of [
+    [elements.autoTrackResults, "auto-track-results"],
+    [elements.autoSaveMapPng, "auto-save-map-png"],
+    [elements.autoSaveResultsPng, "auto-save-results-png"],
+  ]) {
+    const saved = storageGet(`${STORAGE_PREFIX}:${key}`);
+    if (saved !== null) element.checked = saved === "1";
+  }
+  const savedBatchSize = storageGet(`${STORAGE_PREFIX}:result-batch-size`);
+  if (savedBatchSize !== null) elements.resultBatchSize.value = normalizeResultBatchTarget(savedBatchSize);
+  const savedFilter = storageGet(`${STORAGE_PREFIX}:result-floor-filter`);
+  if (savedFilter !== null) elements.resultFloorFilter.value = savedFilter;
+  const savedMode = storageGet(`${STORAGE_PREFIX}:result-batch-mode`);
+  if (savedMode && [...elements.resultBatchMode.options].some((option) => option.value === savedMode)) {
+    elements.resultBatchMode.value = savedMode;
+  }
+}
+
 function initialize() {
   bindEvents();
+  restoreResultSettings();
   updateAllSaveFolderStatuses();
   refreshStoredSaveFolders();
   renderResults();
   renderParty();
   drawEmptyState();
   updateStats();
-  // Restore the saved in-game stats overlay position, size and free coordinates.
+  updateInterfaceScaleStatus();
+  // Restore the saved in-game stats overlay position and free coordinates. Its
+  // physical size follows the automatically detected RuneScape interface scale.
   if (elements.statsPosition) {
     const savedStatsPosition = storageGet(`${STORAGE_PREFIX}:stats-position`);
     if (savedStatsPosition && [...elements.statsPosition.options].some((option) => option.value === savedStatsPosition)) {
       elements.statsPosition.value = savedStatsPosition;
     }
-  }
-  if (elements.statsScale) {
-    const savedScale = storageGet(`${STORAGE_PREFIX}:stats-scale`);
-    if (savedScale) elements.statsScale.value = savedScale;
   }
   try {
     const savedFree = JSON.parse(storageGet(`${STORAGE_PREFIX}:stats-free`) || "null");
@@ -2822,6 +3448,7 @@ function initialize() {
   }
   updateOverlayStatus();
   scanLoop();
+  resultsScanLoop();
   partyScanLoop();
 }
 

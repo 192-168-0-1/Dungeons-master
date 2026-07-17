@@ -73,6 +73,21 @@ test("four evenly spaced dividers locate a five-row DG party panel", () => {
   assert.deepEqual(panel.rows.map((row) => row.pixelCount > 0), [true, true, false, false, false]);
 });
 
+test("the divider fallback locates the party panel at 200% interface scale", () => {
+  const target = image(640, 420);
+  for (const y of [100, 144, 188, 232]) {
+    for (let x = 80; x <= 440; x += 1) setPixel(target, x, y, [80, 70, 55, 255]);
+  }
+  for (let x = 236; x <= 264; x += 1) setPixel(target, x, 78, [210, 53, 0, 255]);
+  for (let x = 230; x <= 270; x += 1) setPixel(target, x, 122, [0, 137, 133, 255]);
+
+  const panel = findPartyPanel(target);
+  assert.ok(panel);
+  assert.equal(panel.firstDividerY, 100);
+  assert.equal(panel.rowGap, 44);
+  assert.deepEqual(panel.rows.map((row) => row.pixelCount > 0), [true, true, false, false, false]);
+});
+
 test("the wider three-divider party layout from RuneScape is detected", () => {
   const target = image(320, 230);
   for (const y of [70, 104, 138]) {

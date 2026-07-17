@@ -1,5 +1,5 @@
-import { ROOM_SIZE, mapToImage } from "./map-core.js?v=20260715-31";
-import { formatElapsedClock, rpmValue } from "./rpm-state.js?v=20260715-31";
+import { ROOM_SIZE, mapToImage } from "./map-core.js?v=20260717-36";
+import { formatElapsedClock, rpmValue } from "./rpm-state.js?v=20260717-36";
 
 export const GATESTONE_POSITIONS = Object.freeze([
   [2, 21],
@@ -116,13 +116,99 @@ export function statsBarOrigin({ position = "bottom", mapX, mapY, mapWidth, mapH
   }
 }
 
+function normalizedScreenBounds(screen) {
+  const width = Math.round(Number(screen?.width));
+  const height = Math.round(Number(screen?.height));
+  return Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0
+    ? { width, height }
+    : null;
+}
+
+function containedStatsBarOrigin({
+  position,
+  mapX,
+  mapY,
+  mapWidth,
+  mapHeight,
+  barWidth,
+  barHeight,
+  free,
+  screen,
+  avoidMapOverlap = false,
+}) {
+  const bounds = normalizedScreenBounds(screen);
+  if (avoidMapOverlap) {
+    const requested = STATS_POSITIONS.includes(position) ? position : "bottom";
+    const candidates = [...new Set([requested, "bottom", "top", "right", "left"])];
+    const mapRight = mapX + mapWidth;
+    const mapBottom = mapY + mapHeight;
+    for (const candidate of candidates) {
+      if (candidate === "hidden") continue;
+      const value = statsBarOrigin({
+        position: candidate, mapX, mapY, mapWidth, mapHeight, barWidth, barHeight, free,
+      });
+      const onScreen = !bounds || (value.x >= 0 && value.y >= 0
+        && value.x + barWidth <= bounds.width && value.y + barHeight <= bounds.height);
+      const overlapsMap = value.x < mapRight && value.x + barWidth > mapX
+        && value.y < mapBottom && value.y + barHeight > mapY;
+      if (onScreen && !overlapsMap) return value;
+    }
+    // In Desktop compatibility mode an overlapping strip would be captured as
+    // map pixels. Hiding it on an impossibly cramped client is safer than
+    // corrupting floor/RPM classification.
+    return null;
+  }
+  let resolvedPosition = position;
+  let origin = statsBarOrigin({
+    position: resolvedPosition,
+    mapX,
+    mapY,
+    mapWidth,
+    mapHeight,
+    barWidth,
+    barHeight,
+    free,
+  });
+
+  if (bounds) {
+    // Preserve the requested side whenever it fits. If the strip would leave
+    // the RuneScape client, prefer the opposite side before clamping. This
+    // keeps an edge-mounted map and its stats visually connected.
+    if (resolvedPosition === "bottom" && origin.y + barHeight > bounds.height) resolvedPosition = "top";
+    else if (resolvedPosition === "top" && origin.y < 0) resolvedPosition = "bottom";
+    else if (resolvedPosition === "right" && origin.x + barWidth > bounds.width) resolvedPosition = "left";
+    else if (resolvedPosition === "left" && origin.x < 0) resolvedPosition = "right";
+
+    if (resolvedPosition !== position) {
+      origin = statsBarOrigin({
+        position: resolvedPosition,
+        mapX,
+        mapY,
+        mapWidth,
+        mapHeight,
+        barWidth,
+        barHeight,
+        free,
+      });
+    }
+
+    return {
+      x: Math.max(0, Math.min(origin.x, Math.max(0, bounds.width - barWidth))),
+      y: Math.max(0, Math.min(origin.y, Math.max(0, bounds.height - barHeight))),
+    };
+  }
+
+  return { x: Math.max(0, origin.x), y: Math.max(0, origin.y) };
+}
+
 export const STATS_DEFAULT_TEXT_COLOR = mixColor(220, 225, 226);
 
-export function buildStatsOverlayCommands({ stats, mapX, mapY, floor, overlayScale = 1, duration = 30_000, position = "bottom", free = null, textColor = STATS_DEFAULT_TEXT_COLOR, sizeScale = 1, screen = null }) {
+export function buildStatsOverlayCommands({ stats, mapX, mapY, floor, overlayScale = 1, duration = 30_000, position = "bottom", free = null, textColor = STATS_DEFAULT_TEXT_COLOR, sizeScale = 1, screen = null, avoidMapOverlap = false }) {
   if (!stats || !floor || position === "hidden") return [];
   const scale = overlayScaleValue(overlayScale);
-  // Independent user size for the strip (default 1 keeps existing geometry).
-  const size = overlayScaleValue(sizeScale);
+  // Follow RuneScape's detected interface scale automatically. sizeScale is an
+  // optional caller-controlled multiplier (1 = match the game interface).
+  const size = scale * overlayScaleValue(sizeScale);
   const barHeight = Math.round(21 * size);
   const fontSize = Math.max(6, Math.round(11 * size));
   const pad = Math.round(3 * size);
@@ -131,18 +217,12 @@ export function buildStatsOverlayCommands({ stats, mapX, mapY, floor, overlaySca
   const mapHeight = Math.round(floor.imageHeight * scale);
   // Right margin mirrors the left pad (identical to +8 at sizeScale 1, pad = 3).
   const barWidth = Math.max(mapWidth, estimateOverlayTextWidth(value, fontSize) + pad * 2 + 2);
-  const origin = statsBarOrigin({ position, mapX, mapY, mapWidth, mapHeight, barWidth, barHeight, free });
-  // The free point is the strip's top-left, so without a right/bottom clamp a
-  // corner click leaves only a sliver on-screen. Only the free mode clamps to the
-  // screen; every other position (and the no-screen default) keeps Math.max(0, ...).
-  let originX = Math.max(0, origin.x);
-  let barTop = Math.max(0, origin.y);
-  if (position === "free" && screen
-    && Number.isFinite(screen.width) && screen.width > 0
-    && Number.isFinite(screen.height) && screen.height > 0) {
-    originX = Math.max(0, Math.min(origin.x, Math.round(screen.width) - barWidth));
-    barTop = Math.max(0, Math.min(origin.y, Math.round(screen.height) - barHeight));
-  }
+  const origin = containedStatsBarOrigin({
+    position, mapX, mapY, mapWidth, mapHeight, barWidth, barHeight, free, screen, avoidMapOverlap,
+  });
+  if (!origin) return [];
+  const originX = origin.x;
+  const barTop = origin.y;
   const commands = [];
 
   // Alt1 rectangles are outlines rather than fills. Nested opaque-black
@@ -170,6 +250,7 @@ export function buildMapOverlayCommands({
   statsColor = STATS_DEFAULT_TEXT_COLOR,
   statsScale = 1,
   statsScreen = null,
+  statsAvoidMapOverlap = false,
   duration = 30_000,
 }) {
   const commands = [];
@@ -178,17 +259,21 @@ export function buildMapOverlayCommands({
   const originY = Math.round(mapY);
   const mapOverlayX = (value) => Math.round(originX + value * scale);
   const mapOverlayY = (value) => Math.round(originY + value * scale);
+  const scaledPixels = (value) => Math.max(1, Math.round(value * scale));
 
   for (const annotation of annotations) {
     if (!annotation?.text || !pointInFloor(annotation.point, floor)) continue;
     const origin = mapToImage(annotation.point, floor);
     const centerX = mapOverlayX(origin.x + ROOM_SIZE / 2);
     const centerY = mapOverlayY(origin.y + ROOM_SIZE / 2);
-    commands.push(rect(mixColor(1, 1, 1, 180), centerX - 13, centerY - 8, 26, 16, duration, 2));
+    const boxWidth = scaledPixels(26);
+    const boxHeight = scaledPixels(16);
+    commands.push(rect(mixColor(1, 1, 1, 180), centerX - Math.round(boxWidth / 2),
+      centerY - Math.round(boxHeight / 2), boxWidth, boxHeight, duration, scaledPixels(2)));
     const color = annotation.color
       ? hexToOverlayColor(annotation.color, 255)
       : annotationOverlayColor(annotation.text);
-    commands.push(text(annotation.text, color, 12,
+    commands.push(text(annotation.text, color, Math.max(6, Math.round(12 * scale)),
       centerX, centerY, duration));
   }
 
@@ -196,7 +281,7 @@ export function buildMapOverlayCommands({
     if (!pointInFloor(point, floor)) continue;
     const origin = mapToImage(point, floor);
     commands.push(rect(mixColor(60, 220, 238, 220), mapOverlayX(origin.x + 2),
-      mapOverlayY(origin.y + 2), Math.max(1, Math.round(28 * scale)), Math.max(1, Math.round(28 * scale)), duration, 2));
+      mapOverlayY(origin.y + 2), scaledPixels(28), scaledPixels(28), duration, scaledPixels(2)));
   }
 
   for (const marker of gatestones) {
@@ -206,9 +291,11 @@ export function buildMapOverlayCommands({
     const x = mapOverlayX(origin.x + dx);
     const y = mapOverlayY(origin.y + dy);
     const fill = hexToOverlayColor(marker.fill, 255);
-    commands.push(rect(fill, x, y, 9, 9, duration, 4));
-    commands.push(text(marker.text, hexToOverlayColor(marker.textColor, 255), 7,
-      x + 5, y + 5, duration));
+    const markerSize = scaledPixels(9);
+    commands.push(rect(fill, x, y, markerSize, markerSize, duration, scaledPixels(4)));
+    commands.push(text(marker.text, hexToOverlayColor(marker.textColor, 255),
+      Math.max(4, Math.round(7 * scale)), x + Math.round(markerSize / 2),
+      y + Math.round(markerSize / 2), duration));
   }
 
   if (stats) {
@@ -224,6 +311,7 @@ export function buildMapOverlayCommands({
       textColor: statsColor,
       sizeScale: statsScale,
       screen: statsScreen,
+      avoidMapOverlap: statsAvoidMapOverlap,
     }));
   }
 

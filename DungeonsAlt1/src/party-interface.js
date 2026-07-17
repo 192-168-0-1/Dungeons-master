@@ -1,6 +1,9 @@
 const MIN_DIVIDER_WIDTH = 100;
 const MIN_ROW_GAP = 18;
-const MAX_ROW_GAP = 42;
+// The native party rows are about 22 px apart at 100% RuneScape interface
+// scale. Keep enough headroom for the supported 200% scale (44 px), plus a
+// small rasterisation tolerance for non-integer DPI/capture transforms.
+const MAX_ROW_GAP = 48;
 const MAX_DIVIDER_PIXEL_GAP = 6;
 const MIN_DIVIDER_DENSITY = 0.32;
 const MIN_OCCUPIED_PIXELS = 6;

@@ -3,6 +3,9 @@ export const RESULT_COLUMNS = Object.freeze([
   "BonusMod", "DifficultyMod", "LevelMod", "FloorXPBoost", "TotalMod", "FinalXP", "Roomcount", "DeadEnds",
 ]);
 
+export const MAX_STORED_RESULTS = 500;
+const MAX_STORED_RESULT_FIELD_LENGTH = 256;
+
 export const RESULT_BATCH_MODES = Object.freeze({
   Lock: "lock",
   Reset: "reset",
@@ -65,13 +68,17 @@ export const RESULT_THEME_RANGES = Object.freeze({
   warped: [[48, 60]],
 });
 
-// A result's identity excludes values that change while the same results screen
-// remains visible. Timestamp changes on every read, Time keeps ticking, and
-// Roomcount/DeadEnds come from the live map. Including any of them lets one
-// physical completion screen acquire multiple fingerprints and be saved twice.
-const RESULT_VOLATILE_COLUMNS = new Set(["Timestamp", "Time", "Roomcount", "DeadEnds"]);
-const RESULT_ID_COLUMNS = RESULT_COLUMNS.filter((column) => !RESULT_VOLATILE_COLUMNS.has(column));
+// Historical identity and live-screen stability deliberately differ. Time is a
+// real property of a completed run, so two otherwise-identical later floors with
+// different completion times must remain distinct in the stored table. While one
+// physical results screen is still visible its Time field keeps ticking, however,
+// so the stability gate excludes it alongside the other live-only values.
+const RESULT_ID_VOLATILE_COLUMNS = new Set(["Timestamp", "Roomcount", "DeadEnds"]);
+const RESULT_ID_COLUMNS = RESULT_COLUMNS.filter((column) => !RESULT_ID_VOLATILE_COLUMNS.has(column));
+const RESULT_STABILITY_VOLATILE_COLUMNS = new Set(["Timestamp", "Time", "Roomcount", "DeadEnds"]);
+const RESULT_STABILITY_COLUMNS = RESULT_COLUMNS.filter((column) => !RESULT_STABILITY_VOLATILE_COLUMNS.has(column));
 export const AUTO_RESULT_MISSES_BEFORE_HIDDEN = 2;
+export const RESULT_STABLE_MIN_MS = 1200;
 // The Dungeoneering results screen animates its XP counters up after it opens
 // (and they jump to final the instant the player presses skip). Capturing on
 // the first sighting therefore reads half-counted, non-final numbers. Require
@@ -86,14 +93,76 @@ export function resultFingerprint(result) {
 }
 
 export function resultStabilityKey(result) {
-  return resultFingerprint(result);
+  if (!result || typeof result !== "object") return "";
+  return RESULT_STABILITY_COLUMNS.map((column) => String(result[column] ?? "").trim()).join("\u001f");
+}
+
+// Semantic identity for the accepted map itself. Player arrows, gatestones and
+// overlay annotations are intentionally excluded: they can move while the same
+// floor remains on screen and must not make an old map claimable a second time.
+// Room types include coordinates, doors, critical/base/boss state and explored
+// progress, so a real newly accepted floor/progression snapshot advances.
+export function mapSnapshotFingerprint(gameMap) {
+  const roomTypes = gameMap?.roomTypes;
+  const floor = gameMap?.floor;
+  if (!Array.isArray(roomTypes) || !roomTypes.length || !floor) return "";
+  const cells = roomTypes.map((type) => {
+    const value = Number(type);
+    return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+  });
+  return `${String(floor.name || "")}\u001f${Number(floor.width) || 0}x${Number(floor.height) || 0}\u001f${cells.join(",")}`;
+}
+
+function normalizeStoredResultValue(value) {
+  if (typeof value !== "string") return "";
+  return value
+    .replace(/[\u0000-\u001f\u007f]/g, "")
+    .trim()
+    .slice(0, MAX_STORED_RESULT_FIELD_LENGTH);
+}
+
+// Treat localStorage as untrusted input: retain only bounded result rows, rebuild
+// every row from the public schema, and discard entries that contain no usable
+// result value at all. The app stores newest-first, so truncation keeps the first
+// (most recent) rows.
+export function normalizeStoredResults(value, maxRows = MAX_STORED_RESULTS) {
+  if (!Array.isArray(value)) return [];
+  const requestedLimit = Number(maxRows);
+  const limit = Number.isFinite(requestedLimit)
+    ? Math.max(0, Math.min(MAX_STORED_RESULTS, Math.floor(requestedLimit)))
+    : MAX_STORED_RESULTS;
+  if (limit === 0) return [];
+
+  const results = [];
+  const seen = new Set();
+  for (const candidate of value) {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) continue;
+    const normalized = Object.fromEntries(
+      RESULT_COLUMNS.map((column) => [column, normalizeStoredResultValue(candidate[column])]),
+    );
+    // A timestamp-only/corrupt row must not count toward a batch target. Apply
+    // the same completeness boundary as a live final-interface capture and
+    // collapse duplicate rows while repairing persisted data.
+    if (!resultLooksComplete(normalized)) continue;
+    const fingerprint = resultFingerprint(normalized);
+    if (!fingerprint || seen.has(fingerprint)) continue;
+    seen.add(fingerprint);
+    results.push(normalized);
+    if (results.length >= limit) break;
+  }
+  return results;
 }
 
 // The pre-skip completion screen matches the winterface marker with every field
 // empty; an all-empty read is stable and used to be committed (early PNG with no
 // values). Only a screen carrying both the floor number and the final XP counts.
 export function resultLooksComplete(result) {
-  return Boolean(String(result?.Floor ?? "").trim()) && Boolean(String(result?.FinalXP ?? "").trim());
+  // Floor/FinalXP alone can appear before the rest of the post-Skip panel has
+  // finished populating. Requiring the clock and both primary XP components
+  // prevents a stable-but-partial screenshot from being mistaken for the final
+  // interface while still allowing optional modifier fields to be blank.
+  return ["Floor", "Time", "FloorXP", "BaseXP", "FinalXP"]
+    .every((field) => Boolean(String(result?.[field] ?? "").trim()));
 }
 
 export function resultAlreadyRecorded(results = [], result) {
@@ -182,24 +251,47 @@ export function resultCaptureRect(capture) {
   };
 }
 
-export function resultMapSnapshotIsFresh(capture, {
-  currentMapReadAt = 0,
-  currentFloorName = "",
-  lastConsumedAt = 0,
+// Scan count by itself is unsafe with DirectX/OpenGL capture backends: several
+// calls may return the same buffered, still-animating frame. This second gate
+// requires the stable OCR key to survive a real wall-clock interval as well.
+// It intentionally leaves nextAutoResultState's small reducer shape unchanged.
+export function enforceResultStableDuration(previousTiming, gate, observedAt = Date.now(), minimumMs = RESULT_STABLE_MIN_MS) {
+  const timestamp = Number(observedAt);
+  const now = Number.isFinite(timestamp) ? timestamp : Date.now();
+  const key = gate?.visible ? String(gate?.key || "") : "";
+  if (!key) return { gate, timing: { key: "", since: 0 } };
+  const sameKey = previousTiming?.key === key && Number.isFinite(Number(previousTiming?.since));
+  const since = sameKey ? Number(previousTiming.since) : now;
+  const required = Math.max(0, Number(minimumMs) || 0);
+  if (gate?.shouldAdd && now - since < required) {
+    return {
+      gate: { ...gate, handled: false, shouldAdd: false },
+      timing: { key, since },
+    };
+  }
+  return { gate, timing: { key, since } };
+}
+
+export function resultMapSnapshotMatchesGeneration(capture, {
+  lastConsumedGeneration = 0,
+  lastConsumedSnapshotRevision = 0,
   hasMap = false,
-  maxAgeMs = 15_000,
 } = {}) {
-  const capturedAt = capture?.date instanceof Date ? capture.date.getTime() : Number.NaN;
-  const mapReadAt = Number(capture?.mapReadAt || 0);
-  const mapAgeMs = capturedAt - mapReadAt;
+  const generation = Math.max(0, Number(capture?.mapGeneration) || 0);
+  const snapshotRevision = Math.max(0, Number(capture?.mapSnapshotRevision) || 0);
+  const consumedGeneration = Math.max(0, Number(lastConsumedGeneration) || 0);
   return Boolean(hasMap)
-    && mapReadAt > Number(lastConsumedAt || 0)
-    && mapReadAt === Number(currentMapReadAt || 0)
-    && capture?.mapFloorName === currentFloorName
-    && capture?.mapFloorName === capture?.result?.FloorSize
-    && Number.isFinite(mapAgeMs)
-    && mapAgeMs >= 0
-    && mapAgeMs <= Math.max(0, Number(maxAgeMs) || 0);
+    && generation > 0
+    && generation >= consumedGeneration
+    // The semantic map revision, rather than a results/OCR epoch, proves these
+    // are newly accepted map bytes. This also permits a real same-size next map
+    // when its floor-generation reset was missed, without ever re-claiming the
+    // same stale snapshot.
+    && snapshotRevision > Math.max(0, Number(lastConsumedSnapshotRevision) || 0)
+    // ocrFloorSize is derived independently from the XP size modifier. The
+    // public result.FloorSize may intentionally prefer map geometry and cannot
+    // validate that same geometry without becoming a circular comparison.
+    && (!capture?.ocrFloorSize || capture?.mapFloorName === capture.ocrFloorSize);
 }
 
 export function parseResultTimeSeconds(value) {
@@ -268,7 +360,7 @@ export function resultMatchesFloorFilter(result, filter = "") {
 export function normalizeResultBatchTarget(value) {
   const target = Number.parseInt(value, 10);
   if (!Number.isFinite(target) || target <= 0) return 0;
-  return Math.min(target, 999);
+  return Math.min(target, MAX_STORED_RESULTS);
 }
 
 export function resultBatchIsComplete(results = [], target = 0) {

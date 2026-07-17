@@ -104,8 +104,8 @@ main { padding: 9px; }
 /* Resize + free-move controls for the in-game RPM/stats overlay. Spaced with
    margins, not flex gap: flex gap needs Chromium 84+ and old Alt1/CEF builds
    would render these controls flush together. */
-.stats-scale-row { display: inline-flex; align-items: center; }
-.stats-scale-row input { width: 64px; margin-right: 4px; }
+.interface-scale-row output { color: #9ee6be; text-align: right; }
+.interface-scale-row output[data-tone="warn"] { color: var(--warning); }
 .stats-free-controls { display: flex; flex-direction: column; margin: 2px 0 4px; }
 .stats-free-controls > * + * { margin-top: 5px; }
 .stats-free-hint { color: #8fa0a4; font-size: 12px; }

@@ -8,18 +8,34 @@ import {
   floorPaceStatus,
   floorStartForDetectedMap,
   formatElapsedClock,
+  mapTopologyDiscontinuity,
   parseFloorTargetSeconds,
   rpmValue,
   trackedBaseAfterTransition,
 } from "../src/rpm-state.js";
 
-function gameMap({ rooms, base = { x: 0, y: 0 }, mystery = 0 } = {}) {
+function gameMap({ rooms, base = { x: 0, y: 0 }, mystery = 0, roomTypes = null } = {}) {
   return {
     openedRoomCount: rooms,
     mysteryCount: mystery,
     base,
+    roomTypes,
   };
 }
+
+function topology(indices, size = 64) {
+  const roomTypes = new Array(size).fill(0);
+  for (const index of indices) roomTypes[index] = 1;
+  return roomTypes;
+}
+
+test("map topology distinguishes a classifier subset from a different floor", () => {
+  const previous = gameMap({ rooms: 8, roomTypes: topology([...Array(8).keys()]) });
+  assert.equal(mapTopologyDiscontinuity(previous,
+    gameMap({ rooms: 5, roomTypes: topology([0, 1, 2, 3, 4]) })), false);
+  assert.equal(mapTopologyDiscontinuity(previous,
+    gameMap({ rooms: 5, roomTypes: topology([20, 21, 22, 23, 24]) })), true);
+});
 
 const calibration = Object.freeze({
   x: 100,
@@ -114,12 +130,14 @@ test("normal same-floor progress is accepted without resetting rpm", () => {
 });
 
 test("single-base false locks do not update displayed rpm until confirmed", () => {
+  const previousMap = gameMap({ rooms: 20, base: { x: 0, y: 0 }, roomTypes: topology([...Array(20).keys()]) });
   const first = evaluateMapTransition({
     floorStart: 10_000,
     lastBase: { x: 0, y: 0 },
     lastRoomCount: 20,
+    lastGameMap: previousMap,
     pendingReset: null,
-  }, gameMap({ rooms: 1, base: { x: 0, y: 0 } }), calibration, 30_000);
+  }, gameMap({ rooms: 1, base: { x: 0, y: 0 }, roomTypes: topology([30]) }), calibration, 30_000);
 
   assert.equal(first.accept, false);
   assert.equal(first.reset, false);
@@ -130,8 +148,9 @@ test("single-base false locks do not update displayed rpm until confirmed", () =
     floorStart: 10_000,
     lastBase: { x: 0, y: 0 },
     lastRoomCount: 20,
+    lastGameMap: previousMap,
     pendingReset: first.pendingReset,
-  }, gameMap({ rooms: 2, base: { x: 0, y: 0 } }), calibration, 30_600);
+  }, gameMap({ rooms: 2, base: { x: 0, y: 0 }, roomTypes: topology([30, 31]) }), calibration, 30_600);
 
   assert.equal(confirmed.accept, true);
   assert.equal(confirmed.reset, true);
@@ -171,50 +190,80 @@ test("a new floor reusing the base resets even when the one-room frame is missed
   // read of the new floor already shows 3 rooms, and the new base sits in the
   // same grid cell as the previous floor. Without the room-collapse trigger this
   // slipped through as same-floor and stranded floorStart (the 0.4 rpm bug).
+  const oldTopology = topology([...Array(15).keys()]);
+  const newTopology = topology([20, 21, 22]);
+  const previousMap = gameMap({ rooms: 15, base: { x: 2, y: 3 }, roomTypes: oldTopology });
+  const nextMap = gameMap({ rooms: 3, base: { x: 2, y: 3 }, roomTypes: newTopology });
   const first = evaluateMapTransition({
     floorStart: 10_000,
     lastBase: { x: 2, y: 3 },
     lastRoomCount: 15,
+    lastGameMap: previousMap,
     pendingReset: null,
-  }, gameMap({ rooms: 3, base: { x: 2, y: 3 } }), calibration, 60_000);
+  }, nextMap, calibration, 60_000);
 
   assert.equal(first.accept, false);
   assert.equal(first.reset, false);
-  assert.equal(first.reason, "pending-single-base");
+  assert.equal(first.reason, "pending-room-regression");
+
+  const middle = evaluateMapTransition({
+    floorStart: 10_000,
+    lastBase: { x: 2, y: 3 },
+    lastRoomCount: 15,
+    lastGameMap: previousMap,
+    pendingReset: first.pendingReset,
+  }, nextMap, calibration, 60_600);
+  assert.equal(middle.reset, false);
 
   const confirmed = evaluateMapTransition({
     floorStart: 10_000,
     lastBase: { x: 2, y: 3 },
     lastRoomCount: 15,
-    pendingReset: first.pendingReset,
-  }, gameMap({ rooms: 3, base: { x: 2, y: 3 } }), calibration, 60_600);
+    lastGameMap: previousMap,
+    pendingReset: middle.pendingReset,
+  }, nextMap, calibration, 62_500);
 
   assert.equal(confirmed.accept, true);
   assert.equal(confirmed.reset, true);
   assert.equal(confirmed.resetAt, 60_000);
   assert.equal(confirmed.resetRoomCount, 3);
-  assert.equal(confirmed.reason, "confirmed-single-base");
+  assert.equal(confirmed.reason, "confirmed-room-collapse");
 });
 
 test("a new floor whose base is not yet readable still confirms and resets", () => {
   // The first seconds of a new floor often read rooms but no base marker. An
   // empty pending key made samePending permanently false, freezing the accepted
   // map (and the 55-room overlay of the previous floor) indefinitely.
+  const priorTopology = topology([...Array(55).keys()], 128);
+  const firstTopology = topology([...Array(8).keys()].map((index) => index + 64), 128);
+  const nextTopology = topology([...Array(10).keys()].map((index) => index + 64), 128);
+  const priorMap = gameMap({ rooms: 55, base: { x: 5, y: 5 }, roomTypes: priorTopology });
   const first = evaluateMapTransition({
     floorStart: 10_000,
     lastBase: { x: 5, y: 5 },
     lastRoomCount: 55,
+    lastGameMap: priorMap,
     pendingReset: null,
-  }, gameMap({ rooms: 8, base: null }), calibration, 60_000);
+  }, gameMap({ rooms: 8, base: null, roomTypes: firstTopology }), calibration, 60_000);
   assert.equal(first.accept, false);
   assert.ok(first.pendingReset.key.length > 0);
+
+  const middle = evaluateMapTransition({
+    floorStart: 10_000,
+    lastBase: { x: 5, y: 5 },
+    lastRoomCount: 55,
+    lastGameMap: priorMap,
+    pendingReset: first.pendingReset,
+  }, gameMap({ rooms: 8, base: null, roomTypes: firstTopology }), calibration, 61_200);
+  assert.equal(middle.reset, false);
 
   const confirmed = evaluateMapTransition({
     floorStart: 10_000,
     lastBase: { x: 5, y: 5 },
     lastRoomCount: 55,
-    pendingReset: first.pendingReset,
-  }, gameMap({ rooms: 10, base: null }), calibration, 60_600);
+    lastGameMap: priorMap,
+    pendingReset: middle.pendingReset,
+  }, gameMap({ rooms: 10, base: null, roomTypes: nextTopology }), calibration, 62_500);
   assert.equal(confirmed.accept, true);
   assert.equal(confirmed.reset, true);
   assert.equal(confirmed.resetAt, 60_000);
@@ -270,6 +319,50 @@ test("a results-screen latch holds an identical map until new-floor progress is 
   assert.equal(confirmed.resetAt, 60_000);
   assert.equal(confirmed.resetRoomCount, 8);
   assert.equal(confirmed.reason, "confirmed-results-lifecycle");
+});
+
+test("a finished results screen yields to confirmed floor-size or base identity", () => {
+  const previous = {
+    floorStart: 10_000,
+    lastBase: { x: 0, y: 0 },
+    lastRoomCount: 12,
+    lastFloorName: "Small",
+    awaitingNewFloor: true,
+    resultsScreenVisible: false,
+  };
+
+  for (const scenario of [
+    {
+      name: "floor size",
+      nextCalibration: calibration,
+      map: gameMap({ rooms: 1, base: { x: 0, y: 0 } }),
+      pendingReason: "pending-floor-change",
+      confirmedReason: "confirmed-floor-change",
+    },
+    {
+      name: "base",
+      nextCalibration: { floor: { name: "Small" } },
+      map: gameMap({ rooms: 1, base: { x: 3, y: 2 } }),
+      pendingReason: "pending-base-change",
+      confirmedReason: "confirmed-base-change",
+    },
+  ]) {
+    const first = evaluateMapTransition(previous, scenario.map, scenario.nextCalibration, 60_000);
+    assert.equal(first.accept, false, scenario.name);
+    assert.equal(first.reason, scenario.pendingReason, scenario.name);
+
+    const confirmed = evaluateMapTransition(
+      { ...previous, pendingReset: first.pendingReset },
+      scenario.map,
+      scenario.nextCalibration,
+      60_600,
+    );
+    assert.equal(confirmed.accept, true, scenario.name);
+    assert.equal(confirmed.reset, true, scenario.name);
+    assert.equal(confirmed.resetAt, 60_000, scenario.name);
+    assert.equal(confirmed.resetRoomCount, 1, scenario.name);
+    assert.equal(confirmed.reason, scenario.confirmedReason, scenario.name);
+  }
 });
 
 test("a post-results classifier dip recovering to the old count cannot reset twice", () => {
@@ -372,13 +465,22 @@ test("a two-second map gap confirms a 15 to 8 same-base floor regression", () =>
 test("a jittering base cannot stall a collapsed-count floor change forever", () => {
   // The base cell reads differently every frame, so the pending key never
   // matches twice; the sustained-collapse valve must confirm after ~2.5s.
-  const previous = { floorStart: 10_000, lastBase: { x: 5, y: 5 }, lastRoomCount: 55 };
+  const previous = {
+    floorStart: 10_000,
+    lastBase: { x: 5, y: 5 },
+    lastRoomCount: 55,
+    lastGameMap: gameMap({ rooms: 55, base: { x: 5, y: 5 }, roomTypes: topology([...Array(55).keys()], 128) }),
+  };
   const bases = [{ x: 0, y: 1 }, { x: 1, y: 1 }, { x: 0, y: 1 }, { x: 1, y: 1 }];
   let pending = null;
   let result = null;
   for (let frame = 0; frame < bases.length; frame += 1) {
     result = evaluateMapTransition({ ...previous, pendingReset: pending },
-      gameMap({ rooms: 8 + frame, base: bases[frame] }), calibration, 60_000 + frame * 1_000);
+      gameMap({
+        rooms: 8 + frame,
+        base: bases[frame],
+        roomTypes: topology([...Array(8 + frame).keys()].map((index) => index + 70), 128),
+      }), calibration, 60_000 + frame * 1_000);
     if (result.reset) break;
     assert.equal(result.accept, false);
     pending = result.pendingReset;
@@ -402,26 +504,194 @@ test("a stale pending from before lost reads does not instantly confirm", () => 
   assert.equal(first.pendingReset.firstSeenAt, 70_000);
 });
 
-test("a partial room-count misread and recovery does not reset the floor timer", () => {
-  // 12 -> 5 fires roomCountDropped (pending single-base); the 12 -> 7 recovery
-  // frame is not itself a reset candidate, so it must NOT confirm a reset.
+test("results lifecycle works without a capture gap and rebases from the old visible map", () => {
+  const previous = {
+    floorStart: 10_000,
+    lastBase: { x: 0, y: 0 },
+    lastRoomCount: 8,
+    lastFloorName: "Large",
+    mapGapMs: 0,
+    awaitingNewFloor: true,
+    resultsScreenVisible: true,
+  };
+  const oldMap = evaluateMapTransition(previous,
+    gameMap({ rooms: 8, base: { x: 0, y: 0 } }), calibration, 60_000);
+  assert.equal(oldMap.accept, false);
+  assert.equal(oldMap.reason, "pending-results-lifecycle");
+
+  const newBaseline = evaluateMapTransition({
+    ...previous,
+    resultsScreenVisible: false,
+    pendingReset: oldMap.pendingReset,
+  }, gameMap({ rooms: 7, base: { x: 0, y: 0 } }), calibration, 60_600);
+  assert.equal(newBaseline.accept, false);
+  assert.equal(newBaseline.pendingReset.firstOpenedRoomCount, 7);
+  assert.equal(newBaseline.pendingReset.firstSeenAt, 60_600);
+
+  const confirmed = evaluateMapTransition({
+    ...previous,
+    resultsScreenVisible: false,
+    pendingReset: newBaseline.pendingReset,
+  }, gameMap({ rooms: 9, base: { x: 0, y: 0 } }), calibration, 61_200);
+  assert.equal(confirmed.accept, true);
+  assert.equal(confirmed.reset, true);
+  assert.equal(confirmed.reason, "confirmed-results-lifecycle");
+  assert.equal(confirmed.resetAt, 60_600);
+  assert.equal(confirmed.resetRoomCount, 7);
+});
+
+test("a recent map gap cannot revive an old matching room-regression pending", () => {
+  const oldMap = gameMap({ rooms: 8, base: { x: 0, y: 0 }, roomTypes: topology([...Array(8).keys()]) });
+  const regressedMap = gameMap({ rooms: 5, base: { x: 0, y: 0 }, roomTypes: topology([20, 21, 22, 23, 24]) });
+  const result = evaluateMapTransition({
+    floorStart: 10_000,
+    lastBase: { x: 0, y: 0 },
+    lastRoomCount: 8,
+    lastGameMap: oldMap,
+    mapGapMs: 1_800,
+    pendingReset: {
+      key: "old",
+      openedRoomCount: 5,
+      seenAt: 60_000,
+      firstSeenAt: 55_000,
+      firstOpenedRoomCount: 5,
+      reason: "room-regression",
+    },
+  }, regressedMap, calibration, 70_000);
+
+  assert.equal(result.accept, false);
+  assert.equal(result.reset, false);
+  assert.equal(result.reason, "pending-room-regression");
+  assert.equal(result.pendingReset.firstSeenAt, 70_000);
+});
+
+test("a sustained 8 to 5 same-base regression resets only after 2.5 seconds", () => {
+  const oldMap = gameMap({ rooms: 8, base: { x: 0, y: 0 }, roomTypes: topology([...Array(8).keys()]) });
+  const fiveRoomMap = gameMap({ rooms: 5, base: { x: 0, y: 0 }, roomTypes: topology([20, 21, 22, 23, 24]) });
+  const sixRoomMap = gameMap({ rooms: 6, base: { x: 0, y: 0 }, roomTypes: topology([20, 21, 22, 23, 24, 25]) });
+  const previous = {
+    floorStart: 10_000,
+    lastBase: { x: 0, y: 0 },
+    lastRoomCount: 8,
+    lastGameMap: oldMap,
+  };
+  const first = evaluateMapTransition(previous,
+    fiveRoomMap, calibration, 60_000);
+  assert.equal(first.accept, false);
+  assert.equal(first.reset, false);
+  assert.equal(first.reason, "pending-room-regression");
+  assert.equal(first.pendingReset.firstSeenAt, 60_000);
+  assert.equal(first.pendingReset.firstOpenedRoomCount, 5);
+
+  const middle = evaluateMapTransition({ ...previous, pendingReset: first.pendingReset },
+    fiveRoomMap, calibration, 61_200);
+  const beforeThreshold = evaluateMapTransition({ ...previous, pendingReset: middle.pendingReset },
+    sixRoomMap, calibration, 62_400);
+  assert.equal(beforeThreshold.accept, false);
+  assert.equal(beforeThreshold.reset, false);
+  assert.equal(beforeThreshold.pendingReset.firstSeenAt, 60_000);
+
+  const confirmed = evaluateMapTransition({ ...previous, pendingReset: beforeThreshold.pendingReset },
+    sixRoomMap, calibration, 62_500);
+  assert.equal(confirmed.accept, true);
+  assert.equal(confirmed.reset, true);
+  assert.equal(confirmed.reason, "confirmed-room-regression");
+  assert.equal(confirmed.resetAt, 60_000);
+  assert.equal(confirmed.resetRoomCount, 5);
+});
+
+test("a short capture miss preserves a mature room-regression streak explicitly", () => {
+  const oldMap = gameMap({ rooms: 8, base: { x: 0, y: 0 }, roomTypes: topology([...Array(8).keys()]) });
+  const regressedMap = gameMap({ rooms: 5, base: { x: 0, y: 0 }, roomTypes: topology([20, 21, 22, 23, 24]) });
+  const previous = {
+    floorStart: 10_000,
+    lastBase: { x: 0, y: 0 },
+    lastRoomCount: 8,
+    lastGameMap: oldMap,
+  };
+  const first = evaluateMapTransition(previous,
+    regressedMap, calibration, 80_000);
+  const stillPending = evaluateMapTransition({ ...previous, pendingReset: first.pendingReset },
+    regressedMap, calibration, 80_600);
+  assert.equal(stillPending.reset, false);
+
+  const missed = evaluateMapTransition({ ...previous, pendingReset: stillPending.pendingReset },
+    null, calibration, 81_200);
+  assert.equal(missed.reason, "missing-map");
+  assert.equal(missed.pendingReset, stillPending.pendingReset);
+  assert.equal(missed.pendingReset.seenAt, 80_600);
+  assert.equal(missed.pendingReset.reason, "room-regression");
+
+  // Retaining the candidate's explicit timestamp/reason plus mapGapMs proves
+  // that pixels were missing for only 1.8s. Although the readable-frame delta
+  // is now 2.4s, the resumed frame may finish the existing 2.5s gate.
+  const resumed = evaluateMapTransition({
+    ...previous,
+    mapGapMs: 1_800,
+    pendingReset: missed.pendingReset,
+  }, regressedMap, calibration, 83_000);
+
+  assert.equal(resumed.accept, true);
+  assert.equal(resumed.reset, true);
+  assert.equal(resumed.reason, "confirmed-room-regression");
+  assert.equal(resumed.resetAt, 80_000);
+  assert.equal(resumed.resetRoomCount, 5);
+});
+
+test("a count-only 12 to 5 to 7 to 12 classifier dip never resets the floor timer", () => {
+  // Every under-read is a subset of the last accepted topology. The reducer
+  // therefore treats it as same-floor data; app.js's monotonic guard keeps the
+  // displayed room count/RPM at 12 until the clean frame returns.
+  const oldMap = gameMap({ rooms: 12, base: { x: 0, y: 0 }, roomTypes: topology([...Array(12).keys()]) });
+  const previous = {
+    floorStart: 10_000,
+    lastBase: { x: 0, y: 0 },
+    lastRoomCount: 12,
+    lastGameMap: oldMap,
+    pendingReset: null,
+  };
+  const first = evaluateMapTransition(previous,
+    gameMap({ rooms: 5, base: { x: 0, y: 0 }, roomTypes: topology([0, 1, 2, 3, 4]) }), calibration, 30_000);
+  assert.equal(first.accept, true);
+  assert.equal(first.reset, false);
+  assert.equal(first.reason, "same-floor");
+
+  const recovery = evaluateMapTransition(previous,
+    gameMap({ rooms: 7, base: { x: 0, y: 0 }, roomTypes: topology([0, 1, 2, 3, 4, 5, 6]) }), calibration, 30_600);
+  assert.equal(recovery.reset, false);
+  assert.equal(recovery.reason, "same-floor");
+
+  const restored = evaluateMapTransition(previous, oldMap, calibration, 31_200);
+  assert.equal(restored.accept, true);
+  assert.equal(restored.reset, false);
+  assert.equal(restored.pendingReset, null);
+  assert.equal(restored.reason, "same-floor");
+});
+
+test("automatic interface-scale recovery cannot turn its map gap into a floor reset", () => {
+  const oldMap = gameMap({ rooms: 20, base: { x: 0, y: 0 }, roomTypes: topology([...Array(20).keys()]) });
+  const scaledSubset = gameMap({ rooms: 10, base: { x: 0, y: 0 }, roomTypes: topology([...Array(10).keys()]) });
   const first = evaluateMapTransition({
     floorStart: 10_000,
     lastBase: { x: 0, y: 0 },
-    lastRoomCount: 12,
-    pendingReset: null,
-  }, gameMap({ rooms: 5, base: { x: 0, y: 0 } }), calibration, 30_000);
-  assert.equal(first.accept, false);
-  assert.equal(first.pendingReset.reason, "single-base");
+    lastRoomCount: 20,
+    lastGameMap: oldMap,
+    mapGapMs: 3_000,
+    scaleChanged: true,
+  }, scaledSubset, calibration, 60_000);
+  assert.equal(first.accept, true);
+  assert.equal(first.reset, false);
 
-  const recovery = evaluateMapTransition({
+  const next = evaluateMapTransition({
     floorStart: 10_000,
     lastBase: { x: 0, y: 0 },
-    lastRoomCount: 12,
+    lastRoomCount: 20,
+    lastGameMap: oldMap,
+    mapGapMs: 0,
     pendingReset: first.pendingReset,
-  }, gameMap({ rooms: 7, base: { x: 0, y: 0 } }), calibration, 30_600);
-  assert.equal(recovery.reset, false);
-  assert.equal(recovery.reason, "same-floor");
+  }, scaledSubset, calibration, 60_600);
+  assert.equal(next.accept, true);
+  assert.equal(next.reset, false);
 });
 
 test("the elapsed clock rolls into hours past 60 minutes", () => {

@@ -126,8 +126,10 @@ $winterface = Get-Content (Join-Path $appRoot 'src\winterface.js') -Raw
 $mapLocator = Get-Content (Join-Path $appRoot 'src\alt1-map-locator.js') -Raw
 $rpmState = Get-Content (Join-Path $appRoot 'src\rpm-state.js') -Raw
 $partyAnchor = Get-Content (Join-Path $appRoot 'src\party-anchor.js') -Raw
+$interfaceScale = Get-Content (Join-Path $appRoot 'src\interface-scale.js') -Raw
+$resultsSentinel = Get-Content (Join-Path $appRoot 'src\results-sentinel.js') -Raw
 $nativeOverlaySource = $app + "`n" + $overlay
-$runtimeSource = $app + "`n" + $capture + "`n" + $overlay + "`n" + $partyCore + "`n" + $partyInterface + "`n" + $teamSync + "`n" + $teamGates + "`n" + $partyMenu + "`n" + $resultsCore + "`n" + $fileSaver + "`n" + $winterface + "`n" + $mapLocator + "`n" + $rpmState + "`n" + $partyAnchor
+$runtimeSource = $app + "`n" + $capture + "`n" + $overlay + "`n" + $partyCore + "`n" + $partyInterface + "`n" + $teamSync + "`n" + $teamGates + "`n" + $partyMenu + "`n" + $resultsCore + "`n" + $fileSaver + "`n" + $winterface + "`n" + $mapLocator + "`n" + $rpmState + "`n" + $partyAnchor + "`n" + $interfaceScale + "`n" + $resultsSentinel
 $domIds = @([regex]::Matches($app, 'querySelector\("#(?<id>[a-z0-9-]+)"\)') | ForEach-Object { $_.Groups['id'].Value })
 $missingDomIds = @($domIds | Where-Object { $html -notmatch ('id="' + [regex]::Escape($_) + '"') })
 if ($missingDomIds.Count -ne 0) {
@@ -149,22 +151,24 @@ if ($overlay -notmatch 'overLayFreezeGroup' -or $overlay -notmatch 'overLayRefre
 if ($overlay -notmatch 'overLaySetGroup\(""\)') {
     throw 'Native Alt1 overlay rendering must reset the active group after drawing.'
 }
-if ($app -notmatch 'gatestones:\s*elements\.rpmOnly\.checked \? \[\] : collectGatestoneMarkers' -or
+if ($app -notmatch 'gatestones:\s*hideMapDetails \? \[\] : collectGatestoneMarkers' -or
     $overlay -notmatch 'for \(const marker of gatestones\)') {
     throw 'Native RuneScape overlay must draw gatestones normally and suppress them in RPM-only mode.'
 }
 if (($overlay -notmatch 'sizeScale') -or
-    ($app -notmatch 'statsScale: statsScaleValue') -or
+    ($overlay -notmatch 'size = scale \* overlayScaleValue\(sizeScale\)') -or
+    ($app -notmatch 'statsScale: 1') -or
     ($app -notmatch 'statsFree: state\.statsFree') -or
     ($app -notmatch 'function setStatsFree') -or
     ($app -notmatch 'onAlt1Event\("alt1pressed"') -or
     ($app -notmatch 'function onAlt1Event') -or
     ($app -match 'window\.addEventListener\("(alt1pressed|permissionchanged)"') -or
     ($app -notmatch 'mouseRs') -or
-    ($html -notmatch 'id="stats-scale"') -or
+    ($html -notmatch 'id="interface-scale-status"') -or
+    ($html -match 'id="stats-scale"') -or
     ($html -notmatch 'id="stats-place"') -or
     ($html -notmatch 'data-stats-nudge')) {
-    throw 'The in-game RPM/stats overlay must be resizable, freely movable and Alt+1 placeable.'
+    throw 'The in-game RPM/stats overlay must auto-scale, remain freely movable and be Alt+1 placeable.'
 }
 if (([regex]::Matches($html, 'class="party-slot" data-slot="[1-5]"')).Count -ne 5) {
     throw 'The Dungeoneering party interface must contain exactly five visible slots.'
@@ -266,6 +270,15 @@ if (($html -notmatch 'id="auto-track-results" type="checkbox"') -or
 }
 if (($app -notmatch 'autoCaptureDungeonResults') -or
     ($app -notmatch 'readDungeonResultsCapture') -or
+    ($app -notmatch 'probeDungeonResultsSentinel') -or
+    ($app -notmatch 'createResultsSentinelPlan') -or
+    ($app -notmatch 'resultsSentinelsMatch') -or
+    ($app -notmatch 'captureCadence\(RESULTS_SENTINEL_CADENCE_MS\)') -or
+    ($resultsSentinel -notmatch 'RESULTS_SENTINEL_CADENCE_MS\s*=\s*250') -or
+    ($resultsSentinel -notmatch 'ZONE_MIN_HITS\s*=\s*5') -or
+    ($resultsSentinel -notmatch 'title-gold') -or
+    ($resultsSentinel -notmatch 'dark-interior') -or
+    ($resultsSentinel -notmatch 'ready-orange') -or
     ($app -notmatch 'saveResultArtifacts') -or
     ($app -notmatch 'cropImageData') -or
     ($app -notmatch 'writePngToSaveFolder') -or
@@ -275,10 +288,18 @@ if (($app -notmatch 'autoCaptureDungeonResults') -or
     ($fileSaver -notmatch 'showDirectoryPicker') -or
     ($fileSaver -notmatch 'indexedDB') -or
     ($fileSaver -notmatch 'writeDataUrlToFolder') -or
+    ($fileSaver -notmatch 'showDirectoryPicker\(\{ id: saveFolderKey\(key\), mode: "readwrite" \}\)') -or
+    ($fileSaver -notmatch 'return "unknown"') -or
+    ($fileSaver -notmatch 'TimeoutError') -or
+    ($fileSaver -notmatch 'isSaveFolderPermissionError') -or
+    ($app -notmatch 'folder\.permission = "granted"') -or
+    ($app -match 'save folder permission was not granted') -or
+    ($app -notmatch 'function canRequestSaveFolderPermission') -or
+    ($app -notmatch 'permission === "prompt" \|\| permission === "denied"') -or
+    ($app -notmatch 'queuePendingMapPng\(artifact\)') -or
     ($app -notmatch 'map-folder') -or
     ($app -notmatch 'results-folder') -or
     ($app -notmatch 'resultsBusy') -or
-    ($app -notmatch 'autoResultKeys') -or
     ($app -notmatch 'commitDungeonResultsCapture') -or
     ($app -notmatch 'prepareResultBatch') -or
     ($resultsCore -notmatch 'averageResultTime') -or
@@ -286,6 +307,9 @@ if (($app -notmatch 'autoCaptureDungeonResults') -or
     ($resultsCore -notmatch 'RESULT_THEME_RANGES') -or
     ($resultsCore -notmatch 'resultBatchStatus') -or
     ($resultsCore -notmatch 'resultAlreadyRecorded') -or
+    ($resultsCore -notmatch 'normalizeStoredResults') -or
+    ($app -notmatch 'function persistResults') -or
+    ($app -notmatch 'auto-track-results') -or
     ($app -notmatch 'resultAlreadyRecorded\(state\.results, result\)') -or
     ($resultsCore -notmatch 'nextAutoResultState') -or
     ($resultsCore -notmatch 'AUTO_RESULT_MISSES_BEFORE_HIDDEN') -or
@@ -302,10 +326,21 @@ if (($app -notmatch 'autoCaptureDungeonResults') -or
     ($app -notmatch 'pendingResultsPngs') -or
     ($app -notmatch 'MAX_PENDING_RESULTS_PNGS = 20') -or
     ($app -notmatch 'retryPendingResultsPngs') -or
-    ($app -notmatch 'RESULT_MAP_MAX_AGE_MS = 15000') -or
-    ($app -notmatch 'capture\?\.mapReadAt === state\.lastMapReadAt') -or
-    ($app -notmatch 'lastConsumedAt:\s*state\.lastResultMapConsumedAt') -or
-    ($resultsCore -notmatch 'function resultMapSnapshotIsFresh') -or
+    ($app -notmatch 'pendingMapPngs') -or
+    ($app -notmatch 'retryPendingMapPngs') -or
+    ($app -notmatch 'activeResultContext') -or
+    ($app -notmatch 'mapGeneration: completionContext\.mapGeneration') -or
+    ($app -notmatch 'mapDataUrl: completionContext\.mapDataUrl') -or
+    ($app -notmatch 'claimResultMapSnapshot') -or
+    ($app -notmatch 'lastResultMapGenerationConsumed') -or
+    ($app -notmatch 'lastResultMapSnapshotRevisionConsumed') -or
+    ($app -notmatch 'mapSnapshotRevision: completionContext\.mapSnapshotRevision') -or
+    ($resultsCore -notmatch 'function mapSnapshotFingerprint') -or
+    ($resultsCore -notmatch 'function resultMapSnapshotMatchesGeneration') -or
+    ($resultsCore -notmatch 'enforceResultStableDuration') -or
+    ($resultsCore -notmatch 'RESULT_STABLE_MIN_MS = 1200') -or
+    ($app -notmatch 'RESULTS_AUTO_INTERVAL = 900') -or
+    ($app -notmatch 'RESULTS_SETTLE_INTERVAL = 300') -or
     ($app -notmatch 'RESULTS_SCALE_FALLBACK_IDLE_INTERVAL = 30000') -or
     ($resultsCore -notmatch 'plannedResultExports')) {
     throw 'Automatic dungeon-results capture, dedupe, stability gate and folder-based PNG export are incomplete.'
@@ -377,28 +412,31 @@ if (($rpmState -notmatch 'function evaluateMapTransition') -or
     ($overlay -notmatch 'rpmValue')) {
     throw 'RPM state must be centralized and must gate suspicious floor resets before updating visible stats.'
 }
-if (($app -notmatch 'map-core\.js\?v=20260715-31') -or
-    ($app -notmatch 'alt1-map-locator\.js\?v=20260715-31') -or
-    ($app -notmatch 'alt1-capture\.js\?v=20260715-31') -or
-    ($app -notmatch 'alt1-overlay\.js\?v=20260715-31') -or
-    ($app -notmatch 'rpm-state\.js\?v=20260715-31') -or
-    ($app -notmatch 'team-sync\.js\?v=20260715-31') -or
-    ($app -notmatch 'party-core\.js\?v=20260715-31') -or
-    ($app -notmatch 'party-interface\.js\?v=20260715-31') -or
-    ($app -notmatch 'results-core\.js\?v=20260715-31') -or
-    ($app -notmatch 'party-menu\.js\?v=20260715-31') -or
-    ($app -notmatch 'team-gates\.js\?v=20260715-31') -or
-    ($app -notmatch 'file-saver\.js\?v=20260715-31') -or
-    ($app -notmatch 'party-anchor\.js\?v=20260715-31') -or
-    ($app -notmatch 'winterface\.js\?v=20260715-31') -or
-    ($overlay -notmatch 'map-core\.js\?v=20260715-31') -or
-    ($overlay -notmatch 'rpm-state\.js\?v=20260715-31') -or
-    ($teamSync -notmatch 'party-core\.js\?v=20260715-31') -or
-    ($teamGates -notmatch 'party-core\.js\?v=20260715-31') -or
-    ($teamGates -notmatch 'alt1-overlay\.js\?v=20260715-31') -or
-    ($partyAnchor -notmatch 'party-interface\.js\?v=20260715-31') -or
-    ($partyAnchor -notmatch 'chatbox-font-data\.js\?v=20260715-31') -or
-    ($mapLocator -notmatch 'map-core\.js\?v=20260715-31')) {
+if (($app -notmatch 'map-core\.js\?v=20260717-36') -or
+    ($app -notmatch 'alt1-map-locator\.js\?v=20260717-36') -or
+    ($app -notmatch 'alt1-capture\.js\?v=20260717-36') -or
+    ($app -notmatch 'capture-scheduler\.js\?v=20260717-36') -or
+    ($app -notmatch 'interface-scale\.js\?v=20260717-36') -or
+    ($app -notmatch 'alt1-overlay\.js\?v=20260717-36') -or
+    ($app -notmatch 'rpm-state\.js\?v=20260717-36') -or
+    ($app -notmatch 'team-sync\.js\?v=20260717-36') -or
+    ($app -notmatch 'party-core\.js\?v=20260717-36') -or
+    ($app -notmatch 'party-interface\.js\?v=20260717-36') -or
+    ($app -notmatch 'results-core\.js\?v=20260717-36') -or
+    ($app -notmatch 'party-menu\.js\?v=20260717-36') -or
+    ($app -notmatch 'team-gates\.js\?v=20260717-36') -or
+    ($app -notmatch 'file-saver\.js\?v=20260717-36') -or
+    ($app -notmatch 'party-anchor\.js\?v=20260717-36') -or
+    ($app -notmatch 'winterface\.js\?v=20260717-36') -or
+    ($app -notmatch 'results-sentinel\.js\?v=20260717-36') -or
+    ($overlay -notmatch 'map-core\.js\?v=20260717-36') -or
+    ($overlay -notmatch 'rpm-state\.js\?v=20260717-36') -or
+    ($teamSync -notmatch 'party-core\.js\?v=20260717-36') -or
+    ($teamGates -notmatch 'party-core\.js\?v=20260717-36') -or
+    ($teamGates -notmatch 'alt1-overlay\.js\?v=20260717-36') -or
+    ($partyAnchor -notmatch 'party-interface\.js\?v=20260717-36') -or
+    ($partyAnchor -notmatch 'chatbox-font-data\.js\?v=20260717-36') -or
+    ($mapLocator -notmatch 'map-core\.js\?v=20260717-36')) {
     throw 'Changed Alt1 runtime modules must be cache-busted for existing Alt1 installations.'
 }
 if (($app -notmatch 'buildVisibleRemoteGatestones') -or
@@ -500,8 +538,10 @@ if (($overlay -notmatch 'overlayScale') -or
     throw 'Native overlays must use the calibrated UI scale so the stats strip is placed under scaled RuneScape maps.'
 }
 if (-not (Test-Path (Join-Path $appRoot 'THIRD_PARTY_NOTES.md')) -or
-    ((Get-Content (Join-Path $appRoot 'THIRD_PARTY_NOTES.md') -Raw) -notmatch 'Sleepy-meh-alt-1/dg-map')) {
-    throw 'Third-party attribution for the adapted map-anchor locator is missing.'
+    ((Get-Content (Join-Path $appRoot 'THIRD_PARTY_NOTES.md') -Raw) -notmatch 'Sleepy-meh-alt-1/dg-map') -or
+    ((Get-Content (Join-Path $appRoot 'THIRD_PARTY_NOTES.md') -Raw) -notmatch 'miseenplac/dghelper') -or
+    ((Get-Content (Join-Path $appRoot 'THIRD_PARTY_NOTES.md') -Raw) -notmatch '80c9c6ced28c9a591d237749ef8c0ca06c6db615')) {
+    throw 'Third-party attribution for adapted map/results detection is missing.'
 }
 if (($partyAnchor -notmatch 'function readPartyByAnchor') -or
     ($partyAnchor -notmatch 'function findDgIcon') -or

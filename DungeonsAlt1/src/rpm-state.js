@@ -84,6 +84,43 @@ function samePoint(left, right) {
   return Boolean(left && right && left.x === right.x && left.y === right.y);
 }
 
+function openedRoomType(type) {
+  const value = Number(type) || 0;
+  return value > 0 && (value & 16) === 0;
+}
+
+// A falling room count alone is not proof of a new floor: one noisy capture can
+// simply stop recognising part of the existing map. A real same-size/same-base
+// floor normally introduces rooms/door topology that did not exist in the last
+// accepted map, whereas a classifier dip is a subset of that map. Keep this
+// deliberately conservative; the authoritative results lifecycle, map gap,
+// floor-size and base-position routes remain available when topology overlaps.
+export function mapTopologyDiscontinuity(previousMap, nextMap) {
+  const previousTypes = previousMap?.roomTypes;
+  const nextTypes = nextMap?.roomTypes;
+  if (!Array.isArray(previousTypes) || !Array.isArray(nextTypes)
+    || !previousTypes.length || previousTypes.length !== nextTypes.length) return false;
+  let novel = 0;
+  let shared = 0;
+  let changed = 0;
+  const identityMask = 1 | 2 | 4 | 8 | 32 | 64 | 128;
+  for (let index = 0; index < nextTypes.length; index += 1) {
+    const beforeOpen = openedRoomType(previousTypes[index]);
+    const afterOpen = openedRoomType(nextTypes[index]);
+    if (afterOpen && !beforeOpen) novel += 1;
+    if (afterOpen && beforeOpen) {
+      shared += 1;
+      if ((Number(previousTypes[index]) & identityMask) !== (Number(nextTypes[index]) & identityMask)) changed += 1;
+    }
+  }
+  return novel >= 2
+    || (novel >= 1 && changed >= 1)
+    || (shared >= 2 && changed >= Math.max(2, Math.ceil(shared * 0.6)));
+}
+
+const PENDING_STREAK_MAX_GAP_MS = 2_000;
+const ROOM_REGRESSION_CONFIRM_MS = 2_500;
+
 // The base marker is allowed to disappear temporarily within one floor (player
 // arrows and scaling can cover its probe), but a confirmed reset starts a new
 // identity. In that case carrying the previous floor's base forward would make
@@ -98,6 +135,7 @@ function confirmedReason(candidateReason) {
     case "base-change": return "confirmed-base-change";
     case "floor-change": return "confirmed-floor-change";
     case "map-gap-regression": return "confirmed-map-gap-regression";
+    case "room-regression": return "confirmed-room-regression";
     case "single-base":
     default: return "confirmed-single-base";
   }
@@ -149,7 +187,7 @@ export function evaluateMapTransition(previous = {}, gameMap, calibration, now =
   const lastFloorName = String(previous.lastFloorName ?? "");
   const detectedFloorName = String(calibration?.floor?.name ?? "");
   const floorChanged = Boolean(lastFloorName && detectedFloorName && lastFloorName !== detectedFloorName);
-  const singleBaseAfterProgress = lastRoomCount > 1 && openedRoomCount === 1 && Boolean(gameMap.base);
+  const rawSingleBaseAfterProgress = lastRoomCount > 1 && openedRoomCount === 1 && Boolean(gameMap.base);
   // A new floor is entered with just the base room. On a slow/jittery scanner
   // the exact 1-room frame is often missed and the first clean read already
   // shows a few rooms, so when the new floor reuses the same base grid cell as
@@ -160,16 +198,35 @@ export function evaluateMapTransition(previous = {}, gameMap, calibration, now =
   // openedRoomCount===1 because its detection reliably caught that frame. This
   // is confirmed through the same two-frame gate below, so a single misread
   // cannot reset the timer.
-  const roomCountDropped = lastRoomCount > 1 && openedRoomCount > 0
+  const rawRoomCountDropped = lastRoomCount > 1 && openedRoomCount > 0
     && openedRoomCount < lastRoomCount
     && (lastRoomCount - openedRoomCount) >= Math.max(2, Math.ceil(lastRoomCount / 2));
   const pending = previous.pendingReset ?? null;
+  // A real same-size floor can start at 5 rooms before an 8-room previous floor
+  // has produced either a one-room frame or a different base marker. That is
+  // too small a collapse for the fast two-frame route above, but losing at
+  // least two rooms and retaining no more than 75% of the accepted count is
+  // still meaningful evidence when it persists. Unlike roomCountDropped this
+  // weaker signal is deliberately time-gated below.
+  const rawRoomRegression = lastRoomCount > 1 && openedRoomCount > 0
+    && lastRoomCount - openedRoomCount >= 2
+    && openedRoomCount <= lastRoomCount * 0.75;
   const mapGapMs = Math.max(0, Number(previous.mapGapMs) || 0);
+  const topologyChanged = mapTopologyDiscontinuity(previous.lastGameMap, gameMap);
+  const scaleChanged = Boolean(previous.scaleChanged);
+  const mapGapSupportsRegression = mapGapMs >= 2_000 && (!scaleChanged || topologyChanged);
+  // The exact one-room base frame is the desktop counter's strongest fallback
+  // when a short results/loading phase was missed. Keep its two-frame gate.
+  // Broader count collapses require independent topology or map-gap evidence.
+  const singleBaseAfterProgress = rawSingleBaseAfterProgress;
+  const roomCountDropped = rawRoomCountDropped && (topologyChanged || mapGapSupportsRegression);
+  const roomRegression = rawRoomRegression && topologyChanged;
   // After a real capture gap, a smaller-but-not-quite-half room count is still
   // strong floor-change evidence. Requiring a >=2 room loss, <=75% of the old
   // count and the normal two-frame confirmation keeps a brief read miss from
   // resetting an active floor.
   const gapRoomRegression = (mapGapMs >= 2_000 || pending?.reason === "map-gap-regression")
+    && (!scaleChanged || topologyChanged)
     && lastRoomCount - openedRoomCount >= 2
     && openedRoomCount > 0
     && openedRoomCount <= lastRoomCount * 0.75;
@@ -179,7 +236,11 @@ export function evaluateMapTransition(previous = {}, gameMap, calibration, now =
       ? "map-gap-regression"
       : baseChanged
         ? "base-change"
-        : "single-base";
+        : singleBaseAfterProgress
+          ? "single-base"
+          : (roomCountDropped || roomRegression)
+            ? "room-regression"
+            : "single-base";
   const key = resetCandidateKey(gameMap, calibration);
   const samePending = Boolean(key && pending?.key === key);
   const hasPendingRoomCount = pending?.openedRoomCount !== null
@@ -205,34 +266,56 @@ export function evaluateMapTransition(previous = {}, gameMap, calibration, now =
   // on the glitch frame would be confirmed by a recovery frame that is not a
   // reset candidate at all, spuriously resetting the timer mid-floor.
   const isResetCandidate = floorChanged || gapRoomRegression
-    || baseChanged || singleBaseAfterProgress || roomCountDropped;
+    || baseChanged || singleBaseAfterProgress || roomCountDropped || roomRegression;
 
-  // A results screen plus a real map gap proves that a new floor is expected,
-  // but the first pixels after the gap can still be the old completed map. Hold
+  // A results screen proves that a new floor is expected, but the map behind it
+  // can still be the old completed map. Hold
   // an otherwise-identical map instead of accepting or immediately resetting
   // it. A genuine same-identity new floor confirms once its room count advances
   // at least two beyond both the first candidate frame and the old floor; a
   // one/two-room classifier dip recovering to the old count cannot satisfy it.
   const lifecyclePending = pending?.reason === "results-lifecycle";
   // Unlike the generic gap-regression heuristic, this lifecycle candidate is
-  // not a reset by itself, so even one genuinely lost frame can arm it safely.
-  const lifecycleArmed = Boolean(previous.awaitingNewFloor) && mapGapMs > 0;
-  if (!isResetCandidate && (lifecyclePending || lifecycleArmed)) {
+  // not a reset by itself, so it can arm even when DirectX/OpenGL kept the old
+  // map readable behind the results interface and no capture gap was observed.
+  const lifecycleArmed = Boolean(previous.awaitingNewFloor);
+  // While the results interface is still visible, lifecycle evidence outranks
+  // every map heuristic: Desktop capture can keep a noisy old map behind it.
+  // Once that interface is gone, however, a stable floor-size or base change is
+  // direct new-floor identity evidence. Let the normal two-frame gate confirm
+  // it instead of waiting for two additional rooms to open.
+  const lifecycleHardIdentityChange = !previous.resultsScreenVisible
+    && (floorChanged || baseChanged);
+  if ((lifecyclePending || lifecycleArmed) && !lifecycleHardIdentityChange) {
     const lifecycleLastSeenAt = Number(pending?.seenAt);
     const lifecycleContinuous = lifecyclePending && Number.isFinite(lifecycleLastSeenAt)
       && timestamp - lifecycleLastSeenAt <= 2_000;
-    const firstSeenAt = lifecycleContinuous && Number(pending?.firstSeenAt) > 0
+    let firstSeenAt = lifecycleContinuous && Number(pending?.firstSeenAt) > 0
       ? Number(pending.firstSeenAt)
       : timestamp;
     const hasLifecycleFirstCount = pending?.firstOpenedRoomCount !== null
       && pending?.firstOpenedRoomCount !== undefined
       && Number.isFinite(Number(pending.firstOpenedRoomCount));
-    const firstRoomCount = lifecycleContinuous && hasLifecycleFirstCount
+    let firstRoomCount = lifecycleContinuous && hasLifecycleFirstCount
       ? Math.max(0, Number(pending.firstOpenedRoomCount))
       : openedRoomCount;
+    // Once the results interface has actually disappeared, a lower same-size,
+    // same-base read is the new floor's baseline rather than progress from the
+    // old completed map that may have armed the latch. Rebase the paired
+    // timestamp/count and require two rooms of subsequent progress.
+    if (lifecycleContinuous && samePending && !previous.resultsScreenVisible
+      && openedRoomCount < firstRoomCount) {
+      firstSeenAt = timestamp;
+      firstRoomCount = openedRoomCount;
+    }
+    const lifecycleBaselineClearlyLower = firstRoomCount <= Math.max(5, Math.floor(lastRoomCount * 0.75));
     const lifecycleProgressed = lifecycleContinuous && samePending
+      && !previous.resultsScreenVisible
       && openedRoomCount >= firstRoomCount + 2
-      && openedRoomCount > lastRoomCount;
+      // A shallow classifier dip (15 -> 13 -> 15) is not a new floor. A true
+      // low baseline may confirm on +2 progress; a shallow baseline must first
+      // progress beyond the old accepted count.
+      && (lifecycleBaselineClearlyLower || openedRoomCount > lastRoomCount);
     if (lifecycleProgressed) {
       return {
         accept: true,
@@ -261,7 +344,8 @@ export function evaluateMapTransition(previous = {}, gameMap, calibration, now =
     };
   }
 
-  if (samePending && pending?.reason === "single-base" && recentEnough && plausibleSingleBase && isResetCandidate) {
+  if (samePending && pending?.reason === "single-base"
+    && recentEnough && plausibleSingleBase) {
     return {
       accept: true,
       reset: true,
@@ -285,7 +369,7 @@ export function evaluateMapTransition(previous = {}, gameMap, calibration, now =
 
   const plausibleResetCandidate = !singleBaseAfterProgress || plausibleSingleBase;
 
-  if (samePending && pending?.reason === candidateReason
+  if (candidateReason !== "room-regression" && samePending && pending?.reason === candidateReason
     && recentEnough && plausibleResetCandidate && isResetCandidate) {
     return {
       accept: true,
@@ -297,17 +381,24 @@ export function evaluateMapTransition(previous = {}, gameMap, calibration, now =
     };
   }
 
-  // Escape valve for a jittering base: when the base cell reads differently on
-  // every frame the pending key never matches twice and the two-frame gate can
-  // stall indefinitely, freezing the accepted map on the previous floor. A
-  // pending that has lived CONTINUOUSLY (refreshed every frame) for this long
-  // while the room count stays collapsed can only be a genuinely new floor —
-  // single-frame misreads resolve to same-floor within a frame and a base
-  // oscillation without a count collapse never reaches this path.
-  const collapseStreakMs = 2_500;
+  // Bounded escape valve for count-only evidence and a jittering base. A key
+  // that moves every frame can never pass the normal two-frame gate, while a
+  // same-size/same-base 8 -> 5 floor does not reach the half-collapse trigger.
+  // In both cases a continuously refreshed regression may reset after 2.5s;
+  // recovery to the accepted count clears the pending candidate before then.
   const streakLastSeen = Number(pending?.seenAt);
+  const elapsedSincePending = timestamp - streakLastSeen;
+  // The capture owner retains pendingReset while pixels are unavailable and
+  // supplies the measured mapGapMs on the first readable frame. Use both the
+  // previous candidate timestamp and reason explicitly: a <=2s capture gap may
+  // bridge the scan interval around that gap, but a stale/different candidate
+  // cannot be revived just because a later capture also happened to be lost.
+  const shortCaptureGap = mapGapMs > 0 && mapGapMs <= PENDING_STREAK_MAX_GAP_MS
+    && elapsedSincePending <= mapGapMs + PENDING_STREAK_MAX_GAP_MS;
   const streakAlive = pending?.reason === candidateReason
-    && Number.isFinite(streakLastSeen) && timestamp - streakLastSeen <= 2_000;
+    && Number.isFinite(streakLastSeen) && streakLastSeen > 0
+    && elapsedSincePending >= 0
+    && (elapsedSincePending <= PENDING_STREAK_MAX_GAP_MS || shortCaptureGap);
   const streakStart = Number(pending?.firstSeenAt);
   const pendingFirstRoomCount = Number(pending?.firstOpenedRoomCount);
   const hasFirstPendingFrame = Number.isFinite(streakStart) && streakStart > 0
@@ -319,15 +410,15 @@ export function evaluateMapTransition(previous = {}, gameMap, calibration, now =
       ? Math.max(0, pendingFirstRoomCount)
       : pendingRoomCount)
     : openedRoomCount;
-  if (roomCountDropped && streakAlive && Number.isFinite(streakStart) && streakStart > 0
-    && timestamp - streakStart >= collapseStreakMs) {
+  if (roomRegression && streakAlive && Number.isFinite(streakStart) && streakStart > 0
+    && timestamp - streakStart >= ROOM_REGRESSION_CONFIRM_MS) {
     return {
       accept: true,
       reset: true,
       pendingReset: null,
       resetAt: hasFirstPendingFrame ? streakStart : resetAt,
       resetRoomCount: hasFirstPendingFrame ? firstOpenedRoomCount : resetRoomCount,
-      reason: "confirmed-room-collapse",
+      reason: roomCountDropped ? "confirmed-room-collapse" : "confirmed-room-regression",
     };
   }
 

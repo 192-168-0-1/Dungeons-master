@@ -12,6 +12,7 @@ const SCALED_GLYPH_FOREGROUND_DISTANCE = 40_000;
 const SCALED_GLYPH_BACKGROUND_DISTANCE = 2_000;
 const HINT_SCAN_POSITION_BUDGET = 1_000_000;
 const FALLBACK_SCAN_POSITION_BUDGET = 100_000;
+const PRESENCE_SCAN_POSITION_BUDGET = 50_000;
 const MAX_COARSE_CANDIDATES = 24;
 const MAX_REFINE_RADIUS = 6;
 
@@ -331,6 +332,31 @@ function findTemplate(image, template, scaleHint, allowScaleFallback = true, tru
   return best;
 }
 
+function findTemplatePresence(image, template, scaleHint, previousSource = null) {
+  const scale = normalizeScale(scaleHint);
+  if (!scale) return null;
+  const dimensions = scaledInterfaceDimensions(scale);
+  const priorX = Number(previousSource?.x);
+  const priorY = Number(previousSource?.y);
+  if (Number.isFinite(priorX) && Number.isFinite(priorY)
+    && priorX >= 0 && priorY >= 0
+    && priorX + dimensions.width <= image.width
+    && priorY + dimensions.height <= image.height) {
+    const score = markerScore(image, template, priorX, priorY, scale, null, SCALED_MARKER_MAX_SCORE);
+    if (score <= SCALED_MARKER_MAX_SCORE) {
+      return {
+        x: priorX, y: priorY, width: dimensions.width, height: dimensions.height,
+        scale, score, tolerant: scale !== 1 || score > 0,
+      };
+    }
+  }
+  // Presence polling only needs the marker, not eleven OCR fields. Search one
+  // already pixel-confirmed interface scale with a much smaller coarse budget;
+  // the normal reader performs the exhaustive fallback after a hit.
+  const probes = markerProbes(template);
+  return searchScaledTemplate(image, template, scale, probes, PRESENCE_SCAN_POSITION_BUDGET);
+}
+
 function normalizeInterfaceRegion(image, source) {
   const data = new Uint8ClampedArray(WINTERFACE_WIDTH * WINTERFACE_HEIGHT * 4);
   const xRatio = source.width / WINTERFACE_WIDTH;
@@ -448,6 +474,17 @@ export function deriveFloorSize({ detected, sizeMod } = {}) {
   return "Small";
 }
 
+export function deriveOcrFloorSize(sizeMod) {
+  const mod = String(sizeMod ?? "").trim();
+  if (mod === "+850" || mod === "+500") return "Large";
+  if (mod === "+350") return "Medium";
+  if (mod === "+0") return "Small";
+  // Small historically meant "anything else", which is unsuitable as an
+  // independent snapshot validator: a partial/noisy +500 read such as +50 must
+  // be unknown, not positive evidence for Small.
+  return null;
+}
+
 export class WinterfaceReader {
   constructor(marker, fonts) {
     this.marker = marker;
@@ -463,6 +500,10 @@ export class WinterfaceReader {
     return new WinterfaceReader(marker, fonts);
   }
 
+  locateMarker(image, { interfaceScale = 1, previousSource = null } = {}) {
+    return findTemplatePresence(image, this.marker, interfaceScale, previousSource);
+  }
+
   readWithOffset(image, extra = {}) {
     const source = findTemplate(
       image,
@@ -476,6 +517,11 @@ export class WinterfaceReader {
     const ocrImage = tolerant ? normalizeInterfaceRegion(image, source) : image;
     const ocrOffset = tolerant ? { x: 0, y: 0 } : { x: source.x, y: source.y };
     const result = Object.fromEntries(FIELDS.map((field) => [field.name, readField(ocrImage, ocrOffset, field, this.fonts, tolerant)]));
+    // Keep the XP-modifier-derived size separate from the geometry-derived
+    // display value. The app uses this independent value to validate that a
+    // frozen map snapshot belongs to the results interface; comparing two
+    // fields both sourced from the same live map would be circular.
+    const ocrFloorSize = deriveOcrFloorSize(result.SizeMod);
     result.FloorSize = deriveFloorSize({ detected: extra.floorSize, sizeMod: result.SizeMod });
     result.BonusMod = `${(readBonus(ocrImage, ocrOffset) * 100).toFixed(1)}%`;
     result.Roomcount = String(extra.roomcount ?? "");
@@ -499,6 +545,7 @@ export class WinterfaceReader {
       rawWidth: source.width,
       rawHeight: source.height,
       rawScale: source.scale,
+      ocrFloorSize,
     };
   }
 

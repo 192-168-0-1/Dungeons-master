@@ -25,6 +25,16 @@ function image(width, height) {
   return { width, height, data: new Uint8ClampedArray(width * height * 4) };
 }
 
+function cropImage(source, width, height) {
+  const target = image(width, height);
+  for (let y = 0; y < height; y += 1) {
+    const sourceStart = y * source.width * 4;
+    const targetStart = y * width * 4;
+    target.data.set(source.data.subarray(sourceStart, sourceStart + width * 4), targetStart);
+  }
+  return target;
+}
+
 function paintSignature(target, origin, signature) {
   const colors = signature.split(";").map((color) => [...color.split(",").map(Number), 255]);
   [[6, 7], [7, 7], [6, 8], [7, 8]].forEach(([x, y], index) => {
@@ -149,6 +159,27 @@ test("mapCandidateFromAnchor converts the top-right anchor to client-relative ma
   assert.equal(candidate.y, 20);
   assert.equal(candidate.scale, 1);
   assert.equal(candidate.captureWidth, floor.imageWidth);
+});
+
+test("a real Small stays locked when scenery only supplies Medium bottom corners", () => {
+  const small = FLOOR_SIZES.find((candidate) => candidate.name === "Small");
+  const medium = FLOOR_SIZES.find((candidate) => candidate.name === "Medium");
+  const smallMap = image(small.imageWidth, small.imageHeight);
+  paintValidMapCorners(smallMap);
+  paintOpenedRoom(smallMap, small, { x: 0, y: 0 }, { base: true });
+  const extended = image(medium.imageWidth, medium.imageHeight);
+  extended.data.set(smallMap.data);
+  setPixel(extended, 0, extended.height - 1, [108, 96, 75, 255]);
+  setPixel(extended, extended.width - 1, extended.height - 1, [108, 96, 75, 255]);
+
+  const read = readMapAtCalibration((x, y, width, height) => {
+    if (width === small.imageWidth && height === small.imageHeight) return smallMap;
+    if (width === medium.imageWidth && height === medium.imageHeight) return extended;
+    return image(width, height);
+  }, { x: 10, y: 10, floor: small, scale: 1 }, { floors: [small] });
+
+  assert.ok(read);
+  assert.equal(read.floor.name, "Small");
 });
 
 function paintExeMapFrame(target) {
@@ -380,6 +411,107 @@ test("readMapAtCalibration re-detects the floor size in place at the locked loca
   assert.equal(read.y, mapY);
   assert.equal(read.floor.name, "Large");
   assert.equal(read.gameMap.openedRoomCount, 3);
+});
+
+test("locked Medium cannot swallow a continuous-border Large map at 100 or 150 percent", () => {
+  const medium = FLOOR_SIZES.find((candidate) => candidate.name === "Medium");
+  const large = FLOOR_SIZES.find((candidate) => candidate.name === "Large");
+  const mapX = 60;
+  const mapY = 40;
+
+  const canonical = image(large.imageWidth, large.imageHeight);
+  paintValidMapCorners(canonical);
+  // Real interface themes can render this edge as a continuous brown run. That
+  // makes the left 152px crop pass Medium's three-corner frame check.
+  for (let x = 0; x < canonical.width; x += 1) {
+    setPixel(canonical, x, canonical.height - 1, [108, 96, 75, 255]);
+  }
+  paintOpenedRoom(canonical, large, { x: 0, y: 0 }, { base: true });
+  paintOpenedRoom(canonical, large, { x: 1, y: 0 });
+  paintOpenedRoom(canonical, large, { x: 2, y: 0 });
+  paintOpenedRoom(canonical, large, { x: 3, y: 0 });
+  paintOpenedRoom(canonical, large, { x: 4, y: 0 });
+
+  for (const scale of [1, 1.5]) {
+    const scaled = scaleImageNearest(canonical, scale);
+    const largeDimensions = scaledFloorDimensions(large, scale);
+    const captureRegion = (x, y, width, height) => {
+      if (x !== mapX || y !== mapY || height !== largeDimensions.height) return image(width, height);
+      if (width > scaled.width) return image(width, height);
+      return cropImage(scaled, width, height);
+    };
+
+    const read = readMapAtCalibration(captureRegion, {
+      x: mapX,
+      y: mapY,
+      floor: medium,
+      scale,
+    }, { floors: [medium] });
+    assert.ok(read, `scale ${scale}`);
+    assert.equal(read.floor.name, "Large", `scale ${scale}`);
+    assert.equal(read.scoredMap.validCorners, true, `scale ${scale}`);
+    assert.equal(read.gameMap.openedRoomCount, 5, `scale ${scale}`);
+  }
+});
+
+test("locked Small cannot swallow the marker-valid top half of Medium at 100 or 150 percent", () => {
+  const small = FLOOR_SIZES.find((candidate) => candidate.name === "Small");
+  const medium = FLOOR_SIZES.find((candidate) => candidate.name === "Medium");
+  const mapX = 44;
+  const mapY = 28;
+  const canonical = image(medium.imageWidth, medium.imageHeight);
+  paintValidMapCorners(canonical);
+  for (let y = small.imageHeight; y < canonical.height; y += 1) {
+    setPixel(canonical, 0, y, [108, 96, 75, 255]);
+    setPixel(canonical, canonical.width - 1, y, [108, 96, 75, 255]);
+  }
+  // RuneScape's internal horizontal edge can make the 152px top crop satisfy
+  // all four Small corner probes, including the shared top-right marker.
+  setPixel(canonical, 0, small.imageHeight - 1, [108, 96, 75, 255]);
+  setPixel(canonical, small.imageWidth - 1, small.imageHeight - 1, [108, 96, 75, 255]);
+  paintOpenedRoom(canonical, medium, { x: 0, y: 4 }, { base: true });
+  paintOpenedRoom(canonical, medium, { x: 1, y: 4 });
+  paintOpenedRoom(canonical, medium, { x: 2, y: 4 });
+  paintOpenedRoom(canonical, medium, { x: 3, y: 4 });
+
+  for (const scale of [1, 1.5]) {
+    const scaled = scaleImageNearest(canonical, scale);
+    const captureRegion = (x, y, width, height) => {
+      if (x !== mapX || y !== mapY || width > scaled.width || height > scaled.height) return image(width, height);
+      return cropImage(scaled, width, height);
+    };
+    const read = readMapAtCalibration(captureRegion, {
+      x: mapX, y: mapY, floor: small, scale,
+    }, { floors: [small] });
+    assert.ok(read, `scale ${scale}`);
+    assert.equal(read.floor.name, "Medium", `scale ${scale}`);
+    assert.equal(read.scoredMap.validCorners, true, `scale ${scale}`);
+    assert.equal(read.gameMap.openedRoomCount, 4, `scale ${scale}`);
+  }
+});
+
+test("a marker-less ambiguity probe cannot change the locked floor size on room score alone", () => {
+  const medium = FLOOR_SIZES.find((candidate) => candidate.name === "Medium");
+  const large = FLOOR_SIZES.find((candidate) => candidate.name === "Large");
+  const locked = image(medium.imageWidth, medium.imageHeight);
+  paintExeMapFrame(locked);
+  paintOpenedRoom(locked, medium, { x: 0, y: 0 }, { base: true });
+
+  const noisyWider = image(large.imageWidth, large.imageHeight);
+  paintExeMapFrame(noisyWider);
+  paintOpenedRoom(noisyWider, large, { x: 0, y: 0 }, { base: true });
+  for (let x = 1; x <= 4; x += 1) paintOpenedRoom(noisyWider, large, { x, y: 0 });
+
+  const read = readMapAtCalibration((x, y, width, height) => {
+    if (width === medium.imageWidth && height === medium.imageHeight) return locked;
+    if (width === large.imageWidth && height === large.imageHeight) return noisyWider;
+    return image(width, height);
+  }, { x: 10, y: 10, floor: medium, scale: 1 }, { floors: [medium] });
+
+  assert.ok(read);
+  assert.equal(read.floor.name, "Medium");
+  assert.equal(read.scoredMap.validCorners, false);
+  assert.equal(read.gameMap.openedRoomCount, 1);
 });
 
 test("readMapAtCalibration keeps the locked floor when valid and returns null off the map", () => {

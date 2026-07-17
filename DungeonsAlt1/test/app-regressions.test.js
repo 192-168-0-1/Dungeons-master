@@ -1,0 +1,127 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import test from "node:test";
+
+const app = readFileSync(new URL("../app.js", import.meta.url), "utf8");
+
+function sourceBetween(start, end) {
+  const from = app.indexOf(start);
+  const to = app.indexOf(end, from + start.length);
+  assert.ok(from >= 0, `missing ${start}`);
+  assert.ok(to > from, `missing ${end}`);
+  return app.slice(from, to);
+}
+
+test("map geometry is committed and redrawn while RPM progress awaits confirmation", () => {
+  const updateMap = sourceBetween("async function updateMap()", "function updateLocalGatestones");
+  const geometryCommit = updateMap.indexOf("state.calibration = nextCalibration");
+  const transitionHold = updateMap.indexOf("if (!transition.accept)");
+  assert.ok(geometryCommit >= 0 && geometryCommit < transitionHold);
+
+  const pendingBranch = updateMap.slice(transitionHold, updateMap.indexOf("if (transition.reset)", transitionHold));
+  assert.match(pendingBranch, /renderGameOverlay\(\)/);
+  const regressionBranch = updateMap.slice(
+    updateMap.indexOf("same-floor-room-regression-held"),
+    updateMap.indexOf("const tReadMs"),
+  );
+  assert.match(regressionBranch, /renderGameOverlay\(\)/);
+});
+
+test("lost or stale-scale map locks cannot leave a ghost overlay forever", () => {
+  const clearCalibration = sourceBetween("function clearCalibration()", "function sameCalibration");
+  assert.match(clearCalibration, /clearGameOverlay\(\)/);
+
+  const updateMap = sourceBetween("async function updateMap()", "function updateLocalGatestones");
+  const lostBranch = updateMap.slice(updateMap.indexOf("if (!read)"), updateMap.indexOf("const readableRooms"));
+  assert.match(lostBranch, /clearGameOverlay\(\)/);
+  assert.doesNotMatch(lostBranch, /pendingFloorReset\s*=\s*null/);
+  assert.match(updateMap, /unreadableCaptures \+= 1/);
+  assert.match(updateMap, /weakFrameCaptures \+= 1/);
+  assert.match(updateMap, /!read\.scoredMap\.validCorners/);
+  assert.match(updateMap, /UNREADABLE_CAPTURES_BEFORE_RECALIBRATION/);
+});
+
+test("results lifecycle probing remains active when automatic table rows are disabled", () => {
+  const autoResults = sourceBetween("async function autoCaptureDungeonResults(", "function renderResults");
+  const presenceProbe = sourceBetween("async function probeDungeonResultsSentinel()", "function captureCadence");
+  const fullRead = sourceBetween("async function readDungeonResultsCapture", "async function probeDungeonResultsSentinel");
+  assert.match(autoResults, /const trackingEnabled = Boolean\(elements\.autoTrackResults\.checked\)/);
+  assert.match(autoResults, /\|\| !state\.resultSentinelOpen/);
+  assert.match(autoResults, /resultLooksComplete\(capture\.result\)/);
+  assert.match(autoResults, /readDungeonResultsCapture/);
+  assert.match(autoResults, /if \(!trackingEnabled \|\| !capture \|\| !next\.shouldAdd\) return/);
+  assert.doesNotMatch(autoResults, /if \(!elements\.autoTrackResults\.checked\)\s*\{[\s\S]*?return;/);
+  assert.match(presenceProbe, /createResultsSentinelPlan/);
+  assert.match(presenceProbe, /captureRegion\(plan\.x, plan\.y, plan\.width, plan\.height\)/);
+  assert.match(presenceProbe, /resultsSentinelsMatch/);
+  assert.doesNotMatch(presenceProbe, /state\.awaitingNewFloor = true/);
+  assert.match(fullRead, /state\.awaitingNewFloor = true/);
+  assert.match(app, /activeResultContext/);
+  assert.match(app, /mapSnapshotRevision: state\.mapSnapshotRevision/);
+  assert.match(app, /lastResultMapSnapshotRevisionConsumed/);
+  assert.match(app, /snapshotFingerprint !== state\.mapSnapshotFingerprint/);
+  assert.match(app, /mapDataUrl: completionContext\.mapDataUrl/);
+  assert.doesNotMatch(app, /lastCommittedResultGeneration/);
+});
+
+test("automatic floor results are discovered faster without weakening the final-value gate", () => {
+  assert.match(app, /RESULTS_SENTINEL_CADENCE_MS/);
+  assert.match(app, /const RESULTS_AUTO_INTERVAL = 900/);
+  assert.match(app, /const RESULTS_SETTLE_INTERVAL = 300/);
+  assert.match(app, /resultLooksComplete\(capture\.result\)/);
+  assert.match(app, /enforceResultStableDuration/);
+  const loop = sourceBetween("async function resultsScanLoop()", "async function partyScanLoop");
+  assert.match(loop, /sentinel\.rising/);
+  assert.match(loop, /forceScan: shouldForceRead/);
+  assert.match(loop, /captureCadence\(RESULTS_SENTINEL_CADENCE_MS\)/);
+  const autoResults = sourceBetween("async function autoCaptureDungeonResults(", "function renderResults");
+  assert.match(autoResults, /capture\?\.result \?\? \(state\.resultSentinelOpen \? \{\} : null\)/);
+});
+
+test("saved calibration input is bounded before its first pixel capture", () => {
+  const load = sourceBetween("function loadCalibration()", "function saveCalibration");
+  assert.match(load, /parseSavedInterfaceScale/);
+  assert.match(load, /saved\.x \+ dimensions\.width > clientWidth/);
+  assert.match(load, /saved\.y \+ dimensions\.height > clientHeight/);
+});
+
+test("only unverified saved locks require the strict top-right marker", () => {
+  const updateMap = sourceBetween("async function updateMap()", "function updateLocalGatestones");
+  assert.match(updateMap, /!state\.calibration\.verified && !read\.scoredMap\.validCorners/);
+  assert.doesNotMatch(updateMap, /if \(!read\.scoredMap\.validCorners\)/);
+  assert.match(updateMap, /unusableCaptures \+= 1/);
+});
+
+test("accepted map scale survives clear/recalibrate and protects RPM from scale-change gaps", () => {
+  const updateMap = sourceBetween("async function updateMap()", "function updateLocalGatestones");
+  assert.match(updateMap, /priorAcceptedScale = Number\(state\.lastAcceptedMapScale\)/);
+  assert.match(updateMap, /scaleChanged: calibrationScaleChanged/);
+  assert.match(updateMap, /state\.lastAcceptedMapScale = nextCalibration\.scale \|\| 1/);
+  const clear = sourceBetween("function clearCalibration()", "function sameCalibration");
+  assert.doesNotMatch(clear, /lastAcceptedMapScale/);
+});
+
+test("Desktop capture clears and disables native overlays before full-client results pixels", () => {
+  const read = sourceBetween("async function readDungeonResultsCapture", "async function probeDungeonResultsSentinel");
+  assert.ok(read.indexOf("await prepareDesktopFullCapture()") < read.indexOf("captureFullRuneScape()"));
+  const prepare = sourceBetween("async function prepareDesktopFullCapture()", "function tryReservePixelCaptureSlot");
+  assert.match(prepare, /clearGameOverlay\(\)/);
+  assert.match(prepare, /backendCaptureInterval\(\)/);
+  const overlay = sourceBetween("function renderGameOverlay()", "function testGameOverlay");
+  assert.match(overlay, /if \(api\.compatEnabled\)/);
+  assert.match(overlay, /drawGameOverlayGated\(api, group, \[\]\)/);
+});
+
+test("results loop always schedules its next scan after a probe failure", () => {
+  const loop = sourceBetween("async function resultsScanLoop()", "async function partyScanLoop");
+  assert.match(loop, /try \{/);
+  assert.match(loop, /finally \{/);
+  assert.match(loop, /setTimeout\(resultsScanLoop/);
+});
+
+test("saved calibration is tied to the RuneScape client dimensions", () => {
+  assert.match(app, /rsWidth: state\.calibration\.rsWidth/);
+  assert.match(app, /rsHeight: state\.calibration\.rsHeight/);
+  assert.match(app, /calibrationMatchesLinkedClient/);
+  assert.match(app, /RuneScape client size changed/);
+});

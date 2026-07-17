@@ -3,25 +3,30 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   AUTO_RESULT_STABLE_SCANS,
+  RESULT_COLUMNS,
   RESULT_DISPLAY_COLUMNS,
   averageResultTime,
+  enforceResultStableDuration,
   formatResultCount,
   formatResultDuration,
   formatResultWhen,
   nextAutoResultState,
+  normalizeStoredResults,
   orderedResultsForDisplay,
   resultDisplayValue,
   normalizeResultBatchTarget,
   parseResultTimeSeconds,
   plannedResultExports,
   resultCaptureRect,
-  resultMapSnapshotIsFresh,
+  resultMapSnapshotMatchesGeneration,
   resultAlreadyRecorded,
   resultBatchIsComplete,
   resultBatchStatus,
   resultFingerprint,
   resultLooksComplete,
+  mapSnapshotFingerprint,
   resultMatchesFloorFilter,
+  resultStabilityKey,
   safeFilePart,
   safeTimestampForFilename,
 } from "../src/results-core.js";
@@ -279,31 +284,101 @@ test("auto results state never commits the empty pre-skip completion screen", ()
   assert.equal(settled.shouldAdd, true);
 });
 
-test("resultLooksComplete requires both the floor number and the final XP", () => {
+test("resultLooksComplete requires the populated final results panel", () => {
   assert.equal(resultLooksComplete(sampleResult), true);
   assert.equal(resultLooksComplete({ ...sampleResult, Floor: "" }), false);
+  assert.equal(resultLooksComplete({ ...sampleResult, Time: "" }), false);
+  assert.equal(resultLooksComplete({ ...sampleResult, FloorXP: "" }), false);
+  assert.equal(resultLooksComplete({ ...sampleResult, BaseXP: "" }), false);
   assert.equal(resultLooksComplete({ ...sampleResult, FinalXP: "" }), false);
   assert.equal(resultLooksComplete({}), false);
 });
 
 test("result fingerprints ignore volatile fields but include the winterface values", () => {
-  // Timestamp, Time, Roomcount and DeadEnds drift while the same results screen is
-  // open, so they must not change a floor's identity.
+  // Timestamp and live map fields do not identify a completed run. Time does:
+  // otherwise a legitimate later run with the same XP would be discarded.
   assert.equal(resultFingerprint(sampleResult), resultFingerprint({ ...sampleResult, Timestamp: "later" }));
-  assert.equal(resultFingerprint(sampleResult), resultFingerprint({ ...sampleResult, Time: "12:01" }));
+  assert.notEqual(resultFingerprint(sampleResult), resultFingerprint({ ...sampleResult, Time: "12:01" }));
   assert.equal(resultFingerprint(sampleResult), resultFingerprint({ ...sampleResult, Roomcount: "99", DeadEnds: "5" }));
   assert.notEqual(resultFingerprint(sampleResult), resultFingerprint({ ...sampleResult, FinalXP: "999" }));
   assert.notEqual(resultFingerprint(sampleResult), resultFingerprint({ ...sampleResult, Floor: "55" }));
+  // Stability is scoped to one still-visible screen, whose Time field ticks.
+  assert.equal(resultStabilityKey(sampleResult), resultStabilityKey({ ...sampleResult, Time: "12:01" }));
+});
+
+test("identical buffered frames must also remain stable for real wall-clock time", () => {
+  let gate = nextAutoResultState(FRESH_AUTO_STATE, sampleResult);
+  let timing = { key: "", since: 0 };
+  ({ gate, timing } = enforceResultStableDuration(timing, gate, 10_000));
+  gate = nextAutoResultState(gate, sampleResult);
+  ({ gate, timing } = enforceResultStableDuration(timing, gate, 10_300));
+  gate = nextAutoResultState(gate, sampleResult);
+  ({ gate, timing } = enforceResultStableDuration(timing, gate, 10_600));
+  assert.equal(gate.shouldAdd, false);
+  gate = nextAutoResultState(gate, sampleResult);
+  ({ gate } = enforceResultStableDuration(timing, gate, 11_200));
+  assert.equal(gate.shouldAdd, true);
+});
+
+test("floor tracker rows and user choices are restored and persisted by the app", () => {
+  const app = readFileSync(new URL("../app.js", import.meta.url), "utf8");
+  assert.match(app, /results: loadStoredResults\(\)/);
+  assert.match(app, /normalizeStoredResults\(state\.results, MAX_PERSISTED_RESULTS\)/);
+  assert.match(app, /storageSet\(`\$\{STORAGE_PREFIX\}:results`/);
+  for (const key of [
+    "auto-track-results",
+    "auto-save-map-png",
+    "auto-save-results-png",
+    "result-batch-size",
+    "result-floor-filter",
+    "result-batch-mode",
+  ]) {
+    assert.match(app, new RegExp(key));
+  }
+  assert.match(app, /last-result-screen/);
+  assert.match(app, /recentResultScreen/);
 });
 
 test("result table dedupe ignores volatile map fields but allows real result changes", () => {
   const existing = [{ ...sampleResult, Timestamp: "first read" }];
   assert.equal(resultAlreadyRecorded(existing, { ...sampleResult, Timestamp: "second read" }), true);
-  assert.equal(resultAlreadyRecorded(existing, { ...sampleResult, Time: "12:01" }), true);
+  assert.equal(resultAlreadyRecorded(existing, { ...sampleResult, Time: "12:01" }), false);
   // The same screen read again with a different live room count stays a dupe.
   assert.equal(resultAlreadyRecorded(existing, { ...sampleResult, Roomcount: "1", DeadEnds: "0" }), true);
   assert.equal(resultAlreadyRecorded(existing, { ...sampleResult, FinalXP: "54321" }), false);
   assert.equal(resultAlreadyRecorded([], sampleResult), false);
+});
+
+test("stored results keep only bounded schema strings and discard corrupt rows", () => {
+  const second = {
+    ...sampleResult,
+    Floor: " 55 ",
+    Time: "\u000012:01\n",
+    FinalXP: "9".repeat(400),
+    Unexpected: "must not survive",
+  };
+  const third = { ...sampleResult, Floor: "56", Time: "11:59" };
+  const normalized = normalizeStoredResults([
+    null,
+    42,
+    [],
+    {},
+    { ...sampleResult, Unexpected: "must not survive" },
+    second,
+    third,
+  ], 2);
+
+  assert.equal(normalized.length, 2);
+  assert.deepEqual(Object.keys(normalized[0]), [...RESULT_COLUMNS]);
+  assert.equal(normalized[0].Unexpected, undefined);
+  assert.ok(Object.values(normalized[0]).every((value) => typeof value === "string"));
+  assert.equal(normalized[1].Floor, "55");
+  assert.equal(normalized[1].Time, "12:01");
+  assert.equal(normalized[1].FinalXP.length, 256);
+  assert.equal(normalizeStoredResults("not an array").length, 0);
+  assert.equal(normalizeStoredResults([{}, null]).length, 0);
+  assert.equal(normalizeStoredResults([{ Timestamp: "corrupt-only" }]).length, 0);
+  assert.equal(normalizeStoredResults([sampleResult], 0).length, 0);
 });
 
 test("auto PNG export planning follows the map/results checkboxes", () => {
@@ -331,25 +406,57 @@ test("result screenshot crops prefer physical raw geometry over normalized OCR a
   assert.equal(resultCaptureRect({ offset: { x: -1, y: 0 }, width: 512, height: 334 }), null);
 });
 
-test("a results row can claim only a fresh, matching, unconsumed map snapshot", () => {
+test("a frozen results map can claim only a new semantic snapshot from a current generation", () => {
   const capture = {
-    date: new Date(20_000),
-    mapReadAt: 10_000,
+    mapGeneration: 7,
+    mapSnapshotRevision: 12,
     mapFloorName: "Large",
+    ocrFloorSize: "Large",
     result: { FloorSize: "Large" },
   };
   const current = {
-    currentMapReadAt: 10_000,
-    currentFloorName: "Large",
-    lastConsumedAt: 0,
+    lastConsumedGeneration: 6,
+    lastConsumedSnapshotRevision: 11,
     hasMap: true,
-    maxAgeMs: 15_000,
   };
-  assert.equal(resultMapSnapshotIsFresh(capture, current), true);
-  assert.equal(resultMapSnapshotIsFresh({ ...capture, date: new Date(26_000) }, current), false);
-  assert.equal(resultMapSnapshotIsFresh(capture, { ...current, lastConsumedAt: 10_000 }), false);
-  assert.equal(resultMapSnapshotIsFresh(capture, { ...current, currentMapReadAt: 11_000 }), false);
-  assert.equal(resultMapSnapshotIsFresh(capture, { ...current, currentFloorName: "Small" }), false);
+  assert.equal(resultMapSnapshotMatchesGeneration(capture, current), true);
+  assert.equal(resultMapSnapshotMatchesGeneration({ ...capture, ocrFloorSize: null }, current), true);
+  assert.equal(resultMapSnapshotMatchesGeneration(capture, {
+    ...current,
+    lastConsumedGeneration: 7,
+    lastConsumedSnapshotRevision: 12,
+  }), false);
+  // A genuinely new semantic map can still be saved when a same-size floor
+  // transition was missed and therefore did not advance mapGeneration.
+  assert.equal(resultMapSnapshotMatchesGeneration({ ...capture, mapSnapshotRevision: 13 }, {
+    ...current,
+    lastConsumedGeneration: 7,
+    lastConsumedSnapshotRevision: 12,
+  }), true);
+  // A stale context can never move backwards to an older floor generation.
+  assert.equal(resultMapSnapshotMatchesGeneration({ ...capture, mapGeneration: 6, mapSnapshotRevision: 13 }, {
+    ...current,
+    lastConsumedGeneration: 7,
+    lastConsumedSnapshotRevision: 12,
+  }), false);
+  // A later live map generation does not invalidate already frozen PNG bytes.
+  assert.equal(resultMapSnapshotMatchesGeneration(capture, { ...current, currentGeneration: 8 }), true);
+  assert.equal(resultMapSnapshotMatchesGeneration({ ...capture, ocrFloorSize: "Medium" }, current), false);
+  assert.equal(resultMapSnapshotMatchesGeneration(capture, { ...current, hasMap: false }), false);
+});
+
+test("map snapshot identity advances for semantic map changes, not overlay movement", () => {
+  const floor = { name: "Large", width: 8, height: 8 };
+  const first = { floor, roomTypes: [64 | 2, 4, 0, 0] };
+  const sameMapDifferentOverlay = {
+    ...first,
+    localGatestones: { 1: { x: 1, y: 0 } },
+    playerArrow: { x: 1, y: 0 },
+  };
+  const progressed = { floor, roomTypes: [64 | 2, 4 | 2, 4, 0] };
+  assert.equal(mapSnapshotFingerprint(first), mapSnapshotFingerprint(sameMapDifferentOverlay));
+  assert.notEqual(mapSnapshotFingerprint(first), mapSnapshotFingerprint(progressed));
+  assert.equal(mapSnapshotFingerprint(null), "");
 });
 
 test("result file helpers produce safe deterministic file parts", () => {
@@ -383,6 +490,7 @@ test("result batch status tracks target completion and average time", () => {
   const rows = [{ Time: "10:00", Floor: "48" }, { Time: "20:00", Floor: "49" }];
   assert.equal(normalizeResultBatchTarget("0"), 0);
   assert.equal(normalizeResultBatchTarget("3"), 3);
+  assert.equal(normalizeResultBatchTarget("999"), 500);
   assert.equal(resultBatchIsComplete(rows, 2), true);
   assert.deepEqual(resultBatchStatus(rows, { target: 3, filter: "warped" }), {
     count: 2,

@@ -108,8 +108,46 @@ test("stats panel sits below the scaled RuneScape map", () => {
   const fill = commands.find((command) => command.type === "rect");
   const label = commands.find((command) => command.type === "text");
   assert.equal(fill.y, 18 + Math.round(floor.imageHeight * 1.5));
-  assert.equal(fill.width, Math.round(floor.imageWidth * 1.5));
+  assert.ok(fill.width >= Math.round(floor.imageWidth * 1.5));
+  assert.equal(fill.height, Math.round(21 * 1.5));
+  assert.equal(label.size, Math.round(11 * 1.5));
   assert.equal(label.text, "1 room (1) | 0.3 rpm | 0 dead ends");
+});
+
+test("stats size follows every supported interface scale automatically", () => {
+  for (const candidateFloor of FLOOR_SIZES) {
+    for (const interfaceScale of [1, 1.25, 1.5, 2]) {
+      const commands = buildStatsOverlayCommands({
+        stats: "12 rooms (16) | 5.6 rpm | 5 dead ends",
+        mapX: 100,
+        mapY: 80,
+        floor: candidateFloor,
+        overlayScale: interfaceScale,
+        screen: { width: 2560, height: 1800 },
+      });
+      const fill = commands.find((command) => command.type === "rect");
+      const label = commands.find((command) => command.type === "text");
+      assert.equal(fill.y, 80 + Math.round(candidateFloor.imageHeight * interfaceScale));
+      assert.equal(fill.height, Math.round(21 * interfaceScale));
+      assert.equal(label.size, Math.round(11 * interfaceScale));
+      assert.ok(fill.width >= Math.round(candidateFloor.imageWidth * interfaceScale));
+    }
+  }
+});
+
+test("an explicit stats size remains a multiplier on the automatic interface scale", () => {
+  const commands = buildStatsOverlayCommands({
+    stats: "x",
+    mapX: 100,
+    mapY: 50,
+    floor,
+    overlayScale: 1.5,
+    sizeScale: 0.8,
+  });
+  const fill = commands.find((command) => command.type === "rect");
+  const label = commands.find((command) => command.type === "text");
+  assert.equal(fill.height, Math.round(21 * 1.5 * 0.8));
+  assert.equal(label.size, Math.round(11 * 1.5 * 0.8));
 });
 
 test("stats overlay can be placed on any side of the map, free, or hidden", () => {
@@ -147,6 +185,75 @@ test("a free stats strip is clamped onto the screen so a corner click keeps it v
     free: { x: 1900, y: 1060 },
   }).find((command) => command.type === "rect");
   assert.deepEqual({ x: unclamped.x, y: unclamped.y }, { x: 1900, y: 1060 });
+});
+
+test("capture-safe stats never overlap map pixels and hide when no side fits", () => {
+  const safe = buildStatsOverlayCommands({
+    stats: "x",
+    mapX: 100,
+    mapY: 50,
+    floor,
+    position: "free",
+    free: { x: 110, y: 60 },
+    screen: { width: 800, height: 600 },
+    avoidMapOverlap: true,
+  }).find((command) => command.type === "rect");
+  const overlaps = safe.x < 252 && safe.x + safe.width > 100
+    && safe.y < 202 && safe.y + safe.height > 50;
+  assert.equal(overlaps, false);
+
+  assert.deepEqual(buildStatsOverlayCommands({
+    stats: "x", mapX: 0, mapY: 0, floor,
+    screen: { width: 152, height: 152 }, avoidMapOverlap: true,
+  }), []);
+});
+
+test("anchored stats flip to the opposite map side before screen clamping", () => {
+  const large = FLOOR_SIZES.find((candidate) => candidate.name === "Large");
+  const screen = { width: 1920, height: 1080 };
+  const firstRect = (position, mapX, mapY) => buildStatsOverlayCommands({
+    stats: "x", mapX, mapY, floor: large, position, screen,
+  }).find((command) => command.type === "rect");
+
+  const bottom = firstRect("bottom", 100, 800);
+  assert.equal(bottom.y, 800 - bottom.height);
+  const top = firstRect("top", 100, 0);
+  assert.equal(top.y, large.imageHeight);
+  const right = firstRect("right", 1640, 100);
+  assert.equal(right.x, 1640 - right.width);
+  const left = firstRect("left", 0, 100);
+  assert.equal(left.x, large.imageWidth);
+});
+
+test("anchored stats stay inside the client at every edge, floor and interface scale", () => {
+  const screen = { width: 1920, height: 1080 };
+  const positions = ["bottom", "top", "left", "right"];
+  for (const candidateFloor of FLOOR_SIZES) {
+    for (const interfaceScale of [1, 1.25, 1.5, 2]) {
+      const mapWidth = Math.round(candidateFloor.imageWidth * interfaceScale);
+      const mapHeight = Math.round(candidateFloor.imageHeight * interfaceScale);
+      const mapX = screen.width - mapWidth;
+      const mapY = screen.height - mapHeight;
+      for (const position of positions) {
+        const commands = buildStatsOverlayCommands({
+          stats: "64 rooms (64) | 9.8 rpm | 12 dead ends | ~6:15",
+          mapX,
+          mapY,
+          floor: candidateFloor,
+          overlayScale: interfaceScale,
+          position,
+          screen,
+        });
+        const fill = commands.find((command) => command.type === "rect");
+        assert.ok(fill.x >= 0, `${candidateFloor.name} ${interfaceScale} ${position} x`);
+        assert.ok(fill.y >= 0, `${candidateFloor.name} ${interfaceScale} ${position} y`);
+        assert.ok(fill.x + fill.width <= screen.width,
+          `${candidateFloor.name} ${interfaceScale} ${position} right`);
+        assert.ok(fill.y + fill.height <= screen.height,
+          `${candidateFloor.name} ${interfaceScale} ${position} bottom`);
+      }
+    }
+  }
 });
 
 test("stats overlay resizes the strip by sizeScale without moving it at scale 1", () => {
@@ -201,6 +308,36 @@ test("map commands use client-relative coordinates and include every marker type
   assert.equal(stats.shadow, false);
   assert.equal(statsBackground.length, 11);
   assert.ok(statsBackground[0].width >= floor.imageWidth);
+});
+
+test("annotation and gatestone boxes and fonts follow the interface scale", () => {
+  const commands = buildMapOverlayCommands({
+    mapX: 100,
+    mapY: 50,
+    floor,
+    overlayScale: 1.5,
+    annotations: [{ point: { x: 0, y: 0 }, text: "b" }],
+    gatestones: [{ point: { x: 1, y: 1 }, text: "G1", fill: "#ffd23f", textColor: "#111111", slot: 0 }],
+  });
+  const annotationText = commands.find((command) => command.type === "text" && command.text === "b");
+  const annotationBox = commands.find((command) => command.type === "rect"
+    && command.color === mixColor(1, 1, 1, 180));
+  assert.deepEqual(
+    { width: annotationBox.width, height: annotationBox.height, lineWidth: annotationBox.lineWidth, font: annotationText.size },
+    { width: 39, height: 24, lineWidth: 3, font: 18 },
+  );
+
+  const gateText = commands.find((command) => command.type === "text" && command.text === "G1");
+  const gateBox = commands.find((command) => command.type === "rect"
+    && command.color === hexToOverlayColor("#ffd23f"));
+  assert.deepEqual(
+    { width: gateBox.width, height: gateBox.height, lineWidth: gateBox.lineWidth, font: gateText.size },
+    { width: 14, height: 14, lineWidth: 6, font: 11 },
+  );
+  assert.deepEqual(
+    { x: gateText.x, y: gateText.y },
+    { x: gateBox.x + 7, y: gateBox.y + 7 },
+  );
 });
 
 test("test overlay stays in RuneScape-client coordinates", () => {

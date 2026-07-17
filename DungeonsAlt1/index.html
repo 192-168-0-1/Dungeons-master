@@ -8,7 +8,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>Dungeons Alt1</title>
-  <link rel="stylesheet" href="./styles.css?v=20260715-31">
+  <link rel="stylesheet" href="./styles.css?v=20260717-36">
 </head>
 <body>
   <header class="titlebar">
@@ -57,7 +57,7 @@
         <label><input id="game-overlay" type="checkbox" checked> Draw labels and gatestones in game</label>
         <label class="select-row" for="stats-position">In-game RPM / stats position
           <select id="stats-position" aria-label="In-game RPM and stats overlay position">
-            <option value="bottom" selected>Anchored below the map</option>
+            <option value="bottom" selected>Below map (auto above at edge)</option>
             <option value="top">Fixed: above the map</option>
             <option value="left">Fixed: left of the map</option>
             <option value="right">Fixed: right of the map</option>
@@ -65,9 +65,10 @@
             <option value="hidden">Hidden</option>
           </select>
         </label>
-        <label class="select-row" for="stats-scale">RPM / stats size
-          <span class="stats-scale-row"><input id="stats-scale" type="number" min="50" max="300" step="10" value="100" aria-label="RPM and stats overlay size percent"> %</span>
-        </label>
+        <div class="select-row interface-scale-row">
+          <span>Interface scale</span>
+          <output id="interface-scale-status" aria-live="polite">Auto: detecting pixels…</output>
+        </div>
         <div id="stats-free-controls" class="stats-free-controls" hidden>
           <span class="stats-free-hint">Free position (client pixels). Type X/Y or nudge:</span>
           <div class="stats-free-row">
@@ -102,7 +103,7 @@
           <label><input id="auto-save-results-png" type="checkbox"> Auto-save results interface PNG</label>
           <div class="result-batch-controls">
             <label for="result-batch-size">Batch floors</label>
-            <input id="result-batch-size" type="number" min="0" max="999" value="0" inputmode="numeric" aria-label="Batch floors">
+            <input id="result-batch-size" type="number" min="0" max="500" value="0" inputmode="numeric" aria-label="Batch floors">
             <label for="result-floor-filter">Floors/themes</label>
             <input id="result-floor-filter" autocomplete="off" spellcheck="false" placeholder="all, 1-11, occult">
             <label for="result-batch-mode">After target</label>
@@ -201,7 +202,7 @@
     (function bootstrapDungeons() {
       "use strict";
 
-      var fallbackVersion = "20260715-31";
+      var fallbackVersion = "20260717-36";
       var appStarted = false;
       var environment = document.getElementById("environment");
       var status = document.getElementById("status");
