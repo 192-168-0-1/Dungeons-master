@@ -1,5 +1,5 @@
-import { resultLooksComplete, resultStabilityKey } from "./results-core.js?v=20260718-39";
-import { WINTERFACE_HEIGHT, WINTERFACE_WIDTH } from "./winterface.js?v=20260718-39";
+import { resultLooksComplete, resultStabilityKey } from "./results-core.js?v=20260718-40";
+import { WINTERFACE_HEIGHT, WINTERFACE_WIDTH } from "./winterface.js?v=20260718-40";
 
 export const RESULT_CAPTURE_PADDING = 4;
 export const RESULT_EVIDENCE_MIN_FRESH_MS = 2000;

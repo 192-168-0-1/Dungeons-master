@@ -2,14 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   DEFAULT_FLOOR_TARGET_SECONDS,
+  DEFAULT_PREDICTED_FLOOR_ROOMS,
   elapsedFloorMinutes,
   elapsedFloorSeconds,
   evaluateMapTransition,
+  floorPredictionRoomTarget,
   floorPaceStatus,
   floorStartForDetectedMap,
   formatElapsedClock,
   mapTopologyDiscontinuity,
   parseFloorTargetSeconds,
+  projectedFloorSecondsForRoomTarget,
   rpmValue,
   trackedBaseAfterTransition,
 } from "../src/rpm-state.js";
@@ -96,6 +99,72 @@ test("the enriched unexplored denominator raises the early-floor projection", ()
   const pace = floorPaceStatus({ openedRooms: 2, possibleRooms: 8, minutes: 1 });
   assert.equal(pace.projectedSeconds, 240);
   assert.equal(pace.status, "ahead");
+});
+
+test("predicted finish time extrapolates live room pace to the 55-58 room midpoint", () => {
+  assert.equal(DEFAULT_PREDICTED_FLOOR_ROOMS, 56.5);
+
+  // The existing dg-map projection is elapsed * target / opened.
+  // Reaching 56.5 rooms from 12 rooms in 2 minutes projects to 565 seconds.
+  assert.equal(projectedFloorSecondsForRoomTarget({
+    openedRooms: 12,
+    minutes: 2,
+  }), 565);
+
+  const pace = floorPaceStatus({
+    openedRooms: 12,
+    possibleRooms: DEFAULT_PREDICTED_FLOOR_ROOMS,
+    minutes: 2,
+    targetSeconds: 375,
+  });
+  assert.equal(pace.projectedSeconds, 565);
+  assert.equal(pace.status, "behind");
+
+  // The requested range brackets the midpoint prediction without changing the
+  // live room count or RPM calculation.
+  assert.equal(projectedFloorSecondsForRoomTarget({
+    openedRooms: 12,
+    minutes: 2,
+    targetRooms: 55,
+  }), 550);
+  assert.equal(projectedFloorSecondsForRoomTarget({
+    openedRooms: 12,
+    minutes: 2,
+    targetRooms: 58,
+  }), 580);
+});
+
+test("the 56.5 room target applies only to Large floors", () => {
+  assert.equal(floorPredictionRoomTarget({
+    floorName: "Large",
+    openedRooms: 12,
+    knownRooms: 18,
+  }), 56.5);
+  assert.equal(floorPredictionRoomTarget({
+    floorName: "large",
+    openedRooms: 60,
+    knownRooms: 62,
+  }), 60);
+  assert.equal(floorPredictionRoomTarget({
+    floorName: "Medium",
+    openedRooms: 12,
+    knownRooms: 27,
+  }), 27);
+  assert.equal(floorPredictionRoomTarget({
+    floorName: "Small",
+    openedRooms: 15,
+    knownRooms: 13,
+  }), 15);
+});
+
+test("room-target prediction waits for progress and never predicts into the past", () => {
+  assert.equal(projectedFloorSecondsForRoomTarget({ openedRooms: 1, minutes: 1 }), 0);
+  assert.equal(projectedFloorSecondsForRoomTarget({ openedRooms: 60, minutes: 7 }), 420);
+  assert.equal(projectedFloorSecondsForRoomTarget({
+    openedRooms: 12,
+    minutes: 2,
+    targetRooms: "invalid",
+  }), 565);
 });
 
 test("first valid map starts a new floor immediately", () => {

@@ -411,7 +411,13 @@ if (($rpmState -notmatch 'function evaluateMapTransition') -or
     ($rpmState -notmatch 'firstSeenAt') -or
     ($rpmState -notmatch 'function floorPaceStatus') -or
     ($rpmState -notmatch 'function parseFloorTargetSeconds') -or
+    ($rpmState -notmatch 'DEFAULT_PREDICTED_FLOOR_ROOMS') -or
+    ($rpmState -notmatch 'function floorPredictionRoomTarget') -or
+    ($rpmState -notmatch 'function projectedFloorSecondsForRoomTarget') -or
     ($app -notmatch 'currentFloorPace') -or
+    ($app -notmatch 'function predictionRoomTarget') -or
+    ($app -notmatch 'floorPredictionRoomTarget') -or
+    ($app -notmatch 'targetRooms: predictionRoomTarget\(\)') -or
     ($app -notmatch 'unexploredRoomCount') -or
     ($rpmState -notmatch 'resetAt') -or
     ($rpmState -notmatch 'FLOOR_START_OFFSET_MS = 2000') -or
@@ -430,36 +436,36 @@ if (($rpmState -notmatch 'function evaluateMapTransition') -or
     ($overlay -notmatch 'rpmValue')) {
     throw 'RPM state must be centralized and must gate suspicious floor resets before updating visible stats.'
 }
-if (($app -notmatch 'map-core\.js\?v=20260718-39') -or
-    ($app -notmatch 'alt1-map-locator\.js\?v=20260718-39') -or
-    ($app -notmatch 'alt1-capture\.js\?v=20260718-39') -or
-    ($app -notmatch 'capture-scheduler\.js\?v=20260718-39') -or
-    ($app -notmatch 'interface-scale\.js\?v=20260718-39') -or
-    ($app -notmatch 'alt1-overlay\.js\?v=20260718-39') -or
-    ($app -notmatch 'rpm-state\.js\?v=20260718-39') -or
-    ($app -notmatch 'team-sync\.js\?v=20260718-39') -or
-    ($app -notmatch 'party-core\.js\?v=20260718-39') -or
-    ($app -notmatch 'party-interface\.js\?v=20260718-39') -or
-    ($app -notmatch 'results-core\.js\?v=20260718-39') -or
-    ($app -notmatch 'results-capture\.js\?v=20260718-39') -or
-    ($app -notmatch 'clipboard\.js\?v=20260718-39') -or
-    ($app -notmatch 'party-menu\.js\?v=20260718-39') -or
-    ($app -notmatch 'team-gates\.js\?v=20260718-39') -or
-    ($app -notmatch 'file-saver\.js\?v=20260718-39') -or
-    ($app -notmatch 'capture-archive\.js\?v=20260718-39') -or
-    ($app -notmatch 'party-anchor\.js\?v=20260718-39') -or
-    ($app -notmatch 'winterface\.js\?v=20260718-39') -or
-    ($app -notmatch 'results-sentinel\.js\?v=20260718-39') -or
-    ($overlay -notmatch 'map-core\.js\?v=20260718-39') -or
-    ($overlay -notmatch 'rpm-state\.js\?v=20260718-39') -or
-    ($teamSync -notmatch 'party-core\.js\?v=20260718-39') -or
-    ($teamGates -notmatch 'party-core\.js\?v=20260718-39') -or
-    ($teamGates -notmatch 'alt1-overlay\.js\?v=20260718-39') -or
-    ($partyAnchor -notmatch 'party-interface\.js\?v=20260718-39') -or
-    ($partyAnchor -notmatch 'chatbox-font-data\.js\?v=20260718-39') -or
-    ($resultsCapture -notmatch 'results-core\.js\?v=20260718-39') -or
-    ($resultsCapture -notmatch 'winterface\.js\?v=20260718-39') -or
-    ($mapLocator -notmatch 'map-core\.js\?v=20260718-39')) {
+if (($app -notmatch 'map-core\.js\?v=20260718-40') -or
+    ($app -notmatch 'alt1-map-locator\.js\?v=20260718-40') -or
+    ($app -notmatch 'alt1-capture\.js\?v=20260718-40') -or
+    ($app -notmatch 'capture-scheduler\.js\?v=20260718-40') -or
+    ($app -notmatch 'interface-scale\.js\?v=20260718-40') -or
+    ($app -notmatch 'alt1-overlay\.js\?v=20260718-40') -or
+    ($app -notmatch 'rpm-state\.js\?v=20260718-40') -or
+    ($app -notmatch 'team-sync\.js\?v=20260718-40') -or
+    ($app -notmatch 'party-core\.js\?v=20260718-40') -or
+    ($app -notmatch 'party-interface\.js\?v=20260718-40') -or
+    ($app -notmatch 'results-core\.js\?v=20260718-40') -or
+    ($app -notmatch 'results-capture\.js\?v=20260718-40') -or
+    ($app -notmatch 'clipboard\.js\?v=20260718-40') -or
+    ($app -notmatch 'party-menu\.js\?v=20260718-40') -or
+    ($app -notmatch 'team-gates\.js\?v=20260718-40') -or
+    ($app -notmatch 'file-saver\.js\?v=20260718-40') -or
+    ($app -notmatch 'capture-archive\.js\?v=20260718-40') -or
+    ($app -notmatch 'party-anchor\.js\?v=20260718-40') -or
+    ($app -notmatch 'winterface\.js\?v=20260718-40') -or
+    ($app -notmatch 'results-sentinel\.js\?v=20260718-40') -or
+    ($overlay -notmatch 'map-core\.js\?v=20260718-40') -or
+    ($overlay -notmatch 'rpm-state\.js\?v=20260718-40') -or
+    ($teamSync -notmatch 'party-core\.js\?v=20260718-40') -or
+    ($teamGates -notmatch 'party-core\.js\?v=20260718-40') -or
+    ($teamGates -notmatch 'alt1-overlay\.js\?v=20260718-40') -or
+    ($partyAnchor -notmatch 'party-interface\.js\?v=20260718-40') -or
+    ($partyAnchor -notmatch 'chatbox-font-data\.js\?v=20260718-40') -or
+    ($resultsCapture -notmatch 'results-core\.js\?v=20260718-40') -or
+    ($resultsCapture -notmatch 'winterface\.js\?v=20260718-40') -or
+    ($mapLocator -notmatch 'map-core\.js\?v=20260718-40')) {
     throw 'Changed Alt1 runtime modules must be cache-busted for existing Alt1 installations.'
 }
 if (($app -notmatch 'buildVisibleRemoteGatestones') -or

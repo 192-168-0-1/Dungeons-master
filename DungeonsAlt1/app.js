@@ -8,16 +8,16 @@ import {
   isOpened,
   mapToImage,
   toChess,
-} from "./src/map-core.js?v=20260718-39";
+} from "./src/map-core.js?v=20260718-40";
 import {
   MAP_SCALE_CANDIDATES,
   findMapByAlt1Anchor,
   findMapByScaledCorners,
   readMapAtCalibration,
   scaledFloorDimensions,
-} from "./src/alt1-map-locator.js?v=20260718-39";
-import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js?v=20260718-39";
-import { normalizeCaptureInterval, reserveCaptureSlot } from "./src/capture-scheduler.js?v=20260718-39";
+} from "./src/alt1-map-locator.js?v=20260718-40";
+import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js?v=20260718-40";
+import { normalizeCaptureInterval, reserveCaptureSlot } from "./src/capture-scheduler.js?v=20260718-40";
 import {
   createInterfaceScaleState,
   currentInterfaceScale,
@@ -25,26 +25,28 @@ import {
   isFreshInterfaceScaleObservation,
   parseSavedInterfaceScale,
   observeInterfaceScale,
-} from "./src/interface-scale.js?v=20260718-39";
+} from "./src/interface-scale.js?v=20260718-40";
 import {
   buildMapOverlayCommands,
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260718-39";
+} from "./src/alt1-overlay.js?v=20260718-40";
 import {
   DEFAULT_FLOOR_TARGET_SECONDS,
   elapsedFloorMinutes,
   elapsedFloorSeconds,
   evaluateMapTransition,
+  floorPredictionRoomTarget,
   floorPaceStatus,
   floorStartForDetectedMap,
   formatElapsedClock,
   parseFloorTargetSeconds,
+  projectedFloorSecondsForRoomTarget,
   rpmValue,
   trackedBaseAfterTransition,
-} from "./src/rpm-state.js?v=20260718-39";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260718-39";
+} from "./src/rpm-state.js?v=20260718-40";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260718-40";
 import {
   PARTY_COLORS,
   automaticPartyRoomStatus,
@@ -53,9 +55,9 @@ import {
   partyColor,
   reconcileObservedParty,
   roomStatusLine,
-} from "./src/party-core.js?v=20260718-39";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260718-39";
-import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260718-39";
+} from "./src/party-core.js?v=20260718-40";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260718-40";
+import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260718-40";
 import {
   RESULT_COLUMNS,
   RESULT_DISPLAY_COLUMNS,
@@ -79,14 +81,14 @@ import {
   normalizeStoredResults,
   safeFilePart,
   safeTimestampForFilename,
-} from "./src/results-core.js?v=20260718-39";
+} from "./src/results-core.js?v=20260718-40";
 import {
   captureEvidenceIsFresh,
   globalResultMarkerSource,
   resultCaptureTarget,
   resultLifecycleObservation,
   resultRetirementKey,
-} from "./src/results-capture.js?v=20260718-39";
+} from "./src/results-capture.js?v=20260718-40";
 import {
   chooseSaveFolder,
   clearStoredSaveFolder,
@@ -98,11 +100,11 @@ import {
   requestSaveFolderPermission,
   supportsFolderSaving,
   writeDataUrlToFolder,
-} from "./src/file-saver.js?v=20260718-39";
+} from "./src/file-saver.js?v=20260718-40";
 import {
   CLIPBOARD_WRITE_FAILURES,
   writePngBlobToClipboard,
-} from "./src/clipboard.js?v=20260718-39";
+} from "./src/clipboard.js?v=20260718-40";
 import {
   MAX_CAPTURE_ARCHIVE_ITEMS,
   buildCaptureZip,
@@ -111,15 +113,15 @@ import {
   requestPersistentCaptureStorage,
   triggerBlobDownload,
   upsertCaptureArchive,
-} from "./src/capture-archive.js?v=20260718-39";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260718-39";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260718-39";
-import { WinterfaceReader } from "./src/winterface.js?v=20260718-39";
+} from "./src/capture-archive.js?v=20260718-40";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260718-40";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260718-40";
+import { WinterfaceReader } from "./src/winterface.js?v=20260718-40";
 import {
   RESULTS_SENTINEL_CADENCE_MS,
   createResultsSentinelPlan,
   resultsSentinelsMatch,
-} from "./src/results-sentinel.js?v=20260718-39";
+} from "./src/results-sentinel.js?v=20260718-40";
 
 const SCAN_INTERVAL = 600;
 const AUTO_CALIBRATION_INTERVAL = 2500;
@@ -1005,27 +1007,43 @@ function onAlt1Pressed(event) {
   stopStatsPlacement(`RPM counter placed at ${state.statsFree.x}, ${state.statsFree.y}`, "ok");
 }
 
-// Pace projection is dg-map's elapsed / completion-of-known-rooms: doors drawn
-// toward still-empty cells (unexploredRoomCount) join opened + mystery in the
-// denominator so early floors project a realistic finish instead of tracking
-// elapsed time. The visible "(possible)" stats number stays opened + mystery.
+// Large-floor predictions use the requested stable midpoint of 55-58 rooms.
+// Small and Medium floors retain their known-map projection; applying a 56.5
+// target there would grossly overestimate them. The visible "(possible)" stats
+// number remains opened + mystery on every floor size.
+function predictionRoomTarget(gameMap = state.gameMap) {
+  if (!gameMap) return 0;
+  const opened = Math.max(0, Number(gameMap.openedRoomCount) || 0);
+  const known = opened + Math.max(0, Number(gameMap.mysteryCount) || 0)
+    + Math.max(0, Number(gameMap.unexploredRoomCount) || 0);
+  return floorPredictionRoomTarget({
+    floorName: gameMap.floor?.name,
+    openedRooms: opened,
+    knownRooms: known,
+  });
+}
+
 function currentFloorPace() {
   if (!elements.paceIndicator?.checked || !state.gameMap) return { status: "none" };
   return floorPaceStatus({
     openedRooms: state.gameMap.openedRoomCount,
-    possibleRooms: state.gameMap.openedRoomCount + state.gameMap.mysteryCount + (state.gameMap.unexploredRoomCount || 0),
+    possibleRooms: predictionRoomTarget(),
     minutes: elapsedFloorMinutes(state.floorStart),
     targetSeconds: floorPaceTargetSeconds(),
   });
 }
 
-// Predicted floor finish time (dg-map style) from the current pace projection.
-// Zero when the pace toggle is off or there is not enough data (status "none").
-// Coarse rounding to the nearest 5s keeps the native overlay from redrawing
-// every frame as the projection drifts.
-function predictedFloorSeconds(pace = currentFloorPace()) {
-  if (!pace || pace.status === "none") return 0;
-  return Math.round((Number(pace.projectedSeconds) || 0) / 5) * 5;
+// Predicted finish time from live room progress. Large floors are extrapolated
+// to 56.5 rooms, and the pace tint uses the same target so color and time agree.
+// Coarse rounding to 5s keeps the native overlay from redrawing every frame.
+function predictedFloorSeconds(minutes = elapsedFloorMinutes(state.floorStart)) {
+  if (!elements.paceIndicator?.checked || !state.gameMap) return 0;
+  const projected = projectedFloorSecondsForRoomTarget({
+    openedRooms: state.gameMap.openedRoomCount,
+    minutes,
+    targetRooms: predictionRoomTarget(),
+  });
+  return Math.round(projected / 5) * 5;
 }
 
 function updateStats() {
@@ -1047,7 +1065,7 @@ function updateStats() {
   let html = `${rooms} rooms (${possible}) · ${rpmMarkup} · ${state.gameMap.deadEndCount} dead ends · ${elapsed}`;
   // Predicted floor finish time (plain text, no tint), same ~M:SS token as the
   // native overlay; absent when the pace toggle is off or there is not enough data.
-  const predicted = predictedFloorSeconds(pace);
+  const predicted = predictedFloorSeconds(minutes);
   if (predicted > 0) html += ` | ~${formatElapsedClock(predicted).replace(/^0(?=\d:)/, "")}`;
   // Verbose diagnostics surface the per-frame map-loop cost so a slow machine or
   // an old Alt1 capture path can be told apart from a heavy app loop.

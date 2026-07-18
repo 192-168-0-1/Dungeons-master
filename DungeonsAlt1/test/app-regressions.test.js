@@ -27,6 +27,17 @@ test("map geometry is committed and redrawn while RPM progress awaits confirmati
   assert.match(regressionBranch, /renderGameOverlay\(\)/);
 });
 
+test("Large-floor predicted time and pace tint share the 56.5-room target", () => {
+  const target = sourceBetween("function predictionRoomTarget", "function currentFloorPace");
+  const pace = sourceBetween("function currentFloorPace", "function predictedFloorSeconds");
+  const predicted = sourceBetween("function predictedFloorSeconds", "function updateStats");
+  assert.match(target, /floorPredictionRoomTarget/);
+  assert.match(target, /floorName: gameMap\.floor\?\.name/);
+  assert.match(target, /knownRooms: known/);
+  assert.match(pace, /possibleRooms: predictionRoomTarget\(\)/);
+  assert.match(predicted, /targetRooms: predictionRoomTarget\(\)/);
+});
+
 test("lost or stale-scale map locks cannot leave a ghost overlay forever", () => {
   const clearCalibration = sourceBetween("function clearCalibration()", "function sameCalibration");
   assert.match(clearCalibration, /clearGameOverlay\(\)/);

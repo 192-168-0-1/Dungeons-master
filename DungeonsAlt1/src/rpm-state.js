@@ -44,6 +44,22 @@ export function rpmValue(rooms = 0, minutes = 0) {
 // benchmark); PACE_CLOSE_RATIO is how far over target still counts as "close".
 export const DEFAULT_FLOOR_TARGET_SECONDS = 375;
 export const PACE_CLOSE_RATIO = 1.2;
+export const PREDICTED_FLOOR_MIN_ROOMS = 55;
+export const PREDICTED_FLOOR_MAX_ROOMS = 58;
+export const DEFAULT_PREDICTED_FLOOR_ROOMS =
+  (PREDICTED_FLOOR_MIN_ROOMS + PREDICTED_FLOOR_MAX_ROOMS) / 2;
+
+export function floorPredictionRoomTarget({
+  floorName = "",
+  openedRooms = 0,
+  knownRooms = 0,
+} = {}) {
+  const opened = Math.max(0, Number(openedRooms) || 0);
+  const known = Math.max(opened, Number(knownRooms) || 0);
+  return String(floorName).trim().toLowerCase() === "large"
+    ? Math.max(opened, DEFAULT_PREDICTED_FLOOR_ROOMS)
+    : known;
+}
 
 export function parseFloorTargetSeconds(value, fallback = DEFAULT_FLOOR_TARGET_SECONDS) {
   const text = String(value ?? "").trim();
@@ -58,12 +74,36 @@ export function parseFloorTargetSeconds(value, fallback = DEFAULT_FLOOR_TARGET_S
   return fallback;
 }
 
+// Predict a complete floor from live room progress, using the midpoint of the
+// normal 55-58 Large-floor room range by default. This deliberately preserves
+// the existing dg-map projection semantics (elapsed * target / opened); the
+// separate 0.8 correction belongs only to the displayed RPM counter.
+export function projectedFloorSecondsForRoomTarget({
+  openedRooms = 0,
+  minutes = 0,
+  targetRooms = DEFAULT_PREDICTED_FLOOR_ROOMS,
+} = {}) {
+  const opened = Math.max(0, Number(openedRooms) || 0);
+  const elapsed = Math.max(0, Number(minutes) || 0);
+  const requestedTarget = Number(targetRooms);
+  const target = Number.isFinite(requestedTarget) && requestedTarget > 0
+    ? requestedTarget
+    : DEFAULT_PREDICTED_FLOOR_ROOMS;
+  if (opened < 2 || elapsed < MIN_RPM_MINUTES * 2) return 0;
+
+  const targetRoomCount = Math.max(opened, target);
+
+  const projectedMinutes = elapsed * (targetRoomCount / opened);
+  // Once more than the average target is open, the prediction can never point
+  // into the past; elapsed time is the lower bound until the floor completes.
+  return Math.round(Math.max(elapsed, projectedMinutes) * 60);
+}
+
 // Subtle pace signal for the RPM display: this is dg-map's projection of
-// elapsed / completion, where completion is the fraction of ALL KNOWN rooms
-// visited (visited / (visited + unknown + locked)). projectedMinutes =
-// elapsed * (possible / opened) is algebraically that same elapsed / completion
-// — the caller widens `possible` with rooms behind doors that open onto empty
-// cells. Would the floor finish within the target time? Returns a status the UI
+// elapsed / completion, where `possibleRooms` is the caller's room target: all
+// known rooms for Small/Medium, or the configured average for Large.
+// projectedMinutes = elapsed * (possible / opened). Would the floor finish
+// within the target time? Returns a status the UI
 // tints the rpm with: "ahead" (on/under target), "close" (a little over),
 // "behind" (well over), or "none" when there is not enough data yet.
 export function floorPaceStatus({ openedRooms = 0, possibleRooms = 0, minutes = 0, targetSeconds = DEFAULT_FLOOR_TARGET_SECONDS } = {}) {

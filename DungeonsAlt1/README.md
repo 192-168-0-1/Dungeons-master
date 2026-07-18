@@ -7,7 +7,8 @@ This is the Alt1 version of the `Dungeons` project. It does not use or modify `A
 - Automatically waits for a Dungeoneering map, then calibrates and starts reading it.
 - Automatic recalibration when the map moves or its floor size changes.
 - Small, medium and large floors.
-- Live room count, possible rooms, rooms per minute, dead ends and timer.
+- Live room count, possible rooms, rooms per minute, dead ends, timer and a
+  Large-floor finish prediction based on the 55-58-room average (56.5 rooms).
 - Original captured map or a clean abstract map view.
 - Grid, automatic critical path and manual critical markings.
 - Labels of up to four characters, drawn directly over the rooms on the RuneScape map through the native Alt1 overlay.
