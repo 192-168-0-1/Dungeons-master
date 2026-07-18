@@ -1,5 +1,5 @@
-import { ROOM_SIZE, mapToImage } from "./map-core.js?v=20260718-37";
-import { formatElapsedClock, rpmValue } from "./rpm-state.js?v=20260718-37";
+import { ROOM_SIZE, mapToImage } from "./map-core.js?v=20260718-38";
+import { formatElapsedClock, rpmValue } from "./rpm-state.js?v=20260718-38";
 
 export const GATESTONE_POSITIONS = Object.freeze([
   [2, 21],

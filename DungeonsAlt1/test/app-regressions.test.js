@@ -46,14 +46,21 @@ test("results lifecycle probing remains active when automatic table rows are dis
   const presenceProbe = sourceBetween("async function probeDungeonResultsSentinel()", "function captureCadence");
   const fullRead = sourceBetween("async function readDungeonResultsCapture", "async function probeDungeonResultsSentinel");
   assert.match(autoResults, /const trackingEnabled = Boolean\(elements\.autoTrackResults\.checked\)/);
-  assert.match(autoResults, /\|\| !state\.resultSentinelOpen/);
+  assert.doesNotMatch(autoResults, /lifecycleProbeNeeded/);
+  assert.match(autoResults, /now - state\.lastAutoResultScan < RESULTS_AUTO_INTERVAL/);
   assert.match(autoResults, /resultLooksComplete\(capture\.result\)/);
   assert.match(autoResults, /readDungeonResultsCapture/);
+  assert.match(autoResults, /const observedResult = capture\?\.result \?\? null/);
+  assert.match(autoResults, /nextAutoResultState\(state\.autoResultState, null\)/);
+  assert.doesNotMatch(autoResults, /sentinelPresentThisProbe \? \{\} : null/);
+  assert.doesNotMatch(autoResults, /autoResultState\?\.visible && state\.autoResultState\?\.handled\) return/);
   assert.match(autoResults, /if \(!trackingEnabled \|\| !capture \|\| !next\.shouldAdd\) return/);
   assert.doesNotMatch(autoResults, /if \(!elements\.autoTrackResults\.checked\)\s*\{[\s\S]*?return;/);
   assert.match(presenceProbe, /createResultsSentinelPlan/);
+  assert.match(presenceProbe, /if \(!plan\) \{[\s\S]*?state\.resultSentinelOpen = false;[\s\S]*?present: false/);
   assert.match(presenceProbe, /captureRegion\(plan\.x, plan\.y, plan\.width, plan\.height\)/);
-  assert.match(presenceProbe, /resultsSentinelsMatch/);
+  assert.match(presenceProbe, /const present = resultsSentinelsMatch[\s\S]*?state\.lastResultSentinelProbe = now/);
+  assert.match(presenceProbe, /previousProbeExpired[\s\S]*?const rising = present && \(!state\.resultSentinelOpen \|\| previousProbeExpired\)/);
   assert.doesNotMatch(presenceProbe, /state\.awaitingNewFloor = true/);
   assert.match(fullRead, /state\.awaitingNewFloor = true/);
   assert.match(app, /activeResultContext/);
@@ -72,10 +79,14 @@ test("automatic floor results are discovered faster without weakening the final-
   assert.match(app, /enforceResultStableDuration/);
   const loop = sourceBetween("async function resultsScanLoop()", "async function partyScanLoop");
   assert.match(loop, /sentinel\.rising/);
+  assert.match(loop, /sentinel\.probed && sentinel\.present/);
+  assert.match(loop, /resultReaderForceNeeded/);
+  assert.match(loop, /readerVisible: Boolean\(state\.autoResultState\?\.visible\)/);
   assert.match(loop, /forceScan: shouldForceRead/);
   assert.match(loop, /captureCadence\(RESULTS_SENTINEL_CADENCE_MS\)/);
   const autoResults = sourceBetween("async function autoCaptureDungeonResults(", "function renderResults");
-  assert.match(autoResults, /capture\?\.result \?\? \(state\.resultSentinelOpen \? \{\} : null\)/);
+  assert.match(autoResults, /capture\?\.result \?\? null/);
+  assert.doesNotMatch(autoResults, /capture\?\.result \?\? \(state\.resultSentinelOpen/);
 });
 
 test("saved calibration input is bounded before its first pixel capture", () => {
@@ -117,6 +128,10 @@ test("results loop always schedules its next scan after a probe failure", () => 
   assert.match(loop, /try \{/);
   assert.match(loop, /finally \{/);
   assert.match(loop, /setTimeout\(resultsScanLoop/);
+  const probeCatch = loop.indexOf("Results sentinel recovered from:");
+  const authoritativeRead = loop.indexOf("await autoCaptureDungeonResults");
+  assert.ok(probeCatch >= 0);
+  assert.ok(authoritativeRead > probeCatch);
 });
 
 test("saved calibration is tied to the RuneScape client dimensions", () => {

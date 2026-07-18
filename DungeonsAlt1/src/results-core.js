@@ -170,6 +170,21 @@ export function resultAlreadyRecorded(results = [], result) {
   return Boolean(key) && (results ?? []).some((candidate) => resultFingerprint(candidate) === key);
 }
 
+export function resultReaderForceNeeded({
+  sentinelRising = false,
+  sentinelPresent = false,
+  trackingEnabled = false,
+  readerVisible = false,
+  readerHandled = false,
+} = {}) {
+  // The rising edge gets an immediate read. Continued positive pixels may only
+  // accelerate stability while the authoritative reader itself is still open;
+  // after it closes, the normal 900 ms cadence prevents a false positive from
+  // hammering full-client capture every 250 ms.
+  return Boolean(sentinelRising || (sentinelPresent && trackingEnabled
+    && readerVisible && !readerHandled));
+}
+
 export function nextAutoResultState(previous, result, {
   missesBeforeHidden = AUTO_RESULT_MISSES_BEFORE_HIDDEN,
   stableScansRequired = AUTO_RESULT_STABLE_SCANS,

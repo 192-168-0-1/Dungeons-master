@@ -8,16 +8,16 @@ import {
   isOpened,
   mapToImage,
   toChess,
-} from "./src/map-core.js?v=20260718-37";
+} from "./src/map-core.js?v=20260718-38";
 import {
   MAP_SCALE_CANDIDATES,
   findMapByAlt1Anchor,
   findMapByScaledCorners,
   readMapAtCalibration,
   scaledFloorDimensions,
-} from "./src/alt1-map-locator.js?v=20260718-37";
-import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js?v=20260718-37";
-import { normalizeCaptureInterval, reserveCaptureSlot } from "./src/capture-scheduler.js?v=20260718-37";
+} from "./src/alt1-map-locator.js?v=20260718-38";
+import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js?v=20260718-38";
+import { normalizeCaptureInterval, reserveCaptureSlot } from "./src/capture-scheduler.js?v=20260718-38";
 import {
   createInterfaceScaleState,
   currentInterfaceScale,
@@ -25,13 +25,13 @@ import {
   isFreshInterfaceScaleObservation,
   parseSavedInterfaceScale,
   observeInterfaceScale,
-} from "./src/interface-scale.js?v=20260718-37";
+} from "./src/interface-scale.js?v=20260718-38";
 import {
   buildMapOverlayCommands,
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260718-37";
+} from "./src/alt1-overlay.js?v=20260718-38";
 import {
   DEFAULT_FLOOR_TARGET_SECONDS,
   elapsedFloorMinutes,
@@ -43,8 +43,8 @@ import {
   parseFloorTargetSeconds,
   rpmValue,
   trackedBaseAfterTransition,
-} from "./src/rpm-state.js?v=20260718-37";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260718-37";
+} from "./src/rpm-state.js?v=20260718-38";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260718-38";
 import {
   PARTY_COLORS,
   automaticPartyRoomStatus,
@@ -53,9 +53,9 @@ import {
   partyColor,
   reconcileObservedParty,
   roomStatusLine,
-} from "./src/party-core.js?v=20260718-37";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260718-37";
-import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260718-37";
+} from "./src/party-core.js?v=20260718-38";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260718-38";
+import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260718-38";
 import {
   RESULT_COLUMNS,
   RESULT_DISPLAY_COLUMNS,
@@ -69,6 +69,7 @@ import {
   resultMapSnapshotMatchesGeneration,
   resultAlreadyRecorded,
   resultLooksComplete,
+  resultReaderForceNeeded,
   resultStabilityKey,
   mapSnapshotFingerprint,
   resultBatchIsComplete,
@@ -78,7 +79,7 @@ import {
   normalizeStoredResults,
   safeFilePart,
   safeTimestampForFilename,
-} from "./src/results-core.js?v=20260718-37";
+} from "./src/results-core.js?v=20260718-38";
 import {
   chooseSaveFolder,
   clearStoredSaveFolder,
@@ -89,7 +90,7 @@ import {
   requestSaveFolderPermission,
   supportsFolderSaving,
   writeDataUrlToFolder,
-} from "./src/file-saver.js?v=20260718-37";
+} from "./src/file-saver.js?v=20260718-38";
 import {
   MAX_CAPTURE_ARCHIVE_ITEMS,
   buildCaptureZip,
@@ -98,15 +99,15 @@ import {
   requestPersistentCaptureStorage,
   triggerBlobDownload,
   upsertCaptureArchive,
-} from "./src/capture-archive.js?v=20260718-37";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260718-37";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260718-37";
-import { WinterfaceReader } from "./src/winterface.js?v=20260718-37";
+} from "./src/capture-archive.js?v=20260718-38";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260718-38";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260718-38";
+import { WinterfaceReader } from "./src/winterface.js?v=20260718-38";
 import {
   RESULTS_SENTINEL_CADENCE_MS,
   createResultsSentinelPlan,
   resultsSentinelsMatch,
-} from "./src/results-sentinel.js?v=20260718-37";
+} from "./src/results-sentinel.js?v=20260718-38";
 
 const SCAN_INTERVAL = 600;
 const AUTO_CALIBRATION_INTERVAL = 2500;
@@ -732,6 +733,11 @@ async function updateMap() {
     const gameMap = scoredMap.gameMap;
     const now = Date.now();
     const mapGapMs = state.mapLostAt ? Math.max(0, now - state.mapLostAt) : 0;
+    const captureIntervalMs = backendCaptureInterval();
+    // The cheap sentinel wakes the full results reader, which owns this latch.
+    // Never let sentinel pixels alone hold RPM indefinitely: DirectX/OpenGL can
+    // repeatedly return a stale or coincidentally matching three-zone frame.
+    const resultsScreenVisible = Boolean(state.autoResultState?.visible);
     const transition = evaluateMapTransition({
       floorStart: state.floorStart,
       lastBase: state.lastBase,
@@ -740,10 +746,11 @@ async function updateMap() {
       lastGameMap: state.gameMap,
       scaleChanged: calibrationScaleChanged,
       mapGapMs,
+      captureIntervalMs,
       // The pure transition gate combines this results-screen lifecycle latch
       // with mapGapMs and never trusts a single returning map frame.
       awaitingNewFloor: state.awaitingNewFloor,
-      resultsScreenVisible: Boolean(state.autoResultState?.visible),
+      resultsScreenVisible,
       pendingReset: state.pendingFloorReset,
     }, gameMap, nextCalibration, now);
     // Gap evidence belongs to this first readable frame. A genuine gap-based
@@ -752,6 +759,14 @@ async function updateMap() {
     state.pendingFloorReset = transition.pendingReset;
     state.lastTransition = transition.reason;
     if (!transition.accept) {
+      if (transition.reason === "pending-results-lifecycle") {
+        setStatus(resultsScreenVisible
+          ? "Results screen completed; waiting for it to close before starting the next floor timer"
+          : "Results screen closed; waiting for confirmed new-floor map evidence", "warn");
+        updateStats();
+        renderGameOverlay();
+        return;
+      }
       const pendingReason = {
         "pending-base-change": "base moved",
         "pending-floor-change": "floor size changed",
@@ -2526,12 +2541,24 @@ async function probeDungeonResultsSentinel() {
     interfaceScale: detectedInterfaceScale(),
     previousSource: state.lastResultMarkerSource,
   });
-  state.lastResultSentinelProbe = now;
-  if (!plan) return { probed: true, present: false, rising: false };
+  if (!plan) {
+    // No valid client-relative capture zone is definitive absence evidence for
+    // this pass. Clear an older positive sentinel instead of refreshing its age
+    // forever; the next valid plan can still produce a normal rising edge.
+    state.lastResultSentinelProbe = now;
+    state.resultSentinelOpen = false;
+    return { probed: true, present: false, rising: false };
+  }
 
   const image = captureRegion(plan.x, plan.y, plan.width, plan.height);
   const present = resultsSentinelsMatch(image, plan);
-  const rising = present && !state.resultSentinelOpen;
+  // Record freshness only after the pixel probe completed. If DirectX/OpenGL
+  // capture throws, the last positive evidence must be allowed to expire.
+  const previousProbeAt = Number(state.lastResultSentinelProbe);
+  const previousProbeExpired = !Number.isFinite(previousProbeAt) || previousProbeAt <= 0
+    || now - previousProbeAt > Math.max(2_000, backendCaptureInterval() * 2);
+  state.lastResultSentinelProbe = now;
+  const rising = present && (!state.resultSentinelOpen || previousProbeExpired);
   state.resultSentinelOpen = present;
   if (rising && (!state.autoResultState?.visible || !state.autoResultState?.handled)) {
     // Match dghelper's rising-edge behaviour: wake the results reader on the
@@ -2919,18 +2946,12 @@ async function autoCaptureDungeonResults({ forceScan = false } = {}) {
   // signal for RPM. The cheap sentinel is the fast path; this 900 ms full-reader
   // fallback deliberately remains active so custom colours, shifted dialogs or
   // a stale scale hint cannot make the checkbox control timer correctness.
-  const lifecycleProbeNeeded = forceScan
-    || trackingEnabled
-    || Boolean(state.mapLostAt)
-    || state.awaitingNewFloor
-    || Boolean(state.autoResultState?.visible)
-    || !state.resultSentinelOpen;
-  if (!lifecycleProbeNeeded) return;
-  // Once this physical results screen has been committed, dghelper keeps only
-  // its cheap sentinel active until the panel closes. Avoid re-running a full
-  // client OCR sweep every 250 ms while that same handled screen remains open.
-  if (!forceScan && state.resultSentinelOpen
-    && state.autoResultState?.visible && state.autoResultState?.handled) return;
+  // Keep the authoritative 900 ms fallback alive in both sentinel states:
+  // closed catches custom colours/shifted dialogs; continuously open must be
+  // rechecked so false-positive pixels cannot hide this or the next floor.
+  // Even a handled screen needs periodic authoritative reads. Otherwise a
+  // continuously false-positive cheap sentinel can keep the floor timer held
+  // forever after the real panel has already closed.
   const awaitingStableResults = trackingEnabled
     && Boolean(state.autoResultState?.visible)
     && !state.autoResultState?.handled
@@ -2960,11 +2981,10 @@ async function autoCaptureDungeonResults({ forceScan = false } = {}) {
       interfaceScale: scaleHint,
       trustScaleHint: trustResultsScale,
     });
-    // A positive three-zone sentinel proves that the panel is still being
-    // rendered even when the heavier marker/OCR pass misses this frame. Feed an
-    // incomplete-but-visible observation so that one staged frame cannot tear
-    // down the lifecycle state before the next 250 ms retry.
-    const observedResult = capture?.result ?? (state.resultSentinelOpen ? {} : null);
+    // The full marker/OCR read is authoritative. Its reducer already tolerates
+    // one missed frame, so sentinel pixels must not replace a null observation
+    // and prevent the bounded two-miss close transition.
+    const observedResult = capture?.result ?? null;
     let next = nextAutoResultState(state.autoResultState, observedResult);
     let timed = enforceResultStableDuration(state.resultStableTiming, next, Date.now());
     next = timed.gate;
@@ -3009,8 +3029,7 @@ async function autoCaptureDungeonResults({ forceScan = false } = {}) {
     const committed = await commitDungeonResultsCapture(capture, "auto");
     setStatus(committed.status, committed.tone);
   } catch (error) {
-    const observedResult = state.resultSentinelOpen ? {} : null;
-    const missed = nextAutoResultState(state.autoResultState, observedResult);
+    const missed = nextAutoResultState(state.autoResultState, null);
     const timed = enforceResultStableDuration(state.resultStableTiming, missed, Date.now());
     state.autoResultState = timed.gate;
     state.resultStableTiming = timed.timing;
@@ -3864,16 +3883,30 @@ async function scanLoop() {
 }
 
 async function resultsScanLoop() {
+  let sentinel = { probed: false, present: false, rising: false };
   try {
-    const sentinel = await probeDungeonResultsSentinel();
-    const shouldForceRead = Boolean(sentinel.rising)
-      || (Boolean(sentinel.present)
-        && Boolean(elements.autoTrackResults.checked)
-        && !state.autoResultState?.handled);
+    sentinel = await probeDungeonResultsSentinel();
+  } catch (error) {
+    // The cheap DirectX/OpenGL probe is optional acceleration. Its failure must
+    // never skip the authoritative reader below, or reader-visible could remain
+    // latched forever without accumulating its bounded close misses.
+    if (elements.debugMode?.checked) {
+      setStatus(`Results sentinel recovered from: ${error.message || error}`, "warn");
+    }
+  }
+  try {
+    const sentinelPresentThisProbe = Boolean(sentinel.probed && sentinel.present);
+    const shouldForceRead = resultReaderForceNeeded({
+      sentinelRising: Boolean(sentinel.rising),
+      sentinelPresent: sentinelPresentThisProbe,
+      trackingEnabled: Boolean(elements.autoTrackResults.checked),
+      readerVisible: Boolean(state.autoResultState?.visible),
+      readerHandled: Boolean(state.autoResultState?.handled),
+    });
     await autoCaptureDungeonResults({ forceScan: shouldForceRead });
   } catch (error) {
     if (elements.debugMode?.checked) {
-      setStatus(`Results scan loop recovered from: ${error.message || error}`, "warn");
+      setStatus(`Results reader loop recovered from: ${error.message || error}`, "warn");
     }
   } finally {
     setTimeout(resultsScanLoop, captureCadence(RESULTS_SENTINEL_CADENCE_MS));

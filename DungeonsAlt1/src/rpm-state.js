@@ -141,12 +141,12 @@ function confirmedReason(candidateReason) {
   }
 }
 
-function resetCandidateKey(gameMap, calibration) {
+function resetCandidateKey(gameMap, calibration, lifecycleArmed = false) {
   if (!calibration) return "";
-  // A base-less read still gets a stable key. In the first seconds of a new
-  // floor the base marker is often unreadable, and an empty key made samePending
-  // permanently false — the transition could then never confirm, freezing the
-  // accepted map (and the rpm/stats overlay) on the PREVIOUS floor.
+  if (lifecycleArmed) return String(calibration.floor?.name ?? "");
+  // Outside an authoritative post-results lifecycle, retain the original exact
+  // identity. In particular, an unreadable base may not confirm a preceding
+  // one-room false lock during an ordinary active floor.
   return [
     calibration.floor?.name ?? "",
     Math.round(Number(calibration.x) || 0),
@@ -154,6 +154,53 @@ function resetCandidateKey(gameMap, calibration) {
     gameMap?.base ? gameMap.base.x : "none",
     gameMap?.base ? gameMap.base.y : "none",
   ].join(":");
+}
+
+function pendingCaptureMatches(pending, calibration, tolerance = 0) {
+  const pendingX = Number(pending?.mapX);
+  const pendingY = Number(pending?.mapY);
+  const currentX = Number(calibration?.x);
+  const currentY = Number(calibration?.y);
+  const pendingHasPosition = pending?.mapX !== null && pending?.mapX !== undefined
+    && pending?.mapY !== null && pending?.mapY !== undefined
+    && Number.isFinite(pendingX) && Number.isFinite(pendingY);
+  const currentHasPosition = calibration?.x !== null && calibration?.x !== undefined
+    && calibration?.y !== null && calibration?.y !== undefined
+    && Number.isFinite(currentX) && Number.isFinite(currentY);
+  // Some pure callers only supply a floor identity. Two equally absent points
+  // are compatible; one present and one absent may not confirm a candidate.
+  if (!pendingHasPosition || !currentHasPosition) return !pendingHasPosition && !currentHasPosition;
+  const allowed = Math.max(0, Number(tolerance) || 0);
+  return Math.abs(Math.round(currentX) - Math.round(pendingX)) <= allowed
+    && Math.abs(Math.round(currentY) - Math.round(pendingY)) <= allowed;
+}
+
+function candidateCoordinate(value) {
+  if (value === null || value === undefined) return null;
+  const coordinate = Number(value);
+  return Number.isFinite(coordinate) ? Math.round(coordinate) : null;
+}
+
+function sameResetCandidate(pending, gameMap, calibration, key, lifecycleArmed = false) {
+  if (!key || pending?.key !== key) return false;
+  if (!lifecycleArmed) return true;
+  // Alt1's scaled-corner locator can move by one physical pixel between valid
+  // DirectX/OpenGL frames. Permit that tiny error after results, but never let
+  // two locks from unrelated screen positions confirm each other.
+  if (!pendingCaptureMatches(pending, calibration, 2)) return false;
+  if (pending?.base && gameMap?.base && !samePoint(pending.base, gameMap.base)) return false;
+  return true;
+}
+
+function resetReasonSharesPostResultsStreak(left, right) {
+  const resetReasons = new Set([
+    "base-change",
+    "floor-change",
+    "map-gap-regression",
+    "room-regression",
+    "single-base",
+  ]);
+  return resetReasons.has(left) && resetReasons.has(right);
 }
 
 export function evaluateMapTransition(previous = {}, gameMap, calibration, now = Date.now()) {
@@ -202,6 +249,7 @@ export function evaluateMapTransition(previous = {}, gameMap, calibration, now =
     && openedRoomCount < lastRoomCount
     && (lastRoomCount - openedRoomCount) >= Math.max(2, Math.ceil(lastRoomCount / 2));
   const pending = previous.pendingReset ?? null;
+  const lifecycleArmed = Boolean(previous.awaitingNewFloor || pending?.reason === "results-lifecycle");
   // A real same-size floor can start at 5 rooms before an 8-room previous floor
   // has produced either a one-room frame or a different base marker. That is
   // too small a collapse for the fast two-frame route above, but losing at
@@ -212,6 +260,7 @@ export function evaluateMapTransition(previous = {}, gameMap, calibration, now =
     && lastRoomCount - openedRoomCount >= 2
     && openedRoomCount <= lastRoomCount * 0.75;
   const mapGapMs = Math.max(0, Number(previous.mapGapMs) || 0);
+  const advisedCaptureInterval = Math.max(0, Number(previous.captureIntervalMs) || 0);
   const topologyChanged = mapTopologyDiscontinuity(previous.lastGameMap, gameMap);
   const scaleChanged = Boolean(previous.scaleChanged);
   const mapGapSupportsRegression = mapGapMs >= 2_000 && (!scaleChanged || topologyChanged);
@@ -241,8 +290,8 @@ export function evaluateMapTransition(previous = {}, gameMap, calibration, now =
           : (roomCountDropped || roomRegression)
             ? "room-regression"
             : "single-base";
-  const key = resetCandidateKey(gameMap, calibration);
-  const samePending = Boolean(key && pending?.key === key);
+  const key = resetCandidateKey(gameMap, calibration, lifecycleArmed);
+  const samePending = sameResetCandidate(pending, gameMap, calibration, key, lifecycleArmed);
   const hasPendingRoomCount = pending?.openedRoomCount !== null
     && pending?.openedRoomCount !== undefined
     && Number.isFinite(Number(pending.openedRoomCount));
@@ -278,18 +327,23 @@ export function evaluateMapTransition(previous = {}, gameMap, calibration, now =
   // Unlike the generic gap-regression heuristic, this lifecycle candidate is
   // not a reset by itself, so it can arm even when DirectX/OpenGL kept the old
   // map readable behind the results interface and no capture gap was observed.
-  const lifecycleArmed = Boolean(previous.awaitingNewFloor);
   // While the results interface is still visible, lifecycle evidence outranks
   // every map heuristic: Desktop capture can keep a noisy old map behind it.
-  // Once that interface is gone, however, a stable floor-size or base change is
-  // direct new-floor identity evidence. Let the normal two-frame gate confirm
-  // it instead of waiting for two additional rooms to open.
-  const lifecycleHardIdentityChange = !previous.resultsScreenVisible
-    && (floorChanged || baseChanged);
-  if ((lifecyclePending || lifecycleArmed) && !lifecycleHardIdentityChange) {
+  // Once it is genuinely gone, every already-vetted reset candidate must use
+  // its normal two-frame/2.5-second gate. Commit 454e313 accidentally allowed
+  // only floor/base identity through here, so even a stable one-room base was
+  // forced to wait for two more rooms and could remain pending indefinitely.
+  const lifecycleCanUseNormalResetGate = !previous.resultsScreenVisible && isResetCandidate;
+  if ((lifecyclePending || lifecycleArmed) && !lifecycleCanUseNormalResetGate) {
     const lifecycleLastSeenAt = Number(pending?.seenAt);
+    const lifecycleContinuityWindowMs = Math.max(5_000, advisedCaptureInterval * 3);
     const lifecycleContinuous = lifecyclePending && Number.isFinite(lifecycleLastSeenAt)
-      && timestamp - lifecycleLastSeenAt <= 2_000;
+      // A real lost map supplies mapGapMs and must establish a fresh baseline.
+      // Scheduler/results-OCR delays do not, so give those valid reads a window
+      // derived from the Alt1 backend cadence instead of expiring after 2s.
+      && mapGapMs === 0
+      && pendingCaptureMatches(pending, calibration, 2)
+      && timestamp - lifecycleLastSeenAt <= lifecycleContinuityWindowMs;
     let firstSeenAt = lifecycleContinuous && Number(pending?.firstSeenAt) > 0
       ? Number(pending.firstSeenAt)
       : timestamp;
@@ -303,13 +357,13 @@ export function evaluateMapTransition(previous = {}, gameMap, calibration, now =
     // same-base read is the new floor's baseline rather than progress from the
     // old completed map that may have armed the latch. Rebase the paired
     // timestamp/count and require two rooms of subsequent progress.
-    if (lifecycleContinuous && samePending && !previous.resultsScreenVisible
+    if (lifecycleContinuous && !previous.resultsScreenVisible
       && openedRoomCount < firstRoomCount) {
       firstSeenAt = timestamp;
       firstRoomCount = openedRoomCount;
     }
     const lifecycleBaselineClearlyLower = firstRoomCount <= Math.max(5, Math.floor(lastRoomCount * 0.75));
-    const lifecycleProgressed = lifecycleContinuous && samePending
+    const lifecycleProgressed = lifecycleContinuous
       && !previous.resultsScreenVisible
       && openedRoomCount >= firstRoomCount + 2
       // A shallow classifier dip (15 -> 13 -> 15) is not a new floor. A true
@@ -335,6 +389,8 @@ export function evaluateMapTransition(previous = {}, gameMap, calibration, now =
         key,
         openedRoomCount: firstRoomCount,
         base: gameMap.base ? { x: gameMap.base.x, y: gameMap.base.y } : null,
+        mapX: candidateCoordinate(calibration?.x),
+        mapY: candidateCoordinate(calibration?.y),
         seenAt: timestamp,
         firstSeenAt,
         firstOpenedRoomCount: firstRoomCount,
@@ -388,6 +444,15 @@ export function evaluateMapTransition(previous = {}, gameMap, calibration, now =
   // recovery to the accepted count clears the pending candidate before then.
   const streakLastSeen = Number(pending?.seenAt);
   const elapsedSincePending = timestamp - streakLastSeen;
+  const postResultsCandidateStreak = lifecycleArmed && !previous.resultsScreenVisible && mapGapMs === 0;
+  const candidateReasonMatches = pending?.reason === candidateReason
+    || (postResultsCandidateStreak
+      && resetReasonSharesPostResultsStreak(pending?.reason, candidateReason));
+  const streakMaxGapMs = postResultsCandidateStreak
+    ? Math.max(5_000, advisedCaptureInterval * 3)
+    : PENDING_STREAK_MAX_GAP_MS;
+  const streakLocationMatches = !postResultsCandidateStreak
+    || pendingCaptureMatches(pending, calibration, 2);
   // The capture owner retains pendingReset while pixels are unavailable and
   // supplies the measured mapGapMs on the first readable frame. Use both the
   // previous candidate timestamp and reason explicitly: a <=2s capture gap may
@@ -395,10 +460,10 @@ export function evaluateMapTransition(previous = {}, gameMap, calibration, now =
   // cannot be revived just because a later capture also happened to be lost.
   const shortCaptureGap = mapGapMs > 0 && mapGapMs <= PENDING_STREAK_MAX_GAP_MS
     && elapsedSincePending <= mapGapMs + PENDING_STREAK_MAX_GAP_MS;
-  const streakAlive = pending?.reason === candidateReason
+  const streakAlive = candidateReasonMatches && streakLocationMatches
     && Number.isFinite(streakLastSeen) && streakLastSeen > 0
     && elapsedSincePending >= 0
-    && (elapsedSincePending <= PENDING_STREAK_MAX_GAP_MS || shortCaptureGap);
+    && (elapsedSincePending <= streakMaxGapMs || shortCaptureGap);
   const streakStart = Number(pending?.firstSeenAt);
   const pendingFirstRoomCount = Number(pending?.firstOpenedRoomCount);
   const hasFirstPendingFrame = Number.isFinite(streakStart) && streakStart > 0
@@ -431,6 +496,8 @@ export function evaluateMapTransition(previous = {}, gameMap, calibration, now =
       key,
       openedRoomCount,
       base: gameMap.base ? { x: gameMap.base.x, y: gameMap.base.y } : null,
+      mapX: candidateCoordinate(calibration?.x),
+      mapY: candidateCoordinate(calibration?.y),
       seenAt: timestamp,
       // The streak start survives key changes so the valve above can measure a
       // continuous pending; a gap (lost reads) starts a fresh streak.

@@ -160,6 +160,26 @@ test("single-base false locks do not update displayed rpm until confirmed", () =
   assert.equal(confirmed.reason, "confirmed-single-base");
 });
 
+test("an unreadable base cannot confirm a single-base false lock during an active floor", () => {
+  const previousMap = gameMap({ rooms: 15, base: { x: 0, y: 0 }, roomTypes: topology([...Array(15).keys()]) });
+  const previous = {
+    floorStart: 10_000,
+    lastBase: { x: 0, y: 0 },
+    lastRoomCount: 15,
+    lastFloorName: "Large",
+    lastGameMap: previousMap,
+    awaitingNewFloor: false,
+  };
+  const first = evaluateMapTransition(previous,
+    gameMap({ rooms: 1, base: { x: 0, y: 0 }, roomTypes: topology([30]) }), calibration, 30_000);
+  const unreadableBase = evaluateMapTransition({ ...previous, pendingReset: first.pendingReset },
+    gameMap({ rooms: 2, base: null, roomTypes: topology([30, 31]) }), calibration, 30_600);
+
+  assert.equal(first.reason, "pending-single-base");
+  assert.equal(unreadableBase.reset, false);
+  assert.notEqual(unreadableBase.reason, "confirmed-single-base");
+});
+
 test("base changes require a confirmation before resetting the floor timer", () => {
   const first = evaluateMapTransition({
     floorStart: 10_000,
@@ -319,6 +339,199 @@ test("a results-screen latch holds an identical map until new-floor progress is 
   assert.equal(confirmed.resetAt, 60_000);
   assert.equal(confirmed.resetRoomCount, 8);
   assert.equal(confirmed.reason, "confirmed-results-lifecycle");
+});
+
+test("a closed results screen confirms a stable one-room base on the second map frame", () => {
+  const previous = {
+    floorStart: 10_000,
+    lastBase: { x: 0, y: 0 },
+    lastRoomCount: 15,
+    lastFloorName: "Large",
+    awaitingNewFloor: true,
+    resultsScreenVisible: true,
+  };
+  const oneRoom = gameMap({ rooms: 1, base: { x: 0, y: 0 } });
+
+  const behindResults = evaluateMapTransition(
+    previous,
+    oneRoom,
+    { ...calibration, x: 100, y: 200 },
+    60_000,
+  );
+  assert.equal(behindResults.accept, false);
+  assert.equal(behindResults.reset, false);
+  assert.equal(behindResults.reason, "pending-results-lifecycle");
+
+  const stillBehindResults = evaluateMapTransition({
+    ...previous,
+    pendingReset: behindResults.pendingReset,
+  }, oneRoom, { ...calibration, x: 101, y: 200 }, 60_300);
+  assert.equal(stillBehindResults.accept, false);
+  assert.equal(stillBehindResults.reset, false);
+  assert.equal(stillBehindResults.reason, "pending-results-lifecycle");
+
+  const firstAfterClose = evaluateMapTransition({
+    ...previous,
+    resultsScreenVisible: false,
+    pendingReset: stillBehindResults.pendingReset,
+  }, oneRoom, { ...calibration, x: 101, y: 200 }, 60_600);
+  assert.equal(firstAfterClose.accept, false);
+  assert.equal(firstAfterClose.reason, "pending-single-base");
+
+  const confirmed = evaluateMapTransition({
+    ...previous,
+    resultsScreenVisible: false,
+    pendingReset: firstAfterClose.pendingReset,
+  }, oneRoom, { ...calibration, x: 100, y: 201 }, 61_200);
+  assert.equal(confirmed.accept, true);
+  assert.equal(confirmed.reset, true);
+  assert.equal(confirmed.reason, "confirmed-single-base");
+  assert.equal(confirmed.resetAt, 60_600);
+  assert.equal(confirmed.resetRoomCount, 1);
+});
+
+test("post-results candidates tolerate locator jitter but reject a different map lock", () => {
+  const previous = {
+    floorStart: 10_000,
+    lastBase: { x: 0, y: 0 },
+    lastRoomCount: 15,
+    lastFloorName: "Large",
+    awaitingNewFloor: true,
+    resultsScreenVisible: false,
+  };
+  const oneRoom = gameMap({ rooms: 1, base: { x: 0, y: 0 } });
+  const first = evaluateMapTransition(previous, oneRoom,
+    { ...calibration, x: 100, y: 50 }, 60_000);
+  const relocated = evaluateMapTransition({ ...previous, pendingReset: first.pendingReset }, oneRoom,
+    { ...calibration, x: 1_200, y: 900 }, 60_600);
+
+  assert.equal(first.reason, "pending-single-base");
+  assert.equal(relocated.accept, false);
+  assert.equal(relocated.reset, false);
+  assert.equal(relocated.reason, "pending-single-base");
+  assert.equal(relocated.pendingReset.firstSeenAt, 60_600);
+
+  const jittered = evaluateMapTransition({ ...previous, pendingReset: relocated.pendingReset }, oneRoom,
+    { ...calibration, x: 1_201, y: 899 }, 61_200);
+  assert.equal(jittered.accept, true);
+  assert.equal(jittered.reset, true);
+  assert.equal(jittered.reason, "confirmed-single-base");
+});
+
+test("one post-results base frame followed by the old map cannot reset the timer", () => {
+  const previous = {
+    floorStart: 10_000,
+    lastBase: { x: 0, y: 0 },
+    lastRoomCount: 15,
+    lastFloorName: "Large",
+    awaitingNewFloor: true,
+    resultsScreenVisible: false,
+  };
+  const candidate = evaluateMapTransition(previous,
+    gameMap({ rooms: 1, base: { x: 0, y: 0 } }), calibration, 60_000);
+  const recoveredOldMap = evaluateMapTransition({ ...previous, pendingReset: candidate.pendingReset },
+    gameMap({ rooms: 15, base: { x: 0, y: 0 } }), calibration, 60_600);
+
+  assert.equal(candidate.reason, "pending-single-base");
+  assert.equal(recoveredOldMap.accept, false);
+  assert.equal(recoveredOldMap.reset, false);
+  assert.equal(recoveredOldMap.reason, "pending-results-lifecycle");
+});
+
+test("results lifecycle survives slow captures, locator jitter and a newly readable base", () => {
+  const previous = {
+    floorStart: 10_000,
+    lastBase: { x: 0, y: 0 },
+    lastRoomCount: 8,
+    lastFloorName: "Large",
+    awaitingNewFloor: true,
+    resultsScreenVisible: true,
+    captureIntervalMs: 2_500,
+  };
+  const oldVisible = evaluateMapTransition(previous,
+    gameMap({ rooms: 8, base: { x: 0, y: 0 } }), { ...calibration, x: 100, y: 200 }, 60_000);
+  const newBaseline = evaluateMapTransition({
+    ...previous,
+    resultsScreenVisible: false,
+    pendingReset: oldVisible.pendingReset,
+  }, gameMap({ rooms: 7, base: null }), { ...calibration, x: 101, y: 200 }, 66_000);
+  const confirmed = evaluateMapTransition({
+    ...previous,
+    resultsScreenVisible: false,
+    pendingReset: newBaseline.pendingReset,
+  }, gameMap({ rooms: 9, base: { x: 0, y: 0 } }), { ...calibration, x: 99, y: 201 }, 72_000);
+
+  assert.equal(newBaseline.accept, false);
+  assert.equal(newBaseline.pendingReset.firstOpenedRoomCount, 7);
+  assert.equal(newBaseline.pendingReset.firstSeenAt, 66_000);
+  assert.equal(confirmed.accept, true);
+  assert.equal(confirmed.reset, true);
+  assert.equal(confirmed.reason, "confirmed-results-lifecycle");
+  assert.equal(confirmed.resetAt, 66_000);
+  assert.equal(confirmed.resetRoomCount, 7);
+
+  const expiredBaseline = evaluateMapTransition({
+    ...previous,
+    resultsScreenVisible: false,
+    pendingReset: oldVisible.pendingReset,
+  }, gameMap({ rooms: 10, base: null }), { ...calibration, x: 101, y: 200 }, 68_000);
+  assert.equal(expiredBaseline.accept, false);
+  assert.equal(expiredBaseline.reset, false);
+  assert.equal(expiredBaseline.pendingReset.firstSeenAt, 68_000);
+});
+
+test("post-results room regression follows a slow capture backend", () => {
+  const oldMap = gameMap({ rooms: 15, base: { x: 5, y: 5 }, roomTypes: topology([...Array(15).keys()]) });
+  const previous = {
+    floorStart: 10_000,
+    lastBase: { x: 5, y: 5 },
+    lastRoomCount: 15,
+    lastFloorName: "Large",
+    lastGameMap: oldMap,
+    awaitingNewFloor: true,
+    resultsScreenVisible: false,
+    captureIntervalMs: 2_500,
+  };
+  const first = evaluateMapTransition(previous,
+    gameMap({ rooms: 3, base: { x: 5, y: 5 }, roomTypes: topology([20, 21, 22]) }), calibration, 60_000);
+  const confirmed = evaluateMapTransition({ ...previous, pendingReset: first.pendingReset },
+    gameMap({ rooms: 4, base: { x: 5, y: 5 }, roomTypes: topology([20, 21, 22, 23]) }), calibration, 66_000);
+
+  assert.equal(first.reason, "pending-room-regression");
+  assert.equal(confirmed.accept, true);
+  assert.equal(confirmed.reset, true);
+  assert.equal(confirmed.resetAt, 60_000);
+
+  const restarted = evaluateMapTransition({ ...previous, pendingReset: first.pendingReset },
+    gameMap({ rooms: 4, base: { x: 5, y: 5 }, roomTypes: topology([20, 21, 22, 23]) }), calibration, 68_000);
+  assert.equal(restarted.reset, false);
+  assert.equal(restarted.pendingReset.firstSeenAt, 68_000);
+});
+
+test("post-results base visibility changes share one confirmed regression streak", () => {
+  const oldMap = gameMap({ rooms: 15, base: { x: 5, y: 5 }, roomTypes: topology([...Array(15).keys()]) });
+  const previous = {
+    floorStart: 10_000,
+    lastBase: { x: 5, y: 5 },
+    lastRoomCount: 15,
+    lastFloorName: "Large",
+    lastGameMap: oldMap,
+    awaitingNewFloor: true,
+    resultsScreenVisible: false,
+  };
+  const first = evaluateMapTransition(previous,
+    gameMap({ rooms: 3, base: null, roomTypes: topology([20, 21, 22]) }), calibration, 60_000);
+  const second = evaluateMapTransition({ ...previous, pendingReset: first.pendingReset },
+    gameMap({ rooms: 4, base: { x: 2, y: 2 }, roomTypes: topology([20, 21, 22, 23]) }), calibration, 61_200);
+  const confirmed = evaluateMapTransition({ ...previous, pendingReset: second.pendingReset },
+    gameMap({ rooms: 5, base: null, roomTypes: topology([20, 21, 22, 23, 24]) }), calibration, 62_500);
+
+  assert.equal(first.reason, "pending-room-regression");
+  assert.equal(second.reason, "pending-base-change");
+  assert.equal(second.pendingReset.firstSeenAt, 60_000);
+  assert.equal(confirmed.accept, true);
+  assert.equal(confirmed.reset, true);
+  assert.equal(confirmed.resetAt, 60_000);
 });
 
 test("a finished results screen yields to confirmed floor-size or base identity", () => {

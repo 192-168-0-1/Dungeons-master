@@ -24,6 +24,7 @@ import {
   resultBatchStatus,
   resultFingerprint,
   resultLooksComplete,
+  resultReaderForceNeeded,
   mapSnapshotFingerprint,
   resultMatchesFloorFilter,
   resultStabilityKey,
@@ -104,6 +105,33 @@ test("results auto tracking options are present and default off in the UI", () =
 });
 
 const FRESH_AUTO_STATE = Object.freeze({ visible: false, key: "", handled: false, missing: 0, stable: 0 });
+
+test("a continuous cheap sentinel stays rate-limited but cannot hide the next real results panel", () => {
+  let reader = { visible: true, key: "done", handled: true, missing: 0, stable: 3 };
+  reader = nextAutoResultState(reader, null);
+  assert.equal(reader.visible, true);
+  reader = nextAutoResultState(reader, null);
+  assert.equal(reader.visible, false);
+
+  // Raw pixels remain positive, so there is no second rising edge. The full
+  // reader must nevertheless stay scheduled at its normal cadence, while the
+  // 250 ms force path remains off until authoritative visibility returns.
+  assert.equal(resultReaderForceNeeded({
+    sentinelPresent: true,
+    trackingEnabled: true,
+    readerVisible: reader.visible,
+    readerHandled: reader.handled,
+  }), false);
+
+  const nextPanel = nextAutoResultState(reader, sampleResult);
+  assert.equal(nextPanel.visible, true);
+  assert.equal(resultReaderForceNeeded({
+    sentinelPresent: true,
+    trackingEnabled: true,
+    readerVisible: nextPanel.visible,
+    readerHandled: nextPanel.handled,
+  }), true);
+});
 
 test("auto results state does nothing when no results screen is visible", () => {
   assert.deepEqual(nextAutoResultState({ visible: true, key: "old" }, null), {
