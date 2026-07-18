@@ -8,16 +8,16 @@ import {
   isOpened,
   mapToImage,
   toChess,
-} from "./src/map-core.js?v=20260718-38";
+} from "./src/map-core.js?v=20260718-39";
 import {
   MAP_SCALE_CANDIDATES,
   findMapByAlt1Anchor,
   findMapByScaledCorners,
   readMapAtCalibration,
   scaledFloorDimensions,
-} from "./src/alt1-map-locator.js?v=20260718-38";
-import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js?v=20260718-38";
-import { normalizeCaptureInterval, reserveCaptureSlot } from "./src/capture-scheduler.js?v=20260718-38";
+} from "./src/alt1-map-locator.js?v=20260718-39";
+import { captureFullRuneScape, captureRegion, hasAlt1, identifyApp, moveWindowFrom } from "./src/alt1-capture.js?v=20260718-39";
+import { normalizeCaptureInterval, reserveCaptureSlot } from "./src/capture-scheduler.js?v=20260718-39";
 import {
   createInterfaceScaleState,
   currentInterfaceScale,
@@ -25,13 +25,13 @@ import {
   isFreshInterfaceScaleObservation,
   parseSavedInterfaceScale,
   observeInterfaceScale,
-} from "./src/interface-scale.js?v=20260718-38";
+} from "./src/interface-scale.js?v=20260718-39";
 import {
   buildMapOverlayCommands,
   buildTestOverlayCommands,
   drawOverlayGroup,
   formatMapStats,
-} from "./src/alt1-overlay.js?v=20260718-38";
+} from "./src/alt1-overlay.js?v=20260718-39";
 import {
   DEFAULT_FLOOR_TARGET_SECONDS,
   elapsedFloorMinutes,
@@ -43,8 +43,8 @@ import {
   parseFloorTargetSeconds,
   rpmValue,
   trackedBaseAfterTransition,
-} from "./src/rpm-state.js?v=20260718-38";
-import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260718-38";
+} from "./src/rpm-state.js?v=20260718-39";
+import { TeamSync, createRoomCode } from "./src/team-sync.js?v=20260718-39";
 import {
   PARTY_COLORS,
   automaticPartyRoomStatus,
@@ -53,9 +53,9 @@ import {
   partyColor,
   reconcileObservedParty,
   roomStatusLine,
-} from "./src/party-core.js?v=20260718-38";
-import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260718-38";
-import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260718-38";
+} from "./src/party-core.js?v=20260718-39";
+import { readPartyInterface, resolvePartyOcrRuntime } from "./src/party-interface.js?v=20260718-39";
+import { loadChatboxFont, readPartyByAnchor } from "./src/party-anchor.js?v=20260718-39";
 import {
   RESULT_COLUMNS,
   RESULT_DISPLAY_COLUMNS,
@@ -79,10 +79,18 @@ import {
   normalizeStoredResults,
   safeFilePart,
   safeTimestampForFilename,
-} from "./src/results-core.js?v=20260718-38";
+} from "./src/results-core.js?v=20260718-39";
+import {
+  captureEvidenceIsFresh,
+  globalResultMarkerSource,
+  resultCaptureTarget,
+  resultLifecycleObservation,
+  resultRetirementKey,
+} from "./src/results-capture.js?v=20260718-39";
 import {
   chooseSaveFolder,
   clearStoredSaveFolder,
+  dataUrlToBlob,
   isSaveFolderPermissionError,
   knownAlt1FolderWritesUnsupported,
   loadStoredSaveFolder,
@@ -90,7 +98,11 @@ import {
   requestSaveFolderPermission,
   supportsFolderSaving,
   writeDataUrlToFolder,
-} from "./src/file-saver.js?v=20260718-38";
+} from "./src/file-saver.js?v=20260718-39";
+import {
+  CLIPBOARD_WRITE_FAILURES,
+  writePngBlobToClipboard,
+} from "./src/clipboard.js?v=20260718-39";
 import {
   MAX_CAPTURE_ARCHIVE_ITEMS,
   buildCaptureZip,
@@ -99,15 +111,15 @@ import {
   requestPersistentCaptureStorage,
   triggerBlobDownload,
   upsertCaptureArchive,
-} from "./src/capture-archive.js?v=20260718-38";
-import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260718-38";
-import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260718-38";
-import { WinterfaceReader } from "./src/winterface.js?v=20260718-38";
+} from "./src/capture-archive.js?v=20260718-39";
+import { buildVisibleRemoteGatestones } from "./src/team-gates.js?v=20260718-39";
+import { PARTY_CONTEXT_OPTIONS, clampContextMenuPosition } from "./src/party-menu.js?v=20260718-39";
+import { WinterfaceReader } from "./src/winterface.js?v=20260718-39";
 import {
   RESULTS_SENTINEL_CADENCE_MS,
   createResultsSentinelPlan,
   resultsSentinelsMatch,
-} from "./src/results-sentinel.js?v=20260718-38";
+} from "./src/results-sentinel.js?v=20260718-39";
 
 const SCAN_INTERVAL = 600;
 const AUTO_CALIBRATION_INTERVAL = 2500;
@@ -144,6 +156,7 @@ const elements = {
   calibrate: document.querySelector("#calibrate"),
   pause: document.querySelector("#pause"),
   save: document.querySelector("#save"),
+  copyMap: document.querySelector("#copy-map"),
   clear: document.querySelector("#clear"),
   captureResults: document.querySelector("#capture-results"),
   showCapture: document.querySelector("#show-capture"),
@@ -252,12 +265,19 @@ const state = {
   results: loadStoredResults(),
   recentResultScreen: loadRecentResultScreen(),
   resultsBusy: false,
+  resultsCommitBusy: false,
   autoResultState: { visible: false, key: "", handled: false, missing: 0, stable: 0 },
   resultStableTiming: { key: "", since: 0 },
   lastAutoResultScan: 0,
   lastResultSentinelProbe: 0,
   resultSentinelOpen: false,
   lastResultMarkerSource: null,
+  resultTargetMisses: 0,
+  lastResultFullDiscoveryAt: 0,
+  lastAuthoritativeResultSeenAt: 0,
+  lastAuthoritativeResultKey: "",
+  resultEvidenceRetired: false,
+  retiredResultKey: "",
   nextPixelCaptureAt: 0,
   lastResultsScaleFallback: 0,
   pendingResultsPngs: [],
@@ -534,6 +554,15 @@ function resetFloor(now = Date.now(), openedRooms = 1) {
   elements.selection.textContent = "No room selected";
 }
 
+function retireCurrentResultEvidence() {
+  state.resultEvidenceRetired = true;
+  state.retiredResultKey = String(state.lastAuthoritativeResultKey || state.autoResultState?.key || "");
+  state.autoResultState = { visible: false, key: "", handled: false, missing: 0, stable: 0 };
+  state.resultStableTiming = { key: "", since: 0 };
+  state.lastAuthoritativeResultSeenAt = 0;
+  state.activeResultContext = null;
+}
+
 function clearCalibration() {
   if (state.calibration?.scale) {
     state.interfaceScale = {
@@ -737,7 +766,26 @@ async function updateMap() {
     // The cheap sentinel wakes the full results reader, which owns this latch.
     // Never let sentinel pixels alone hold RPM indefinitely: DirectX/OpenGL can
     // repeatedly return a stale or coincidentally matching three-zone frame.
-    const resultsScreenVisible = Boolean(state.autoResultState?.visible);
+    const rawResultsScreenVisible = Boolean(state.autoResultState?.visible);
+    const authoritativeResultFresh = captureEvidenceIsFresh(
+      state.lastAuthoritativeResultSeenAt,
+      now,
+      captureIntervalMs,
+    );
+    const sentinelProbeFresh = captureEvidenceIsFresh(
+      state.lastResultSentinelProbe,
+      now,
+      captureIntervalMs,
+      { minimumMs: 1_500, intervalMultiplier: 2 },
+    );
+    const sentinelPositive = sentinelProbeFresh && state.resultSentinelOpen;
+    // A fresh positive sentinel is a short bridge across slow OCR/artifact I/O.
+    // It cannot arm lifecycle by itself (rawResultsScreenVisible must already
+    // be true), but it prevents the normal two-frame reset gate from opening
+    // while independent live pixels still prove the real panel is present.
+    const resultsScreenVisible = rawResultsScreenVisible
+      && (authoritativeResultFresh || sentinelPositive);
+    const resultsSentinelAbsent = sentinelProbeFresh && !state.resultSentinelOpen;
     const transition = evaluateMapTransition({
       floorStart: state.floorStart,
       lastBase: state.lastBase,
@@ -751,6 +799,7 @@ async function updateMap() {
       // with mapGapMs and never trusts a single returning map frame.
       awaitingNewFloor: state.awaitingNewFloor,
       resultsScreenVisible,
+      resultsSentinelAbsent,
       pendingReset: state.pendingFloorReset,
     }, gameMap, nextCalibration, now);
     // Gap evidence belongs to this first readable frame. A genuine gap-based
@@ -761,8 +810,12 @@ async function updateMap() {
     if (!transition.accept) {
       if (transition.reason === "pending-results-lifecycle") {
         setStatus(resultsScreenVisible
-          ? "Results screen completed; waiting for it to close before starting the next floor timer"
-          : "Results screen closed; waiting for confirmed new-floor map evidence", "warn");
+          ? (resultsSentinelAbsent
+            ? "Results capture conflicts with a live new-floor map; confirming before releasing the timer"
+            : "Results screen completed; waiting for it to close before starting the next floor timer")
+          : (rawResultsScreenVisible
+            ? "Results capture became stale; confirming the live new-floor map"
+            : "Results screen closed; waiting for confirmed new-floor map evidence"), "warn");
         updateStats();
         renderGameOverlay();
         return;
@@ -787,6 +840,12 @@ async function updateMap() {
       return;
     }
     if (transition.reset) {
+      // Freshness expiry can route the same stale reader through the ordinary
+      // two-frame floor/base gate instead of the explicit stale override. Any
+      // accepted reset while the raw old result phase is still latched must
+      // retire it, otherwise its next buffered hit immediately re-arms the new
+      // floor and recreates the permanent hold.
+      if (rawResultsScreenVisible || state.activeResultContext) retireCurrentResultEvidence();
       resetFloor(transition.resetAt ?? now, transition.resetRoomCount ?? gameMap.openedRoomCount);
       state.awaitingNewFloor = false;
     } else if (gameMap.openedRoomCount < state.lastRoomCount) {
@@ -2130,6 +2189,37 @@ async function saveMap(options = {}) {
   return { ...saved, prepared };
 }
 
+async function copyMapPng() {
+  const frozenResultMap = state.awaitingNewFloor && state.activeResultContext?.mapDataUrl
+    ? state.activeResultContext.mapDataUrl
+    : null;
+  if (!frozenResultMap && !state.image) {
+    setStatus("No map to copy yet - wait for a Dungeoneering map to appear", "warn");
+    return false;
+  }
+  try {
+    // Keep conversion and clipboard.write in this click turn. Clipboard image
+    // permission in embedded Chromium commonly depends on transient activation.
+    const dataUrl = frozenResultMap || elements.canvas.toDataURL("image/png");
+    const blob = dataUrlToBlob(dataUrl);
+    await writePngBlobToClipboard(blob, window);
+    setStatus(frozenResultMap
+      ? "Final floor map PNG copied to the clipboard"
+      : "Map PNG copied to the clipboard", "ok");
+    return true;
+  } catch (error) {
+    const blocked = error?.code === CLIPBOARD_WRITE_FAILURES.Blocked;
+    const timedOut = error?.code === CLIPBOARD_WRITE_FAILURES.Timeout;
+    const message = blocked
+      ? "Clipboard image access was blocked - use Save PNG or Download stored captures (.zip)"
+      : timedOut
+        ? "Clipboard image access did not respond - use Save PNG or Download stored captures (.zip)"
+        : "PNG clipboard images are unavailable in this Alt1 build - use Save PNG or Download stored captures (.zip)";
+    setStatus(message, "warn");
+    return false;
+  }
+}
+
 function resultsPngFilename(result, date = new Date()) {
   const floor = safeFilePart(result?.Floor || result?.FloorSize, "unknown");
   return `dungeon-results-${floor}-${capturePngTimestamp(date)}.png`;
@@ -2452,76 +2542,147 @@ function freezeCurrentResultContext(date = new Date()) {
   };
 }
 
-async function readDungeonResultsCapture(date = new Date(), {
-  allowScaleFallback = true,
-  interfaceScale = null,
-  trustScaleHint = false,
-} = {}) {
-  const reader = await winterfaceReader;
-  // Do not capture until the lazily-loaded OCR assets are ready. On a cold
-  // start, capturing first could leave us parsing an interface frame that was
-  // already animating or closed by the time the reader finished loading.
-  await prepareDesktopFullCapture();
-  await waitForPixelCaptureSlot();
-  const image = captureFullRuneScape();
-  const calibratedScale = Number(state.calibration?.scale) || null;
-  const scaleHint = interfaceScale ?? detectedInterfaceScale();
-  const capture = reader.readWithOffset(image, {
-    ...resultExtraFields(),
-    timestamp: date,
-    // The map locator already knows RuneScape's interface scale. The results
-    // reader uses it first, then falls back across supported scales when no map
-    // has been calibrated yet.
-    interfaceScale: scaleHint,
-    allowScaleFallback,
-    // A stored/previous observation is only a fast probe. The matcher must
-    // remain allowed to prove that RuneScape's interface scale changed.
-    trustScaleHint,
-  });
+function freshPositiveResultSentinel(now = Date.now()) {
+  return Boolean(state.resultSentinelOpen) && captureEvidenceIsFresh(
+    state.lastResultSentinelProbe,
+    now,
+    backendCaptureInterval(),
+    { minimumMs: 1_500, intervalMultiplier: 2 },
+  );
+}
+
+function attachDungeonResultsContext(capture, date = new Date()) {
   if (!capture) return null;
-  const markerRect = resultCaptureRect(capture);
-  if (markerRect) {
-    state.lastResultMarkerSource = {
-      x: markerRect.offset.x,
-      y: markerRect.offset.y,
-      width: markerRect.width,
-      height: markerRect.height,
-      scale: Number(capture.rawScale ?? capture.sourceScale ?? capture.scale) || detectedInterfaceScale(),
-      clientWidth: Number(window.alt1?.rsWidth) || 0,
-      clientHeight: Number(window.alt1?.rsHeight) || 0,
-    };
-  }
   if (!state.activeResultContext) state.activeResultContext = freezeCurrentResultContext(date);
   const completionContext = state.activeResultContext;
-  // Keep every follow-up OCR read paired with the map/stats from the first
-  // marker sighting, even if a new map frame arrives while values settle.
+  // Keep every follow-up OCR read paired with the exact map/stats from the first
+  // live-confirmed marker, even if OCR settles while a new map frame arrives.
   capture.result.Roomcount = String(completionContext.extraFields.roomcount ?? "");
   capture.result.DeadEnds = String(completionContext.extraFields.deadEnds ?? "");
   capture.result.FloorSize = completionContext.extraFields.floorSize || capture.result.FloorSize;
-  if (capture.scale) {
-    if (calibratedScale && Math.abs(capture.scale - calibratedScale) >= 0.025) {
-      // The strong Winterface marker proves the global UI scale changed while
-      // the old map lock was hidden by results. Drop stale geometry now rather
-      // than waiting for three unreadable next-floor frames.
-      clearCalibration();
-    }
-    recordInterfaceScale(capture.scale, "results");
-  }
-  // Seeing the winterface marker is an authoritative end-of-floor signal. The
-  // RPM transition may hold the old map behind it, then rebases only after the
-  // results screen disappears and new-floor room progress is confirmed.
   if (!state.awaitingNewFloor) state.pendingFloorReset = null;
   state.awaitingNewFloor = true;
   return {
     ...capture,
-    image,
-    date,
     mapReadAt: state.lastMapReadAt,
     mapGeneration: completionContext.mapGeneration,
     mapSnapshotRevision: completionContext.mapSnapshotRevision,
     mapFloorName: completionContext.mapFloorName,
     mapDataUrl: completionContext.mapDataUrl,
     mapCapturedAt: completionContext.capturedAt,
+  };
+}
+
+async function readDungeonResultsCapture(date = new Date(), {
+  allowScaleFallback = true,
+  interfaceScale = null,
+  trustScaleHint = false,
+  captureSlotReserved = false,
+} = {}) {
+  const reader = await winterfaceReader;
+  const client = {
+    clientWidth: Number(window.alt1?.rsWidth) || 0,
+    clientHeight: Number(window.alt1?.rsHeight) || 0,
+  };
+  const rememberedTarget = resultCaptureTarget(state.lastResultMarkerSource, client);
+  // Two misses ask the exhaustive reader to rediscover scale/location, but a
+  // miss never falls back to the potentially stale full-client buffer in the
+  // same pass. That null observation must reach the two-miss close reducer.
+  const discover = !rememberedTarget || state.resultTargetMisses >= 2;
+  let target = rememberedTarget;
+  let capture = null;
+  let image = null;
+
+  // Do not capture until the lazily-loaded OCR assets are ready. Desktop mode
+  // also needs one overlay-free backend frame before every pixel read.
+  await prepareDesktopFullCapture();
+  if (!captureSlotReserved) await waitForPixelCaptureSlot();
+
+  if (!discover) {
+    image = captureRegion(target.x, target.y, target.width, target.height);
+    capture = reader.readWithOffset(image, {
+      ...resultExtraFields(),
+      timestamp: date,
+      interfaceScale: target.scale,
+      allowScaleFallback: false,
+      trustScaleHint: true,
+    });
+    if (!capture) {
+      state.resultTargetMisses += 1;
+      return null;
+    }
+  } else {
+    state.lastResultFullDiscoveryAt = Date.now();
+    const discoveryImage = captureFullRuneScape();
+    const scaleHint = interfaceScale ?? detectedInterfaceScale();
+    const discovered = reader.readWithOffset(discoveryImage, {
+      ...resultExtraFields(),
+      timestamp: date,
+      interfaceScale: scaleHint,
+      allowScaleFallback,
+      trustScaleHint,
+    });
+    const discoveredRect = resultCaptureRect(discovered);
+    const discoveredSource = discoveredRect ? globalResultMarkerSource(
+      discoveredRect,
+      { x: 0, y: 0, scale: Number(discovered?.rawScale ?? discovered?.sourceScale ?? discovered?.scale) || scaleHint },
+      { ...client, scale: Number(discovered?.rawScale ?? discovered?.sourceScale ?? discovered?.scale) || scaleHint },
+    ) : null;
+    target = resultCaptureTarget(discoveredSource, client);
+    // A full-client match is discovery only. Require the next backend frame's
+    // small live getRegion capture to confirm it before touching lifecycle,
+    // map context, scale, or the saved results screenshot.
+    if (!target) {
+      state.resultTargetMisses = 0;
+      return null;
+    }
+    await prepareDesktopFullCapture();
+    await waitForPixelCaptureSlot();
+    image = captureRegion(target.x, target.y, target.width, target.height);
+    capture = reader.readWithOffset(image, {
+      ...resultExtraFields(),
+      timestamp: date,
+      interfaceScale: target.scale,
+      allowScaleFallback: false,
+      trustScaleHint: true,
+    });
+    if (!capture) {
+      state.resultTargetMisses = 0;
+      return null;
+    }
+  }
+
+  const markerRect = resultCaptureRect(capture);
+  const source = markerRect ? globalResultMarkerSource(
+    markerRect,
+    target,
+    {
+      ...client,
+      scale: Number(capture.rawScale ?? capture.sourceScale ?? capture.scale) || target.scale,
+    },
+  ) : null;
+  if (!source) return null;
+  state.lastResultMarkerSource = source;
+  state.resultTargetMisses = 0;
+  state.lastAuthoritativeResultSeenAt = Date.now();
+  state.lastAuthoritativeResultKey = resultRetirementKey(capture.result);
+
+  const calibratedScale = Number(state.calibration?.scale) || null;
+  if (capture.scale) {
+    if (calibratedScale && Math.abs(capture.scale - calibratedScale) >= 0.025) {
+      // Only a targeted second-frame confirmation may invalidate map geometry.
+      clearCalibration();
+    }
+    recordInterfaceScale(capture.scale, "results");
+  }
+  return {
+    ...capture,
+    // Keep offsets local to this small image: the PNG cropper must not apply
+    // client-global coordinates to a target-sized ImageData buffer.
+    image,
+    date,
+    authoritativeTarget: true,
+    markerSource: source,
   };
 }
 
@@ -2641,8 +2802,11 @@ async function readSettledDungeonResultsCapture() {
   let latest = null;
   let found = false;
   for (let scan = 0; scan < RESULTS_MANUAL_MAX_SCANS; scan += 1) {
-    const capture = await readDungeonResultsCapture(new Date());
+    const rawCapture = await readDungeonResultsCapture(new Date());
+    const capture = rawCapture ? attachDungeonResultsContext(rawCapture, rawCapture.date) : null;
     if (capture) {
+      state.resultEvidenceRetired = false;
+      state.retiredResultKey = "";
       found = true;
       latest = capture;
     }
@@ -2891,8 +3055,21 @@ async function commitDungeonResultsCapture(capture, source = "manual") {
   };
 }
 
+async function commitDungeonResultsWithoutCaptureLock(capture, source) {
+  // Every image/map byte was frozen before this point. Folder permission,
+  // IndexedDB and archive writes can legitimately take tens of seconds, but
+  // none of them may keep the live map pixel/OCR lock held during that wait.
+  state.resultsBusy = false;
+  state.resultsCommitBusy = true;
+  try {
+    return await commitDungeonResultsCapture(capture, source);
+  } finally {
+    state.resultsCommitBusy = false;
+  }
+}
+
 async function captureDungeonResults() {
-  if (state.resultsBusy) return;
+  if (state.resultsBusy || state.resultsCommitBusy) return;
   state.resultsBusy = true;
   elements.captureResults.disabled = true;
   try {
@@ -2917,7 +3094,7 @@ async function captureDungeonResults() {
         : "Results were still changing after 9 seconds — press Skip in game or wait for final values, then read again", "warn");
       return;
     }
-    const committed = await commitDungeonResultsCapture(capture, "manual");
+    const committed = await commitDungeonResultsWithoutCaptureLock(capture, "manual");
     // The manual reader already passed the same stability gate as auto mode.
     // Mark this still-visible screen handled so auto tracking does not perform
     // three more full-screen captures only to discover the same duplicate.
@@ -2939,7 +3116,7 @@ async function captureDungeonResults() {
 }
 
 async function autoCaptureDungeonResults({ forceScan = false } = {}) {
-  if (state.resultsBusy || !hasAlt1() || !window.alt1.rsLinked) return;
+  if (state.resultsBusy || state.resultsCommitBusy || !hasAlt1() || !window.alt1.rsLinked) return;
   const trackingEnabled = Boolean(elements.autoTrackResults.checked);
   const now = Date.now();
   // Results recognition is also the authoritative end-of-floor lifecycle
@@ -2959,6 +3136,17 @@ async function autoCaptureDungeonResults({ forceScan = false } = {}) {
   const urgentPresenceCheck = forceScan || Boolean(state.mapLostAt);
   if (!urgentPresenceCheck && !awaitingStableResults
     && now - state.lastAutoResultScan < RESULTS_AUTO_INTERVAL) return;
+  const knownTarget = resultCaptureTarget(state.lastResultMarkerSource, {
+    clientWidth: Number(window.alt1?.rsWidth) || 0,
+    clientHeight: Number(window.alt1?.rsHeight) || 0,
+  });
+  const fullDiscoveryNeeded = !knownTarget || state.resultTargetMisses >= 2;
+  if (!urgentPresenceCheck && fullDiscoveryNeeded && state.lastResultFullDiscoveryAt
+    && now - state.lastResultFullDiscoveryAt < RESULTS_SCALE_FALLBACK_ACTIVE_INTERVAL) return;
+  // Automatic results work is opportunistic. The map owns any capture already
+  // in progress; unlike the manual button, this loop never queues behind it and
+  // then monopolises the next DirectX/OpenGL frame.
+  if (state.busy || !tryReservePixelCaptureSlot()) return;
   state.lastAutoResultScan = now;
 
   state.resultsBusy = true;
@@ -2976,14 +3164,26 @@ async function autoCaptureDungeonResults({ forceScan = false } = {}) {
     if (allowScaleFallback) state.lastResultsScaleFallback = now;
     const trustResultsScale = state.interfaceScale?.source === "results"
       && isFreshInterfaceScaleObservation(state.interfaceScale, now);
-    let capture = await readDungeonResultsCapture(new Date(), {
+    let rawCapture = await readDungeonResultsCapture(new Date(), {
       allowScaleFallback,
       interfaceScale: scaleHint,
       trustScaleHint: trustResultsScale,
+      captureSlotReserved: true,
     });
-    // The full marker/OCR read is authoritative. Its reducer already tolerates
-    // one missed frame, so sentinel pixels must not replace a null observation
-    // and prevent the bounded two-miss close transition.
+    let observation = resultLifecycleObservation(rawCapture?.result ?? null, {
+      sentinelPositive: freshPositiveResultSentinel(),
+      retired: state.resultEvidenceRetired,
+      retiredKey: state.retiredResultKey,
+      confirmedMissing: !rawCapture && state.resultTargetMisses >= 2,
+    });
+    state.resultEvidenceRetired = observation.retired;
+    state.retiredResultKey = observation.retiredKey;
+    let capture = observation.observable
+      ? attachDungeonResultsContext(rawCapture, rawCapture.date)
+      : null;
+    // A full discovery is never exposed here unless a second targeted backend
+    // frame confirmed it. Incomplete OCR without a fresh sentinel and retired
+    // stale frames deliberately reduce as null observations.
     const observedResult = capture?.result ?? null;
     let next = nextAutoResultState(state.autoResultState, observedResult);
     let timed = enforceResultStableDuration(state.resultStableTiming, next, Date.now());
@@ -2996,7 +3196,7 @@ async function autoCaptureDungeonResults({ forceScan = false } = {}) {
       && !next.shouldAdd && !next.handled) {
       for (let burst = 0; burst < 2 && !next.shouldAdd; burst += 1) {
         await waitForNextResultScan();
-        const followUp = await readDungeonResultsCapture(new Date(), {
+        const rawFollowUp = await readDungeonResultsCapture(new Date(), {
           allowScaleFallback: false,
           interfaceScale: detectedInterfaceScale(),
           // The first pixel fallback just confirmed this scale. Tolerant noisy
@@ -3004,6 +3204,17 @@ async function autoCaptureDungeonResults({ forceScan = false } = {}) {
           trustScaleHint: state.interfaceScale?.source === "results"
             && isFreshInterfaceScaleObservation(state.interfaceScale, Date.now()),
         });
+        observation = resultLifecycleObservation(rawFollowUp?.result ?? null, {
+          sentinelPositive: freshPositiveResultSentinel(),
+          retired: state.resultEvidenceRetired,
+          retiredKey: state.retiredResultKey,
+          confirmedMissing: !rawFollowUp && state.resultTargetMisses >= 2,
+        });
+        state.resultEvidenceRetired = observation.retired;
+        state.retiredResultKey = observation.retiredKey;
+        const followUp = observation.observable
+          ? attachDungeonResultsContext(rawFollowUp, rawFollowUp.date)
+          : null;
         next = nextAutoResultState(next, followUp?.result ?? null);
         timed = enforceResultStableDuration(timed.timing, next, Date.now());
         next = timed.gate;
@@ -3026,19 +3237,24 @@ async function autoCaptureDungeonResults({ forceScan = false } = {}) {
     state.resultStableTiming = timed.timing;
     if (!next.visible) state.activeResultContext = null;
     if (!trackingEnabled || !capture || !next.shouldAdd) return;
-    const committed = await commitDungeonResultsCapture(capture, "auto");
+    const committed = await commitDungeonResultsWithoutCaptureLock(capture, "auto");
     setStatus(committed.status, committed.tone);
   } catch (error) {
-    const missed = nextAutoResultState(state.autoResultState, null);
-    const timed = enforceResultStableDuration(state.resultStableTiming, missed, Date.now());
-    state.autoResultState = timed.gate;
-    state.resultStableTiming = timed.timing;
-    if (!timed.gate.visible) state.activeResultContext = null;
+    if (state.resultsBusy) {
+      const missed = nextAutoResultState(state.autoResultState, null);
+      const timed = enforceResultStableDuration(state.resultStableTiming, missed, Date.now());
+      state.autoResultState = timed.gate;
+      state.resultStableTiming = timed.timing;
+      if (!timed.gate.visible) state.activeResultContext = null;
+    }
     if (elements.debugMode?.checked) {
       setStatus(`Results lifecycle scan failed: ${error.message || error}`, "warn");
     }
   } finally {
     state.resultsBusy = false;
+    // Leave a complete quiet window after OCR/capture work so the 600ms map
+    // loop gets a fair chance even on a slow Desktop capture backend.
+    state.lastAutoResultScan = Date.now();
   }
 }
 
@@ -3540,6 +3756,9 @@ function bindEvents() {
     const artifact = await saveMap();
     queuePendingMapPng(artifact);
   });
+  // An installed Alt1 window can briefly combine an older cached HTML shell
+  // with this newer module; keep startup alive until the shell refreshes.
+  elements.copyMap?.addEventListener("click", copyMapPng);
   elements.clear.addEventListener("click", () => clearAnnotations(true));
   elements.captureResults.addEventListener("click", captureDungeonResults);
   elements.copyResults.addEventListener("click", copyResults);

@@ -120,6 +120,7 @@ export function mapTopologyDiscontinuity(previousMap, nextMap) {
 
 const PENDING_STREAK_MAX_GAP_MS = 2_000;
 const ROOM_REGRESSION_CONFIRM_MS = 2_500;
+const STALE_RESULTS_OVERRIDE_FRAMES = 3;
 
 // The base marker is allowed to disappear temporarily within one floor (player
 // arrows and scaling can cover its probe), but a confirmed reset starts a new
@@ -274,7 +275,7 @@ export function evaluateMapTransition(previous = {}, gameMap, calibration, now =
   // strong floor-change evidence. Requiring a >=2 room loss, <=75% of the old
   // count and the normal two-frame confirmation keeps a brief read miss from
   // resetting an active floor.
-  const gapRoomRegression = (mapGapMs >= 2_000 || pending?.reason === "map-gap-regression")
+  const gapRoomRegression = (mapGapMs >= 2_000 || pending?.reason === "map-gap-regression" || pending?.hadMapGap)
     && (!scaleChanged || topologyChanged)
     && lastRoomCount - openedRoomCount >= 2
     && openedRoomCount > 0
@@ -316,6 +317,59 @@ export function evaluateMapTransition(previous = {}, gameMap, calibration, now =
   // reset candidate at all, spuriously resetting the timer mid-floor.
   const isResetCandidate = floorChanged || gapRoomRegression
     || baseChanged || singleBaseAfterProgress || roomCountDropped || roomRegression;
+
+  // DirectX/OpenGL can leave a large full-client results capture buffered while
+  // small map/sentinel regions are already live. A fresh negative sentinel plus
+  // three stable, independently valid new-floor map candidates is the bounded
+  // contradiction needed to retire that result frame. Never override from a
+  // timeout, a single low read, or while the sentinel itself is still positive.
+  let visibleResultsOverride = null;
+  const visibleOverrideCandidate = Boolean(previous.resultsScreenVisible
+    && previous.resultsSentinelAbsent && isResetCandidate);
+  if (visibleOverrideCandidate) {
+    const priorOverride = pending?.visibleResultsOverride;
+    const priorSeenAt = Number(priorOverride?.seenAt);
+    const continuityWindowMs = Math.max(5_000, advisedCaptureInterval * 3);
+    const sameFloorIdentity = Boolean(key && priorOverride?.key === key);
+    const sameReasonFamily = resetReasonSharesPostResultsStreak(priorOverride?.reason, candidateReason);
+    const sameLocation = pendingCaptureMatches(priorOverride, calibration, 2);
+    const sameBase = !(priorOverride?.base && gameMap?.base)
+      || samePoint(priorOverride.base, gameMap.base);
+    const continuous = Boolean(priorOverride && sameFloorIdentity && sameReasonFamily && sameLocation && sameBase
+      && Number.isFinite(priorSeenAt) && timestamp - priorSeenAt >= 0
+      && timestamp - priorSeenAt <= continuityWindowMs);
+    const frames = continuous ? Math.max(1, Number(priorOverride.frames) || 0) + 1 : 1;
+    const firstSeenAt = continuous && Number(priorOverride.firstSeenAt) > 0
+      ? Number(priorOverride.firstSeenAt)
+      : timestamp;
+    const firstOpenedRoomCount = continuous
+      && priorOverride?.firstOpenedRoomCount !== null
+      && priorOverride?.firstOpenedRoomCount !== undefined
+      && Number.isFinite(Number(priorOverride.firstOpenedRoomCount))
+      ? Math.max(0, Number(priorOverride.firstOpenedRoomCount))
+      : openedRoomCount;
+    visibleResultsOverride = {
+      key,
+      reason: candidateReason,
+      frames,
+      firstSeenAt,
+      firstOpenedRoomCount,
+      seenAt: timestamp,
+      mapX: candidateCoordinate(calibration?.x),
+      mapY: candidateCoordinate(calibration?.y),
+      base: gameMap.base ? { x: gameMap.base.x, y: gameMap.base.y } : null,
+    };
+    if (frames >= STALE_RESULTS_OVERRIDE_FRAMES) {
+      return {
+        accept: true,
+        reset: true,
+        pendingReset: null,
+        resetAt: firstSeenAt,
+        resetRoomCount: firstOpenedRoomCount,
+        reason: "confirmed-stale-results-override",
+      };
+    }
+  }
 
   // A results screen proves that a new floor is expected, but the map behind it
   // can still be the old completed map. Hold
@@ -394,6 +448,8 @@ export function evaluateMapTransition(previous = {}, gameMap, calibration, now =
         seenAt: timestamp,
         firstSeenAt,
         firstOpenedRoomCount: firstRoomCount,
+        hadMapGap: Boolean(pending?.hadMapGap || mapGapMs >= 2_000),
+        visibleResultsOverride,
         reason: "results-lifecycle",
       },
       reason: "pending-results-lifecycle",

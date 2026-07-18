@@ -45,6 +45,7 @@ test("results lifecycle probing remains active when automatic table rows are dis
   const autoResults = sourceBetween("async function autoCaptureDungeonResults(", "function renderResults");
   const presenceProbe = sourceBetween("async function probeDungeonResultsSentinel()", "function captureCadence");
   const fullRead = sourceBetween("async function readDungeonResultsCapture", "async function probeDungeonResultsSentinel");
+  const attachContext = sourceBetween("function attachDungeonResultsContext", "async function readDungeonResultsCapture");
   assert.match(autoResults, /const trackingEnabled = Boolean\(elements\.autoTrackResults\.checked\)/);
   assert.doesNotMatch(autoResults, /lifecycleProbeNeeded/);
   assert.match(autoResults, /now - state\.lastAutoResultScan < RESULTS_AUTO_INTERVAL/);
@@ -62,13 +63,66 @@ test("results lifecycle probing remains active when automatic table rows are dis
   assert.match(presenceProbe, /const present = resultsSentinelsMatch[\s\S]*?state\.lastResultSentinelProbe = now/);
   assert.match(presenceProbe, /previousProbeExpired[\s\S]*?const rising = present && \(!state\.resultSentinelOpen \|\| previousProbeExpired\)/);
   assert.doesNotMatch(presenceProbe, /state\.awaitingNewFloor = true/);
-  assert.match(fullRead, /state\.awaitingNewFloor = true/);
+  assert.doesNotMatch(fullRead, /state\.awaitingNewFloor = true/);
+  assert.match(attachContext, /state\.awaitingNewFloor = true/);
   assert.match(app, /activeResultContext/);
   assert.match(app, /mapSnapshotRevision: state\.mapSnapshotRevision/);
   assert.match(app, /lastResultMapSnapshotRevisionConsumed/);
   assert.match(app, /snapshotFingerprint !== state\.mapSnapshotFingerprint/);
   assert.match(app, /mapDataUrl: completionContext\.mapDataUrl/);
   assert.doesNotMatch(app, /lastCommittedResultGeneration/);
+});
+
+test("full-client results matches require a second targeted live capture", () => {
+  const read = sourceBetween("async function readDungeonResultsCapture", "async function probeDungeonResultsSentinel");
+  const discovery = read.indexOf("const discoveryImage = captureFullRuneScape()");
+  const targetConfirmation = read.indexOf("image = captureRegion(target.x, target.y, target.width, target.height)", discovery);
+  const authoritativeMutation = read.indexOf("state.lastAuthoritativeResultSeenAt = Date.now()", targetConfirmation);
+  assert.ok(discovery >= 0);
+  assert.ok(targetConfirmation > discovery);
+  assert.ok(authoritativeMutation > targetConfirmation);
+  assert.match(read, /if \(!capture\) \{[\s\S]*?state\.resultTargetMisses \+= 1;[\s\S]*?return null;/);
+  assert.match(read, /authoritativeTarget: true/);
+  assert.match(read, /markerSource: source/);
+  assert.match(read, /Keep offsets local/);
+});
+
+test("automatic results capture cannot hold the map lock during folder or archive writes", () => {
+  const autoResults = sourceBetween("async function autoCaptureDungeonResults(", "function renderResults");
+  const unlockedCommit = sourceBetween("async function commitDungeonResultsWithoutCaptureLock", "async function captureDungeonResults");
+  assert.match(autoResults, /state\.busy \|\| !tryReservePixelCaptureSlot\(\)/);
+  assert.match(autoResults, /captureSlotReserved: true/);
+  assert.match(autoResults, /commitDungeonResultsWithoutCaptureLock\(capture, "auto"\)/);
+  assert.ok(unlockedCommit.indexOf("state.resultsBusy = false")
+    < unlockedCommit.indexOf("await commitDungeonResultsCapture"));
+  assert.match(unlockedCommit, /state\.resultsCommitBusy = true/);
+  assert.match(unlockedCommit, /state\.resultsCommitBusy = false/);
+});
+
+test("a fresh positive sentinel bridges expired OCR freshness without arming lifecycle alone", () => {
+  const updateMap = sourceBetween("async function updateMap()", "function updateLocalGatestones");
+  assert.match(updateMap, /const sentinelPositive = sentinelProbeFresh && state\.resultSentinelOpen/);
+  assert.match(updateMap, /resultsScreenVisible = rawResultsScreenVisible[\s\S]*?authoritativeResultFresh \|\| sentinelPositive/);
+  assert.match(updateMap, /resultsSentinelAbsent = sentinelProbeFresh && !state\.resultSentinelOpen/);
+});
+
+test("every accepted reset retires an old raw results phase, including the normal gate", () => {
+  const updateMap = sourceBetween("async function updateMap()", "function updateLocalGatestones");
+  const resetStart = updateMap.indexOf("if (transition.reset)");
+  const resetBranch = updateMap.slice(resetStart, updateMap.indexOf("} else if", resetStart));
+  assert.match(resetBranch, /rawResultsScreenVisible \|\| state\.activeResultContext/);
+  assert.match(resetBranch, /retireCurrentResultEvidence\(\)/);
+  assert.doesNotMatch(resetBranch, /confirmed-stale-results-override.*retireCurrentResultEvidence/);
+});
+
+test("map PNG clipboard action is explicit and independent from folder/archive saving", () => {
+  const copy = sourceBetween("async function copyMapPng()", "function resultsPngFilename");
+  assert.match(copy, /activeResultContext\?\.mapDataUrl/);
+  assert.match(copy, /dataUrlToBlob\(dataUrl\)/);
+  assert.match(copy, /writePngBlobToClipboard\(blob, window\)/);
+  assert.doesNotMatch(copy, /saveMap|queuePending|writePngToSaveFolder/);
+  assert.match(app, /copyMap: document\.querySelector\("#copy-map"\)/);
+  assert.match(app, /elements\.copyMap\?\.addEventListener\("click", copyMapPng\)/);
 });
 
 test("automatic floor results are discovered faster without weakening the final-value gate", () => {

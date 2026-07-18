@@ -390,6 +390,119 @@ test("a closed results screen confirms a stable one-room base on the second map 
   assert.equal(confirmed.resetRoomCount, 1);
 });
 
+test("fresh negative sentinel and three stable new-map frames override a stale results capture", () => {
+  const previous = {
+    floorStart: 10_000,
+    lastBase: { x: 0, y: 0 },
+    lastRoomCount: 15,
+    lastFloorName: "Large",
+    awaitingNewFloor: true,
+    resultsScreenVisible: true,
+    resultsSentinelAbsent: true,
+  };
+  const nextMap = gameMap({ rooms: 1, base: { x: 0, y: 0 } });
+  const first = evaluateMapTransition(previous, nextMap,
+    { ...calibration, x: 100, y: 200 }, 60_000);
+  const second = evaluateMapTransition({ ...previous, pendingReset: first.pendingReset }, nextMap,
+    { ...calibration, x: 101, y: 200 }, 60_600);
+  const third = evaluateMapTransition({ ...previous, pendingReset: second.pendingReset }, nextMap,
+    { ...calibration, x: 100, y: 201 }, 61_200);
+
+  assert.equal(first.reason, "pending-results-lifecycle");
+  assert.equal(first.pendingReset.visibleResultsOverride.frames, 1);
+  assert.equal(second.reset, false);
+  assert.equal(second.pendingReset.visibleResultsOverride.frames, 2);
+  assert.equal(third.accept, true);
+  assert.equal(third.reset, true);
+  assert.equal(third.reason, "confirmed-stale-results-override");
+  assert.equal(third.resetAt, 60_000);
+  assert.equal(third.resetRoomCount, 1);
+});
+
+test("stale-results override never uses one bad map frame, the old map, or a positive sentinel", () => {
+  const oldMap = gameMap({ rooms: 15, base: { x: 0, y: 0 } });
+  const oneRoom = gameMap({ rooms: 1, base: { x: 0, y: 0 } });
+  const previous = {
+    floorStart: 10_000,
+    lastBase: { x: 0, y: 0 },
+    lastRoomCount: 15,
+    lastFloorName: "Large",
+    awaitingNewFloor: true,
+    resultsScreenVisible: true,
+    resultsSentinelAbsent: true,
+  };
+  const oneBadFrame = evaluateMapTransition(previous, oneRoom, calibration, 60_000);
+  const recovered = evaluateMapTransition({ ...previous, pendingReset: oneBadFrame.pendingReset },
+    oldMap, calibration, 60_600);
+  assert.equal(oneBadFrame.reset, false);
+  assert.equal(recovered.reset, false);
+  assert.equal(recovered.pendingReset.visibleResultsOverride, null);
+
+  let pendingReset = null;
+  for (let frame = 0; frame < 8; frame += 1) {
+    const held = evaluateMapTransition({
+      ...previous,
+      resultsSentinelAbsent: false,
+      pendingReset,
+    }, oneRoom, calibration, 70_000 + frame * 600);
+    assert.equal(held.reset, false);
+    assert.equal(held.reason, "pending-results-lifecycle");
+    pendingReset = held.pendingReset;
+  }
+});
+
+test("stale-results override restarts when detected floor identity alternates", () => {
+  const previous = {
+    floorStart: 10_000,
+    lastBase: { x: 0, y: 0 },
+    lastRoomCount: 15,
+    lastFloorName: "Large",
+    awaitingNewFloor: true,
+    resultsScreenVisible: true,
+    resultsSentinelAbsent: true,
+  };
+  const oneRoom = gameMap({ rooms: 1, base: { x: 0, y: 0 } });
+  const names = ["Small", "Medium", "Small", "Medium", "Small"];
+  let pendingReset = null;
+  for (let frame = 0; frame < names.length; frame += 1) {
+    const result = evaluateMapTransition({ ...previous, pendingReset }, oneRoom, {
+      ...calibration,
+      x: 100,
+      y: 200,
+      floor: { name: names[frame] },
+    }, 60_000 + frame * 600);
+    assert.equal(result.reset, false);
+    assert.equal(result.reason, "pending-results-lifecycle");
+    assert.equal(result.pendingReset.visibleResultsOverride.frames, 1);
+    assert.equal(result.pendingReset.visibleResultsOverride.key, names[frame]);
+    pendingReset = result.pendingReset;
+  }
+});
+
+test("results lifecycle preserves a real map gap while the visible reader vetoes the first map", () => {
+  const previous = {
+    floorStart: 10_000,
+    lastBase: { x: 0, y: 0 },
+    lastRoomCount: 12,
+    lastFloorName: "Large",
+    lastGameMap: gameMap({ rooms: 12, base: { x: 0, y: 0 } }),
+    mapGapMs: 3_000,
+    awaitingNewFloor: true,
+    resultsScreenVisible: true,
+  };
+  const first = evaluateMapTransition(previous,
+    gameMap({ rooms: 5, base: { x: 0, y: 0 } }), calibration, 60_000);
+  assert.equal(first.pendingReset.hadMapGap, true);
+
+  const afterClose = evaluateMapTransition({
+    ...previous,
+    mapGapMs: 0,
+    resultsScreenVisible: false,
+    pendingReset: first.pendingReset,
+  }, gameMap({ rooms: 5, base: { x: 0, y: 0 } }), calibration, 60_600);
+  assert.notEqual(afterClose.reason, "same-floor");
+});
+
 test("post-results candidates tolerate locator jitter but reject a different map lock", () => {
   const previous = {
     floorStart: 10_000,

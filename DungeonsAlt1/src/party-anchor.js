@@ -1,5 +1,5 @@
-import { nearestPartySlot, normalizeOcrPartyName } from "./party-interface.js?v=20260718-38";
-import { CHATBOX_FONT_PNG_BASE64 } from "./chatbox-font-data.js?v=20260718-38";
+import { nearestPartySlot, normalizeOcrPartyName } from "./party-interface.js?v=20260718-39";
+import { CHATBOX_FONT_PNG_BASE64 } from "./chatbox-font-data.js?v=20260718-39";
 
 // Sprite-anchor reader for the RuneScape Dungeoneering party interface, ported
 // from the working Sleepy-meh-alt-1/dg-map plugin (with the maintainer's
